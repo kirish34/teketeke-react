@@ -1,0 +1,486 @@
+{
+  "saccos": [
+    {
+      "id": "SAC001",
+      "name": "CityLink",
+      "contact_name": "Alice Kariuki",
+      "contact_phone": "0712000001",
+      "contact_email": "ops@citylink.test",
+      "default_till": "223344"
+    },
+    {
+      "id": "SAC002",
+      "name": "MetroTrans",
+      "contact_name": "Brian Otieno",
+      "contact_phone": "0722000002",
+      "contact_email": "support@metrotrans.test",
+      "default_till": "556677"
+    },
+    {
+      "id": "SAC-04c304b7-03f6-476a-b8ca-3378eefd20e5",
+      "name": "wamasaa",
+      "contact_name": "masaa",
+      "contact_phone": "0768765432",
+      "contact_email": "ayub@skyyalla.com",
+      "default_till": "786543"
+    },
+    {
+      "id": "SAC-8240f858-bb1e-4879-b925-4d18795ca7ec",
+      "name": "EBTI SACCO",
+      "contact_name": "JOSEPH",
+      "contact_phone": "0722 123 543",
+      "contact_email": "john@gmail.com",
+      "default_till": "567898765"
+    },
+    {
+      "id": "SAC-e9537048-62c9-4743-939c-53fd6849e4f3",
+      "name": "mombana ltd",
+      "contact_name": "sarah",
+      "contact_phone": "0745345261",
+      "contact_email": "sarah@gmail.com",
+      "default_till": "87654567"
+    }
+  ],
+  "matatus": [
+    {
+      "id": "MAT001",
+      "plate": "KDA123A",
+      "owner_name": "James Mwangi",
+      "owner_phone": "0712000001",
+      "sacco_name": "CityLink",
+      "sacco": "SAC001",
+      "body_type": "MATATU"
+    },
+    {
+      "id": "MAT002",
+      "plate": "KDA456B",
+      "owner_name": "Sarah Njeri",
+      "owner_phone": "0722000002",
+      "sacco_name": "MetroTrans",
+      "sacco": "SAC002",
+      "body_type": "MATATU"
+    },
+    {
+      "id": "MAT-cdb6395e-aedc-4f31-8125-26dc9f97b796",
+      "plate": "kda453f",
+      "registration": "kda453f",
+      "owner_name": "moses",
+      "owner_phone": "0754665544",
+      "sacco": "SAC-04c304b7-03f6-476a-b8ca-3378eefd20e5",
+      "sacco_name": "SAC-04c304b7-03f6-476a-b8ca-3378eefd20e5",
+      "body_type": "MATATU"
+    },
+    {
+      "id": "MAT-fa14b610-248f-4577-b3e8-5b9a4b998a2c",
+      "plate": "KDR 675G",
+      "registration": "KDR 675G",
+      "owner_name": "CLAIRE",
+      "owner_phone": "0722 312 234",
+      "sacco": "SAC-04c304b7-03f6-476a-b8ca-3378eefd20e5",
+      "sacco_name": "SAC-04c304b7-03f6-476a-b8ca-3378eefd20e5",
+      "body_type": "MATATU"
+    },
+    {
+      "id": "MAT-d38a4b56-cf05-4183-a8ee-a0e41bdf8c5b",
+      "plate": "KAA123A",
+      "registration": "KAA123A",
+      "owner_name": "MWANGI",
+      "owner_phone": "0732554476",
+      "sacco": "SAC-e9537048-62c9-4743-939c-53fd6849e4f3",
+      "sacco_name": "SAC-e9537048-62c9-4743-939c-53fd6849e4f3",
+      "body_type": "TAXI"
+    },
+    {
+      "id": "MAT-36295f8d-6969-4d1c-b872-0247a0f2efc5",
+      "plate": "KMCL234F",
+      "registration": "KMCL234F",
+      "owner_name": "JAMES",
+      "owner_phone": "0723443221",
+      "sacco": "SAC001",
+      "sacco_name": "SAC001",
+      "body_type": "BODABODA"
+    }
+  ],
+  "withdrawals": [
+    {
+      "id": "WDR-1",
+      "sacco_name": "CityLink",
+      "matatu_plate": "KDA123A",
+      "phone": "0712000001",
+      "amount": 12500,
+      "status": "SUCCESS",
+      "created_at": "2025-12-17T14:19:36.868Z"
+    },
+    {
+      "id": "WDR-2",
+      "sacco_name": "MetroTrans",
+      "matatu_plate": "KDA456B",
+      "phone": "0722000002",
+      "amount": 7800,
+      "status": "PENDING",
+      "created_at": "2025-12-16T14:19:36.869Z"
+    }
+  ],
+  "ussd": {
+    "available": [
+      {
+        "code": "*456#",
+        "telco": "Airtel"
+      },
+      {
+        "code": "*789#",
+        "telco": "Telkom"
+      }
+    ],
+    "allocated": [
+      {
+        "code": "*100#",
+        "telco": "Safaricom",
+        "sacco_id": "SAC001"
+      },
+      {
+        "code": "*123#",
+        "telco": "SAFARICOM",
+        "sacco_id": "SAC001"
+      }
+    ]
+  },
+  "sms": [
+    {
+      "id": "SMS-1",
+      "to_phone": "0712000001",
+      "template_code": "TRIP_END",
+      "status": "SUCCESS",
+      "tries": 1,
+      "updated_at": "2025-12-17T14:19:36.869Z",
+      "error_message": ""
+    },
+    {
+      "id": "SMS-2",
+      "to_phone": "0722000002",
+      "template_code": "PAYMENT_CONFIRM",
+      "status": "FAILED",
+      "tries": 2,
+      "updated_at": "2025-12-17T14:19:36.869Z",
+      "error_message": "Gateway timeout"
+    }
+  ],
+  "routes": [
+    {
+      "id": "RT-1",
+      "name": "CBD - Westlands",
+      "sacco_id": "SAC001",
+      "active": true,
+      "path_points": [
+        [
+          -1.286389,
+          36.817223
+        ],
+        [
+          -1.268334,
+          36.811667
+        ],
+        [
+          -1.263889,
+          36.814722
+        ]
+      ]
+    },
+    {
+      "id": "RT-2",
+      "name": "CBD - Thika Road",
+      "sacco_id": "SAC002",
+      "active": true,
+      "path_points": [
+        [
+          -1.286389,
+          36.817223
+        ],
+        [
+          -1.246389,
+          36.870556
+        ]
+      ]
+    }
+  ],
+  "logins": [
+    {
+      "user_id": "USR-1",
+      "email": "admin@teketeke.test",
+      "role": "SYSTEM_ADMIN",
+      "sacco_id": null,
+      "matatu_id": null
+    },
+    {
+      "user_id": "USR-2",
+      "email": "ops@citylink.test",
+      "role": "SACCO",
+      "sacco_id": "SAC001",
+      "matatu_id": null
+    }
+  ],
+  "walletBalances": {
+    "MAT0021": {
+      "virtual_account_code": "MAT0021",
+      "balance": 125000,
+      "currency": "KES"
+    },
+    "SAC001": {
+      "virtual_account_code": "SAC001",
+      "balance": 75500,
+      "currency": "KES"
+    }
+  },
+  "walletTx": {
+    "MAT0021": [
+      {
+        "created_at": "2025-12-17T14:19:36.869Z",
+        "tx_type": "CREDIT",
+        "amount": 50000,
+        "balance_after": 125000,
+        "source": "fare_collection"
+      },
+      {
+        "created_at": "2025-12-17T13:19:36.869Z",
+        "tx_type": "DEBIT",
+        "amount": 10000,
+        "balance_after": 75000,
+        "source": "withdrawal"
+      }
+    ],
+    "SAC001": [
+      {
+        "created_at": "2025-12-17T14:19:36.869Z",
+        "tx_type": "CREDIT",
+        "amount": 25000,
+        "balance_after": 75500,
+        "source": "settlement"
+      }
+    ]
+  },
+  "taxi": {
+    "settings": {
+      "till_number": "123456",
+      "auto_mpesa_import": true,
+      "monthly_savings_target_kes": 25000
+    },
+    "cash": [
+      {
+        "created_at": "2025-12-17T14:19:36.869Z",
+        "name": "Morning rider",
+        "phone": "0712000001",
+        "amount": 850
+      },
+      {
+        "created_at": "2025-12-17T13:19:36.869Z",
+        "name": "Airport",
+        "phone": "0722000002",
+        "amount": 1800
+      }
+    ],
+    "expenses": [
+      {
+        "created_at": "2025-12-17T14:19:36.869Z",
+        "category": "Fuel",
+        "amount": 1200,
+        "notes": "Shell"
+      },
+      {
+        "created_at": "2025-12-17T12:19:36.869Z",
+        "category": "Maintenance",
+        "amount": 600,
+        "notes": "Wash"
+      }
+    ]
+  },
+  "boda": {
+    "settings": {
+      "till_number": "987654",
+      "auto_mpesa_import": true,
+      "monthly_savings_target_kes": 15000
+    },
+    "cash": [
+      {
+        "created_at": "2025-12-17T14:19:36.869Z",
+        "name": "CBD rider",
+        "phone": "0700000001",
+        "amount": 300
+      },
+      {
+        "created_at": "2025-12-17T12:49:36.869Z",
+        "name": "Delivery",
+        "phone": "0708000000",
+        "amount": 650
+      }
+    ],
+    "expenses": [
+      {
+        "created_at": "2025-12-17T14:19:36.869Z",
+        "category": "Fuel",
+        "amount": 400,
+        "notes": "Oil"
+      },
+      {
+        "created_at": "2025-12-17T11:19:36.869Z",
+        "category": "Maintenance",
+        "amount": 250,
+        "notes": "Puncture"
+      }
+    ]
+  },
+  "matatuTransactions": {
+    "MAT001": [
+      {
+        "id": "TX-MAT001-1",
+        "created_at": "2025-12-17T14:19:36.869Z",
+        "passenger_msisdn": "0712345678",
+        "kind": "FARE",
+        "fare_amount_kes": 120,
+        "status": "SUCCESS",
+        "matatu_id": "MAT001"
+      }
+    ],
+    "MAT002": [
+      {
+        "id": "TX-MAT002-1",
+        "created_at": "2025-12-17T14:19:36.869Z",
+        "passenger_msisdn": "0798765432",
+        "kind": "FARE",
+        "fare_amount_kes": 150,
+        "status": "SUCCESS",
+        "matatu_id": "MAT002"
+      }
+    ]
+  },
+  "saccoTransactions": {
+    "SAC001": [],
+    "SAC002": []
+  },
+  "saccoRoutes": [
+    {
+      "id": "SR-1",
+      "sacco_id": "SAC001",
+      "name": "CBD-Westlands",
+      "code": "CW1",
+      "start_stop": "CBD",
+      "end_stop": "Westlands",
+      "active": true
+    },
+    {
+      "id": "SR-2",
+      "sacco_id": "SAC002",
+      "name": "CBD-Thika",
+      "code": "CT1",
+      "start_stop": "CBD",
+      "end_stop": "Thika",
+      "active": true
+    }
+  ],
+  "saccoStaff": {
+    "SAC001": [
+      {
+        "id": "ST-1",
+        "name": "Conductor One",
+        "phone": "0711",
+        "email": "cond1@citylink.test",
+        "role": "STAFF"
+      },
+      {
+        "id": "ST-2",
+        "name": "Driver One",
+        "phone": "0712",
+        "email": "driver1@citylink.test",
+        "role": "STAFF"
+      }
+    ],
+    "SAC002": [
+      {
+        "id": "ST-3",
+        "name": "Conductor Two",
+        "phone": "0722",
+        "email": "cond2@metro.test",
+        "role": "STAFF"
+      }
+    ]
+  },
+  "matatuStaff": {
+    "MAT001": [
+      {
+        "id": "MS-1",
+        "name": "MAT001 Cond",
+        "phone": "0713",
+        "email": "mat001@citylink.test",
+        "role": "STAFF"
+      }
+    ],
+    "MAT002": [
+      {
+        "id": "MS-2",
+        "name": "MAT002 Cond",
+        "phone": "0714",
+        "email": "mat002@metro.test",
+        "role": "STAFF"
+      }
+    ]
+  },
+  "saccoFeeRates": {
+    "SAC001": [
+      {
+        "vehicle_type": "MATATU",
+        "daily_fee_kes": 200
+      }
+    ],
+    "SAC002": [
+      {
+        "vehicle_type": "MATATU",
+        "daily_fee_kes": 180
+      }
+    ]
+  },
+  "saccoLoanRequests": {
+    "SAC001": [
+      {
+        "id": "LR-1",
+        "created_at": "2025-12-17T14:19:36.869Z",
+        "owner_name": "James Mwangi",
+        "matatu_id": "MAT001",
+        "amount_kes": 500000,
+        "model": "Nissan",
+        "term_months": 6,
+        "payout_method": "M_PESA",
+        "payout_phone": "0712",
+        "note": "New tires",
+        "status": "PENDING"
+      }
+    ],
+    "SAC002": []
+  },
+  "saccoLoans": {
+    "SAC001": [
+      {
+        "id": "LN-1",
+        "sacco_id": "SAC001",
+        "matatu_id": "MAT001",
+        "borrower_name": "James Mwangi",
+        "principal_kes": 300000,
+        "interest_rate_pct": 10,
+        "term_months": 6,
+        "status": "ACTIVE",
+        "collection_model": "DAILY",
+        "start_date": "2025-12-17"
+      }
+    ],
+    "SAC002": []
+  },
+  "loanPayments": {
+    "LN-1": [
+      {
+        "id": "LP-1",
+        "created_at": "2025-12-17T14:19:36.869Z",
+        "fare_amount_kes": 5000,
+        "created_by_name": "Staff A",
+        "notes": "Week 1"
+      }
+    ]
+  }
+}
