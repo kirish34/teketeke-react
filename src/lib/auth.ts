@@ -111,5 +111,12 @@ export async function authFetch(input: RequestInfo | URL, init?: RequestInit) {
     console.warn('[auth] unable to attach token', error)
   }
 
-  return fetch(input, { ...(init || {}), headers })
+  let target: RequestInfo | URL = input
+  if (isRelative) {
+    const base = env.apiBase || '/'
+    const baseUrl = base.endsWith('/') ? base : `${base}/`
+    target = new URL(url.replace(/^\//, ''), baseUrl).toString()
+  }
+
+  return fetch(target, { ...(init || {}), headers })
 }
