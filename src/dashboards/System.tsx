@@ -1,138 +1,135 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import DashboardShell from '../components/DashboardShell'
 import { authFetch } from '../lib/auth'
 
 type OverviewCounts = {
-  saccos...: number
-  matatus...: number
-  taxis...: number
-  bodas...: number
-  tx_today...: number
+  saccos?: number
+  matatus?: number
+  taxis?: number
+  bodas?: number
+  tx_today?: number
 }
 
 type OverviewPool = {
-  available...: number
-  total...: number
+  available?: number
+  total?: number
 }
 
 type Overview = {
-  counts...: OverviewCounts
-  ussd_pool...: OverviewPool
+  counts?: OverviewCounts
+  ussd_pool?: OverviewPool
 }
 
 type PlatformTotals = {
-  gross_fares...: number
-  matatu_net...: number
-  sacco_fee_income...: number
-  teketeke_income...: number
+  gross_fares?: number
+  matatu_net?: number
+  sacco_fee_income?: number
+  teketeke_income?: number
 }
 
 type FinanceOverview = {
-  today...: PlatformTotals
-  week...: PlatformTotals
-  month...: PlatformTotals
+  today?: PlatformTotals
+  week?: PlatformTotals
+  month?: PlatformTotals
 }
 
 type SaccoSummaryRow = {
-  sacco_id...: string
-  sacco_name...: string
-  matatus...: number
-  gross_fares...: number
-  matatu_net...: number
-  sacco_fee_income...: number
-  status...: string
+  sacco_id?: string
+  sacco_name?: string
+  matatus?: number
+  gross_fares?: number
+  matatu_net?: number
+  sacco_fee_income?: number
+  status?: string
 }
 
 type WithdrawalRow = {
-  id...: string
-  created_at...: string
-  sacco_name...: string
-  matatu_plate...: string
-  phone...: string
-  amount...: number
-  status...: string
+  id?: string
+  created_at?: string
+  sacco_name?: string
+  matatu_plate?: string
+  phone?: string
+  amount?: number
+  status?: string
 }
 
 type WalletSummary = {
-  virtual_account_code...: string
-  balance...: number
-  currency...: string
+  virtual_account_code?: string
+  balance?: number
+  currency?: string
 }
 
 type WalletTx = {
-  created_at...: string
-  tx_type...: string
-  amount...: number
-  balance_after...: number
-  source...: string
+  created_at?: string
+  tx_type?: string
+  amount?: number
+  balance_after?: number
+  source?: string
 }
 
 type UssdPool = {
-  available...: Array<{ code...: string; telco...: string }>
-  allocated...: Array<{ code...: string; telco...: string; sacco_id...: string }>
+  available?: Array<{ code?: string; telco?: string }>
+  allocated?: Array<{ code?: string; telco?: string; sacco_id?: string }>
 }
 
 type SmsRow = {
-  id...: string
-  to_phone...: string
-  template_code...: string
-  status...: string
-  tries...: number
-  updated_at...: string
-  error_message...: string
+  id?: string
+  to_phone?: string
+  template_code?: string
+  status?: string
+  tries?: number
+  updated_at?: string
+  error_message?: string
 }
 
 type RouteUsageRow = {
-  sacco_id...: string
-  sacco_name...: string
-  routes...: number
-  active_routes...: number
-  total_distance_km...: number
-  average_distance_km...: number
+  sacco_id?: string
+  sacco_name?: string
+  routes?: number
+  active_routes?: number
+  total_distance_km?: number
+  average_distance_km?: number
 }
 
 type AdminRoute = {
-  id...: string
-  name...: string
-  sacco_id...: string
-  active...: boolean
-  path_points...: unknown
+  id?: string
+  name?: string
+  sacco_id?: string
+  active?: boolean
+  path_points?: unknown
 }
 
 type AdminLogin = {
-  user_id...: string
-  email...: string
-  role...: string
-  sacco_id...: string | null
-  matatu_id...: string | null
+  user_id?: string
+  email?: string
+  role?: string
+  sacco_id?: string | null
+  matatu_id?: string | null
 }
 
 type SaccoRow = {
-  id...: string
-  sacco_id...: string
-  name...: string
-  sacco_name...: string
-  contact_name...: string
-  phone...: string
-  contact_phone...: string
-  email...: string
-  contact_email...: string
+  id?: string
+  sacco_id?: string
+  name?: string
+  sacco_name?: string
+  contact_name?: string
+  phone?: string
+  contact_phone?: string
+  email?: string
+  contact_email?: string
 }
 
 type VehicleRow = {
-  id...: string
-  plate...: string
-  registration...: string
-  number_plate...: string
-  owner_name...: string
-  owner_phone...: string
-  sacco_name...: string
-  sacco...: string
-  sacco_id...: string
-  body_type...: string
-  type...: string
-  vehicle_type...: string
+  id?: string
+  plate?: string
+  registration?: string
+  owner_name?: string
+  owner_phone?: string
+  sacco_name?: string
+  sacco?: string
+  body_type?: string
+  type?: string
+  number_plate?: string
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -152,7 +149,7 @@ async function fetchList<T>(url: string): Promise<T[]> {
   }
   const data = await res.json()
   if (Array.isArray(data)) return data as T[]
-  if (Array.isArray(data....items)) return data.items as T[]
+  if (Array.isArray(data?.items)) return data.items as T[]
   return []
 }
 
@@ -187,12 +184,12 @@ async function deleteJson(url: string) {
   return res.json().catch(() => ({}))
 }
 
-const formatKes = (val...: number | null) => `KES ${(Number(val || 0)).toLocaleString('en-KE')}`
+const formatKes = (val?: number | null) => `KES ${(Number(val || 0)).toLocaleString('en-KE')}`
 type LatLng = [number, number]
 
 declare global {
   interface Window {
-    L...: any
+    L?: any
   }
 }
 
@@ -254,11 +251,10 @@ const SystemDashboard = () => {
   const [routePathText, setRoutePathText] = useState('')
   const [routePathMsg, setRoutePathMsg] = useState('')
   const [routeMapOpen, setRouteMapOpen] = useState(false)
-  const navigate = useNavigate()
   const leafletLoader = useRef<Promise<any> | null>(null)
   const mapRef = useRef<HTMLDivElement | null>(null)
   const mapInstance = useRef<any>(null)
-  const mapLayers = useRef<{ polyline...: any; markers...: any[] }>({})
+  const mapLayers = useRef<{ polyline?: any; markers?: any[] }>({})
 
   const [saccoForm, setSaccoForm] = useState({
     name: '',
@@ -378,27 +374,27 @@ const SystemDashboard = () => {
     setSaccoRange(rangeKey)
     try {
       const rows = await fetchList<SaccoSummaryRow>(
-        `/api/admin/platform-saccos-summary...from=${range.from}&to=${range.to}`,
+        `/api/admin/platform-saccos-summary?from=${range.from}&to=${range.to}`,
       )
       setSaccoSummary(rows)
       setSaccoSummaryError(null)
     } catch (err) {
       setSaccoSummary([])
-      setSaccoSummaryError(err instanceof Error ... err.message : String(err))
+      setSaccoSummaryError(err instanceof Error ? err.message : String(err))
     }
   }
 
   async function loadWithdrawals(status: string, range: { from: string; to: string }) {
     try {
-      const q = status ... `&status=${encodeURIComponent(status)}` : ''
+      const q = status ? `&status=${encodeURIComponent(status)}` : ''
       const rows = await fetchList<WithdrawalRow>(
-        `/api/admin/withdrawals...from=${range.from}&to=${range.to}${q}`,
+        `/api/admin/withdrawals?from=${range.from}&to=${range.to}${q}`,
       )
       setWithdrawals(rows)
       setWithdrawError(null)
     } catch (err) {
       setWithdrawals([])
-      setWithdrawError(err instanceof Error ... err.message : String(err))
+      setWithdrawError(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -407,7 +403,7 @@ const SystemDashboard = () => {
     let cancelled = false
     ;(async () => {
       try {
-        setRoutePathMsg((m) => (m ... m : 'Loading map...'))
+        setRoutePathMsg((m) => (m ? m : 'Loading map...'))
         const L = await ensureLeaflet()
         if (cancelled || !mapRef.current) return
         if (!mapInstance.current) {
@@ -424,7 +420,7 @@ const SystemDashboard = () => {
               let arr: any[] = []
               try {
                 const parsed = JSON.parse(txt || '[]')
-                arr = Array.isArray(parsed) ... parsed : []
+                arr = Array.isArray(parsed) ? parsed : []
               } catch {
                 arr = []
               }
@@ -434,10 +430,10 @@ const SystemDashboard = () => {
           })
         }
         syncRouteMap()
-        setRoutePathMsg((m) => (m....includes('fail') ... m : 'Map ready (click to add points)'))
+        setRoutePathMsg((m) => (m?.includes('fail') ? m : 'Map ready (click to add points)'))
       } catch (err) {
         if (!cancelled) {
-          setRoutePathMsg(err instanceof Error ... err.message : 'Map failed to load')
+          setRoutePathMsg(err instanceof Error ? err.message : 'Map failed to load')
         }
       }
     })()
@@ -457,52 +453,52 @@ const SystemDashboard = () => {
     if (!clean) return
     setWalletError(null)
     try {
-      const summary = await fetchJson<{ wallet...: WalletSummary }>(`/wallets/${encodeURIComponent(clean)}`)
-      const tx = await fetchJson<{ transactions...: WalletTx[]; data...: WalletTx[] }>(
-        `/wallets/${encodeURIComponent(clean)}/transactions...limit=50&offset=0`,
+      const summary = await fetchJson<{ wallet?: WalletSummary }>(`/wallets/${encodeURIComponent(clean)}`)
+      const tx = await fetchJson<{ transactions?: WalletTx[]; data?: WalletTx[] }>(
+        `/wallets/${encodeURIComponent(clean)}/transactions?limit=50&offset=0`,
       )
       setWalletSummary(summary.wallet || (summary as unknown as WalletSummary))
       setWalletTx(tx.transactions || tx.data || [])
     } catch (err) {
       setWalletSummary(null)
       setWalletTx([])
-      setWalletError(err instanceof Error ... err.message : String(err))
+      setWalletError(err instanceof Error ? err.message : String(err))
     }
   }
 
   async function loadUssd() {
     try {
-      const available = await fetchList<{ code...: string; telco...: string }>('/api/admin/ussd/pool/available')
-      const allocated = await fetchList<{ code...: string; telco...: string; sacco_id...: string }>(
+      const available = await fetchList<{ code?: string; telco?: string }>('/api/admin/ussd/pool/available')
+      const allocated = await fetchList<{ code?: string; telco?: string; sacco_id?: string }>(
         '/api/admin/ussd/pool/allocated',
       )
       setUssd({ available, allocated })
       setUssdError(null)
     } catch (err) {
       setUssd(null)
-      setUssdError(err instanceof Error ... err.message : String(err))
+      setUssdError(err instanceof Error ? err.message : String(err))
     }
   }
 
   async function loadSms(status: string) {
     try {
-      const q = status ... `...status=${encodeURIComponent(status)}` : ''
+      const q = status ? `?status=${encodeURIComponent(status)}` : ''
       const rows = await fetchList<SmsRow>(`/api/admin/sms${q}`)
       setSmsRows(rows)
       setSmsError(null)
     } catch (err) {
       setSmsRows([])
-      setSmsError(err instanceof Error ... err.message : String(err))
+      setSmsError(err instanceof Error ? err.message : String(err))
     }
   }
 
-  async function retrySms(id...: string) {
+  async function retrySms(id?: string) {
     if (!id) return
     try {
       await postJson(`/api/admin/sms/${id}/retry`)
       await loadSms(smsFilter)
     } catch (err) {
-      setSmsError(err instanceof Error ... err.message : String(err))
+      setSmsError(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -513,7 +509,7 @@ const SystemDashboard = () => {
       setRouteError(null)
     } catch (err) {
       setRouteUsage([])
-      setRouteError(err instanceof Error ... err.message : String(err))
+      setRouteError(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -524,7 +520,7 @@ const SystemDashboard = () => {
       setRoutesError(null)
     } catch (err) {
       setRoutes([])
-      setRoutesError(err instanceof Error ... err.message : String(err))
+      setRoutesError(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -535,7 +531,7 @@ const SystemDashboard = () => {
       setLoginError(null)
     } catch (err) {
       setLogins([])
-      setLoginError(err instanceof Error ... err.message : String(err))
+      setLoginError(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -545,7 +541,7 @@ const SystemDashboard = () => {
       setOverview(data)
       setOverviewError(null)
     } catch (err) {
-      setOverviewError(err instanceof Error ... err.message : String(err))
+      setOverviewError(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -554,25 +550,25 @@ const SystemDashboard = () => {
       void refreshOverview()
       fetchList<SaccoRow>('/api/admin/saccos')
         .then((rows) => setSaccos(rows))
-        .catch((err) => setSaccosError(err instanceof Error ... err.message : String(err)))
+        .catch((err) => setSaccosError(err instanceof Error ? err.message : String(err)))
       fetchList<VehicleRow>('/api/admin/matatus')
         .then((rows) => setMatatus(rows))
-        .catch((err) => setVehiclesError(err instanceof Error ... err.message : String(err)))
+        .catch((err) => setVehiclesError(err instanceof Error ? err.message : String(err)))
       Promise.all([
         fetchJson<PlatformTotals>(
-          '/api/admin/platform-overview...from=' + getRange('today').from + '&to=' + getRange('today').to,
+          '/api/admin/platform-overview?from=' + getRange('today').from + '&to=' + getRange('today').to,
         ).catch(() => null),
         fetchJson<PlatformTotals>(
-          '/api/admin/platform-overview...from=' + getRange('week').from + '&to=' + getRange('week').to,
+          '/api/admin/platform-overview?from=' + getRange('week').from + '&to=' + getRange('week').to,
         ).catch(() => null),
         fetchJson<PlatformTotals>(
-          '/api/admin/platform-overview...from=' + getRange('month').from + '&to=' + getRange('month').to,
+          '/api/admin/platform-overview?from=' + getRange('month').from + '&to=' + getRange('month').to,
         ).catch(() => null),
       ])
         .then(([todayTotals, weekTotals, monthTotals]) =>
           setFinance({ today: todayTotals || undefined, week: weekTotals || undefined, month: monthTotals || undefined }),
         )
-        .catch((err) => setFinanceError(err instanceof Error ... err.message : String(err)))
+        .catch((err) => setFinanceError(err instanceof Error ? err.message : String(err)))
 
       await loadSaccoSummary('month')
       await loadWithdrawals('', getRange('month'))
@@ -585,183 +581,54 @@ const SystemDashboard = () => {
     void bootstrap()
   }, [])
 
-  const counts = useMemo(() => {
-    const base = overview....counts || {}
-    const normalize = (val: unknown) => {
-      const upper = String(val || '')
-        .trim()
-        .toUpperCase()
-        .replace(/[^A-Z]/g, '')
-      if (upper === 'BODA' || upper === 'BODABODA' || upper === 'BODABODAS') return 'BODABODA'
-      if (upper === 'MATATUS') return 'MATATU'
-      if (upper === 'TAXIS') return 'TAXI'
-      return upper
-    }
-    const derived = matatus.reduce(
-      (acc, v) => {
-        const t = normalize(v.vehicle_type || v.body_type || v.type)
-        if (t === 'MATATU') acc.matatus += 1
-        if (t === 'TAXI') acc.taxis += 1
-        if (t === 'BODABODA') acc.bodas += 1
-        return acc
-      },
-      { matatus: 0, taxis: 0, bodas: 0 },
-    )
-    return {
-      ...base,
-      matatus: base.matatus ...... derived.matatus,
-      taxis: base.taxis ...... derived.taxis,
-      bodas: base.bodas ...... derived.bodas,
-    }
-  }, [matatus, overview....counts])
-  const pool = overview....ussd_pool || {}
-  const sysSections = useMemo(
-    () => [
-      { id: 'sys-overview', label: 'Overview' },
-      { id: 'sys-finance', label: 'Finance' },
-      { id: 'sys-saccos', label: 'SACCOs' },
-      { id: 'sys-matatu', label: 'Matatu' },
-      { id: 'sys-taxis', label: 'Taxis' },
-      { id: 'sys-bodabodas', label: 'BodaBodas' },
-      { id: 'sys-ussd', label: 'USSD Pool' },
-      { id: 'sys-sms', label: 'SMS' },
-      { id: 'sys-logins', label: 'Logins' },
-      { id: 'sys-routes', label: 'Routes Overview' },
-    ],
-    [],
-  )
-  const sysSectionIds = useMemo(() => new Set(sysSections.map((s) => s.id)), [sysSections])
-  const resolveSection = useCallback(
-    (rawId: string) => {
-      if (rawId === 'sys-withdrawals') return 'sys-finance'
-      if (rawId === 'sys-vehicles') return 'sys-matatu'
-      return sysSectionIds.has(rawId) ... rawId : 'sys-overview'
-    },
-    [sysSectionIds],
-  )
-
-  const [activeSection, setActiveSection] = useState<string>(() => {
-    if (typeof window === 'undefined') return 'sys-overview'
-    return resolveSection(window.location.hash....slice(1) || 'sys-overview')
-  })
-
-  useEffect(() => {
-    const onHash = () => {
-      const raw = window.location.hash....slice(1) || 'sys-overview'
-      const resolved = resolveSection(raw)
-      setActiveSection(resolved)
-      if (resolved !== raw) window.history.replaceState(null, '', `#${resolved}`)
-    }
-    onHash()
-    window.addEventListener('hashchange', onHash)
-    return () => window.removeEventListener('hashchange', onHash)
-  }, [resolveSection])
-
-  const activeVehicleType = useMemo(() => {
-    if (activeSection === 'sys-matatu') return 'MATATU'
-    if (activeSection === 'sys-taxis') return 'TAXI'
-    if (activeSection === 'sys-bodabodas') return 'BODABODA'
-    return ''
-  }, [activeSection])
-
-  const activeVehicleLabel = useMemo(() => {
-    if (activeVehicleType === 'MATATU') return 'Matatu'
-    if (activeVehicleType === 'TAXI') return 'Taxi'
-    if (activeVehicleType === 'BODABODA') return 'BodaBoda'
-    return ''
-  }, [activeVehicleType])
-
-  const activeVehicleListTitle = useMemo(() => {
-    if (activeVehicleType === 'MATATU') return 'Matatus'
-    if (activeVehicleType === 'TAXI') return 'Taxis'
-    if (activeVehicleType === 'BODABODA') return 'BodaBodas'
-    return 'Vehicles'
-  }, [activeVehicleType])
-
-  const filteredVehicles = useMemo(() => {
-    if (!activeVehicleType) return []
-    const normalize = (val: unknown) => {
-      const upper = String(val || '')
-        .trim()
-        .toUpperCase()
-        .replace(/[^A-Z]/g, '')
-      if (upper === 'BODA' || upper === 'BODABODA' || upper === 'BODABODAS') return 'BODABODA'
-      if (upper === 'MATATUS') return 'MATATU'
-      if (upper === 'TAXIS') return 'TAXI'
-      return upper
-    }
-    return matatus.filter((v) => normalize(v.vehicle_type || v.body_type || v.type) === activeVehicleType)
-  }, [activeVehicleType, matatus])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }, [activeSection])
+  const counts = overview?.counts || {}
+  const pool = overview?.ussd_pool || {}
 
   return (
-    <DashboardShell
-      title="System Admin"
-      subtitle="Central oversight for every fleet."
-      navLabel="System dashboard sections"
-      nav={sysSections.map((s) => (
-        <a key={s.id} className={`tab${activeSection === s.id ... ' active' : ''}`} href={`#${s.id}`}>
-          {s.label}
-        </a>
-      ))}
-    >
-      <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-        <button className="btn ghost" onClick={() => navigate('/system/registry')}>
-          Registry
-        </button>
-      </div>
-
-      {activeSection === 'sys-overview' ... (
-      <section id="sys-overview" className="card sys-anchor">
+    <DashboardShell title="System Admin" subtitle="React port of the system dashboard">
+      <section className="card">
         <h3 style={{ margin: '0 0 8px' }}>Platform snapshot</h3>
-        {overviewError ... <div className="err">Overview error: {overviewError}</div> : null}
+        {overviewError ? <div className="err">Overview error: {overviewError}</div> : null}
         <div className="grid metrics">
           <div className="metric">
             <div className="k">SACCOs</div>
-            <div className="v">{counts.saccos ...... '-'}</div>
+            <div className="v">{counts.saccos ?? '-'}</div>
           </div>
           <div className="metric">
             <div className="k">Matatus</div>
-            <div className="v">{counts.matatus ...... '-'}</div>
+            <div className="v">{counts.matatus ?? '-'}</div>
           </div>
           <div className="metric">
             <div className="k">Taxis</div>
-            <div className="v">{counts.taxis ...... '-'}</div>
+            <div className="v">{counts.taxis ?? '-'}</div>
           </div>
           <div className="metric">
             <div className="k">BodaBodas</div>
-            <div className="v">{counts.bodas ...... '-'}</div>
+            <div className="v">{counts.bodas ?? '-'}</div>
           </div>
           <div className="metric">
             <div className="k">Transactions today</div>
-            <div className="v">{counts.tx_today ...... '-'}</div>
+            <div className="v">{counts.tx_today ?? '-'}</div>
           </div>
           <div className="metric">
             <div className="k">USSD available</div>
-            <div className="v">{pool.available ...... '-'}</div>
+            <div className="v">{pool.available ?? '-'}</div>
           </div>
           <div className="metric">
             <div className="k">USSD total</div>
-            <div className="v">{pool.total ...... '-'}</div>
+            <div className="v">{pool.total ?? '-'}</div>
           </div>
         </div>
       </section>
-      ) : null}
 
-      {activeSection === 'sys-saccos' ... (
-      <>
-      <section id="sys-saccos" className="card sys-anchor">
+      <section className="card">
         <div className="topline">
           <h3 style={{ margin: 0 }}>SACCOs</h3>
           <span className="muted small">
-            Showing {saccos.length} record{saccos.length === 1 ... '' : 's'}
+            Showing {saccos.length} record{saccos.length === 1 ? '' : 's'}
           </span>
         </div>
-        {saccosError ... <div className="err">SACCO load error: {saccosError}</div> : null}
+        {saccosError ? <div className="err">SACCO load error: {saccosError}</div> : null}
         <div className="table-wrap">
           <table>
             <thead>
@@ -774,7 +641,7 @@ const SystemDashboard = () => {
               </tr>
             </thead>
             <tbody>
-              {saccos.length === 0 ... (
+              {saccos.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="muted">
                     No SACCOs yet.
@@ -852,9 +719,9 @@ const SystemDashboard = () => {
                 })
                 await fetchList<SaccoRow>('/api/admin/saccos')
                   .then((rows) => setSaccos(rows))
-                  .catch((err) => setSaccosError(err instanceof Error ... err.message : String(err)))
+                  .catch((err) => setSaccosError(err instanceof Error ? err.message : String(err)))
               } catch (err) {
-                setSaccoMsg(err instanceof Error ... err.message : 'Create failed')
+                setSaccoMsg(err instanceof Error ? err.message : 'Create failed')
               }
             }}
           >
@@ -863,13 +730,9 @@ const SystemDashboard = () => {
         </div>
         <div className="muted small">{saccoMsg}</div>
       </section>
-      </>
-      ) : null}
 
-      {activeVehicleType ... (
-      <>
       <section className="card">
-        <h3 style={{ marginTop: 0 }}>Register {activeVehicleLabel}</h3>
+        <h3 style={{ marginTop: 0 }}>Register Vehicle</h3>
         <div className="row">
           <input
             className="input"
@@ -907,6 +770,16 @@ const SystemDashboard = () => {
               </option>
             ))}
           </select>
+          <select
+            value={matatuForm.body}
+            onChange={(e) => setMatatuForm((f) => ({ ...f, body: e.target.value }))}
+            style={{ padding: 10 }}
+          >
+            <option value="">Type</option>
+            <option value="MATATU">Matatu</option>
+            <option value="TAXI">Taxi</option>
+            <option value="BODABODA">Boda</option>
+          </select>
           <button
             className="btn"
             type="button"
@@ -919,32 +792,32 @@ const SystemDashboard = () => {
                   phone: matatuForm.phone.trim(),
                   till: matatuForm.till.trim(),
                   sacco: matatuForm.sacco || null,
-                  body_type: activeVehicleType,
+                  body_type: matatuForm.body || null,
                 })
-                setMatatuMsg(`${activeVehicleLabel} registered`)
+                setMatatuMsg('Vehicle registered')
                 setMatatuForm({ plate: '', owner: '', phone: '', till: '', sacco: '', body: '' })
                 await fetchList<VehicleRow>('/api/admin/matatus')
                   .then((rows) => setMatatus(rows))
-                  .catch((err) => setVehiclesError(err instanceof Error ... err.message : String(err)))
+                  .catch((err) => setVehiclesError(err instanceof Error ? err.message : String(err)))
               } catch (err) {
-                setMatatuMsg(err instanceof Error ... err.message : 'Create failed')
+                setMatatuMsg(err instanceof Error ? err.message : 'Create failed')
               }
             }}
           >
-            Register {activeVehicleLabel}
+            Register
           </button>
         </div>
         <div className="muted small">{matatuMsg}</div>
       </section>
 
-      <section id={activeSection} className="card sys-anchor">
+      <section className="card">
         <div className="topline">
-          <h3 style={{ margin: 0 }}>{activeVehicleListTitle}</h3>
+          <h3 style={{ margin: 0 }}>Vehicles</h3>
           <span className="muted small">
-            Showing {filteredVehicles.length} record{filteredVehicles.length === 1 ... '' : 's'}
+            Showing {matatus.length} record{matatus.length === 1 ? '' : 's'}
           </span>
         </div>
-        {vehiclesError ... <div className="err">Vehicle load error: {vehiclesError}</div> : null}
+        {vehiclesError ? <div className="err">Vehicle load error: {vehiclesError}</div> : null}
         <div className="table-wrap">
           <table>
             <thead>
@@ -957,20 +830,20 @@ const SystemDashboard = () => {
               </tr>
             </thead>
             <tbody>
-              {filteredVehicles.length === 0 ... (
+              {matatus.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="muted">
-                    No {activeVehicleListTitle} yet.
+                    No vehicles yet.
                   </td>
                 </tr>
               ) : (
-                filteredVehicles.map((v) => (
-                  <tr key={v.id || v.plate || v.registration || v.number_plate}>
-                    <td>{v.plate || v.registration || v.number_plate || '-'}</td>
+                matatus.map((v) => (
+                  <tr key={v.id || v.plate || v.registration}>
+                    <td>{v.plate || v.registration || '-'}</td>
                     <td>{v.owner_name || '-'}</td>
                     <td>{v.owner_phone || '-'}</td>
-                    <td>{v.sacco_name || v.sacco || v.sacco_id || '-'}</td>
-                    <td>{v.body_type || v.type || v.vehicle_type || '-'}</td>
+                    <td>{v.sacco_name || v.sacco || '-'}</td>
+                    <td>{v.body_type || v.type || '-'}</td>
                   </tr>
                 ))
               )}
@@ -978,37 +851,33 @@ const SystemDashboard = () => {
           </table>
         </div>
       </section>
-      </>
-      ) : null}
 
-      {activeSection === 'sys-finance' ... (
-      <>
-      <section id="sys-finance" className="card sys-anchor">
+      <section className="card">
         <h3 style={{ marginTop: 0 }}>Finance overview</h3>
-        {financeError ... <div className="err">Finance error: {financeError}</div> : null}
+        {financeError ? <div className="err">Finance error: {financeError}</div> : null}
         <div className="grid metrics">
           <div className="metric">
             <div className="k">Today gross</div>
-            <div className="v">{formatKes(finance-.today-.gross_fares)}</div>
+            <div className="v">{formatKes(finance?.today?.gross_fares)}</div>
             <div className="muted small">
-              Matatu: {formatKes(finance?.today?.matatu_net)} - SACCO: {formatKes(finance?.today?.sacco_fee_income)} - TekeTeke:{" "}
-              {formatKes(finance?.today?.teketeke_income)}
+              Matatu: {formatKes(finance?.today?.matatu_net)} • SACCO: {formatKes(finance?.today?.sacco_fee_income)} •
+              TekeTeke: {formatKes(finance?.today?.teketeke_income)}
             </div>
           </div>
           <div className="metric">
             <div className="k">This week gross</div>
-            <div className="v">{formatKes(finance-.week-.gross_fares)}</div>
+            <div className="v">{formatKes(finance?.week?.gross_fares)}</div>
             <div className="muted small">
-              Matatu: {formatKes(finance?.week?.matatu_net)} - SACCO: {formatKes(finance?.week?.sacco_fee_income)} - TekeTeke:{" "}
-              {formatKes(finance?.week?.teketeke_income)}
+              Matatu: {formatKes(finance?.week?.matatu_net)} • SACCO: {formatKes(finance?.week?.sacco_fee_income)} •
+              TekeTeke: {formatKes(finance?.week?.teketeke_income)}
             </div>
           </div>
           <div className="metric">
             <div className="k">This month gross</div>
-            <div className="v">{formatKes(finance-.month-.gross_fares)}</div>
+            <div className="v">{formatKes(finance?.month?.gross_fares)}</div>
             <div className="muted small">
-              Matatu: {formatKes(finance?.month?.matatu_net)} - SACCO: {formatKes(finance?.month?.sacco_fee_income)} - TekeTeke:{" "}
-              {formatKes(finance?.month?.teketeke_income)}
+              Matatu: {formatKes(finance?.month?.matatu_net)} • SACCO: {formatKes(finance?.month?.sacco_fee_income)} •
+              TekeTeke: {formatKes(finance?.month?.teketeke_income)}
             </div>
           </div>
         </div>
@@ -1029,7 +898,7 @@ const SystemDashboard = () => {
             </select>
           </label>
         </div>
-        {saccoSummaryError ... <div className="err">Summary error: {saccoSummaryError}</div> : null}
+        {saccoSummaryError ? <div className="err">Summary error: {saccoSummaryError}</div> : null}
         <div className="table-wrap">
           <table>
             <thead>
@@ -1043,7 +912,7 @@ const SystemDashboard = () => {
               </tr>
             </thead>
             <tbody>
-              {saccoSummary.length === 0 ... (
+              {saccoSummary.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="muted">
                     No rows.
@@ -1053,7 +922,7 @@ const SystemDashboard = () => {
                 saccoSummary.map((row) => (
                   <tr key={row.sacco_id || row.sacco_name}>
                     <td>{row.sacco_name || row.sacco_id || '-'}</td>
-                    <td>{row.matatus ...... 0}</td>
+                    <td>{row.matatus ?? 0}</td>
                     <td>{formatKes(row.gross_fares)}</td>
                     <td>{formatKes(row.matatu_net)}</td>
                     <td>{formatKes(row.sacco_fee_income)}</td>
@@ -1065,11 +934,8 @@ const SystemDashboard = () => {
           </table>
         </div>
       </section>
-      </>
-      ) : null}
 
-      {activeSection === 'sys-finance' ... (
-      <section id="sys-withdrawals" className="grid g2 sys-anchor">
+      <section className="grid g2">
         <div className="card">
           <div className="topline">
             <h3 style={{ margin: 0 }}>Withdrawals monitor</h3>
@@ -1091,7 +957,7 @@ const SystemDashboard = () => {
               </select>
             </label>
           </div>
-          {withdrawError ... <div className="err">Withdrawals error: {withdrawError}</div> : null}
+          {withdrawError ? <div className="err">Withdrawals error: {withdrawError}</div> : null}
           <div className="table-wrap" style={{ maxHeight: 320, overflow: 'auto' }}>
             <table>
               <thead>
@@ -1104,7 +970,7 @@ const SystemDashboard = () => {
                 </tr>
               </thead>
               <tbody>
-                {withdrawals.length === 0 ... (
+                {withdrawals.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="muted">
                       No withdrawals found.
@@ -1113,7 +979,7 @@ const SystemDashboard = () => {
                 ) : (
                   withdrawals.map((row) => (
                     <tr key={row.id || row.created_at}>
-                      <td className="mono">{row.created_at ... new Date(row.created_at).toLocaleString() : ''}</td>
+                      <td className="mono">{row.created_at ? new Date(row.created_at).toLocaleString() : ''}</td>
                       <td>{row.matatu_plate || row.sacco_name || '-'}</td>
                       <td>{row.phone || ''}</td>
                       <td>{formatKes(row.amount)}</td>
@@ -1140,11 +1006,11 @@ const SystemDashboard = () => {
               Inspect
             </button>
           </div>
-          {walletError ... <div className="err">{walletError}</div> : null}
+          {walletError ? <div className="err">{walletError}</div> : null}
           <div className="muted small" style={{ marginTop: 8 }}>
-            {walletSummary ... (
+            {walletSummary ? (
               <>
-                <strong>{walletSummary.virtual_account_code || 'Wallet'}</strong> - Balance:{' '}
+                <strong>{walletSummary.virtual_account_code || 'Wallet'}</strong> — Balance:{' '}
                 {formatKes(walletSummary.balance)} ({walletSummary.currency || 'KES'})
               </>
             ) : (
@@ -1163,7 +1029,7 @@ const SystemDashboard = () => {
                 </tr>
               </thead>
               <tbody>
-                {walletTx.length === 0 ... (
+                {walletTx.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="muted">
                       No transactions.
@@ -1172,7 +1038,7 @@ const SystemDashboard = () => {
                 ) : (
                   walletTx.map((row, idx) => (
                     <tr key={`${row.created_at || ''}-${idx}`}>
-                      <td className="mono">{row.created_at ... new Date(row.created_at).toLocaleString() : ''}</td>
+                      <td className="mono">{row.created_at ? new Date(row.created_at).toLocaleString() : ''}</td>
                       <td>{row.tx_type || ''}</td>
                       <td>{formatKes(row.amount)}</td>
                       <td>{formatKes(row.balance_after)}</td>
@@ -1185,14 +1051,11 @@ const SystemDashboard = () => {
           </div>
         </div>
       </section>
-      ) : null}
 
-      {activeSection === 'sys-ussd' || activeSection === 'sys-sms' ... (
       <section className="grid g2">
-        {activeSection === 'sys-ussd' ... (
-        <div id="sys-ussd" className="card sys-anchor">
+        <div className="card">
           <h3 style={{ marginTop: 0 }}>USSD pool</h3>
-          {ussdError ... <div className="err">USSD error: {ussdError}</div> : null}
+          {ussdError ? <div className="err">USSD error: {ussdError}</div> : null}
           <div className="table-wrap" style={{ maxHeight: 240 }}>
             <table>
               <thead>
@@ -1202,7 +1065,7 @@ const SystemDashboard = () => {
                 </tr>
               </thead>
               <tbody>
-                {!ussd....available....length ... (
+                {!ussd?.available?.length ? (
                   <tr>
                     <td colSpan={2} className="muted">
                       No available codes.
@@ -1229,7 +1092,7 @@ const SystemDashboard = () => {
                 </tr>
               </thead>
               <tbody>
-                {!ussd....allocated....length ... (
+                {!ussd?.allocated?.length ? (
                   <tr>
                     <td colSpan={3} className="muted">
                       No allocated codes.
@@ -1248,10 +1111,8 @@ const SystemDashboard = () => {
             </table>
           </div>
         </div>
-        ) : null}
 
-        {activeSection === 'sys-sms' ... (
-        <div id="sys-sms" className="card sys-anchor">
+        <div className="card">
           <div className="topline">
             <h3 style={{ margin: 0 }}>SMS</h3>
             <label className="muted small">
@@ -1271,7 +1132,7 @@ const SystemDashboard = () => {
               </select>
             </label>
           </div>
-          {smsError ... <div className="err">SMS error: {smsError}</div> : null}
+          {smsError ? <div className="err">SMS error: {smsError}</div> : null}
           <div className="table-wrap" style={{ maxHeight: 280 }}>
             <table>
               <thead>
@@ -1286,7 +1147,7 @@ const SystemDashboard = () => {
                 </tr>
               </thead>
               <tbody>
-                {smsRows.length === 0 ... (
+                {smsRows.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="muted">
                       No messages.
@@ -1300,11 +1161,11 @@ const SystemDashboard = () => {
                         <td>{row.to_phone || ''}</td>
                         <td>{row.template_code || ''}</td>
                         <td>{row.status || ''}</td>
-                        <td>{row.tries ...... ''}</td>
-                        <td>{row.updated_at ... new Date(row.updated_at).toLocaleString() : ''}</td>
+                        <td>{row.tries ?? ''}</td>
+                        <td>{row.updated_at ? new Date(row.updated_at).toLocaleString() : ''}</td>
                         <td>{row.error_message || ''}</td>
                         <td>
-                          {canRetry ... (
+                          {canRetry ? (
                             <button className="btn ghost" type="button" onClick={() => retrySms(row.id)}>
                               Retry
                             </button>
@@ -1318,15 +1179,11 @@ const SystemDashboard = () => {
             </table>
           </div>
         </div>
-        ) : null}
       </section>
-      ) : null}
 
-      {activeSection === 'sys-routes' ... (
-      <>
-      <section id="sys-routes" className="card sys-anchor">
+      <section className="card">
         <h3 style={{ marginTop: 0 }}>Routes overview</h3>
-        {routeError ... <div className="err">Route error: {routeError}</div> : null}
+        {routeError ? <div className="err">Route error: {routeError}</div> : null}
         <div className="table-wrap">
           <table>
             <thead>
@@ -1339,7 +1196,7 @@ const SystemDashboard = () => {
               </tr>
             </thead>
             <tbody>
-              {routeUsage.length === 0 ... (
+              {routeUsage.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="muted">
                     No routes data.
@@ -1349,10 +1206,10 @@ const SystemDashboard = () => {
                 routeUsage.map((row) => (
                   <tr key={row.sacco_id || row.sacco_name}>
                     <td>{row.sacco_name || row.sacco_id || '-'}</td>
-                    <td>{row.routes ...... 0}</td>
-                    <td>{row.active_routes ...... 0}</td>
-                    <td>{(row.total_distance_km ...... 0).toLocaleString()}</td>
-                    <td>{(row.average_distance_km ...... 0).toLocaleString()}</td>
+                    <td>{row.routes ?? 0}</td>
+                    <td>{row.active_routes ?? 0}</td>
+                    <td>{(row.total_distance_km ?? 0).toLocaleString()}</td>
+                    <td>{(row.average_distance_km ?? 0).toLocaleString()}</td>
                   </tr>
                 ))
               )}
@@ -1398,7 +1255,7 @@ const SystemDashboard = () => {
                   await loadRoutes()
                   await loadRouteUsage()
                 } catch (err) {
-                  setRoutesError(err instanceof Error ... err.message : 'Create route failed')
+                  setRoutesError(err instanceof Error ? err.message : 'Create route failed')
                 }
               }}
             >
@@ -1406,7 +1263,7 @@ const SystemDashboard = () => {
             </button>
           </div>
         </div>
-        {routesError ... <div className="err">Routes error: {routesError}</div> : null}
+        {routesError ? <div className="err">Routes error: {routesError}</div> : null}
         <div className="table-wrap">
           <table>
             <thead>
@@ -1418,7 +1275,7 @@ const SystemDashboard = () => {
               </tr>
             </thead>
             <tbody>
-              {routes.length === 0 ... (
+              {routes.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="muted">
                     No routes.
@@ -1429,18 +1286,18 @@ const SystemDashboard = () => {
                   <tr key={r.id || r.name}>
                     <td>{r.name || ''}</td>
                     <td>{r.sacco_id || ''}</td>
-                    <td>{r.active ... 'Yes' : 'No'}</td>
+                    <td>{r.active ? 'Yes' : 'No'}</td>
                     <td className="row" style={{ gap: 6 }}>
                       <button
                         className="btn ghost"
                         type="button"
                         onClick={() => {
-                          const nextId = routeEditId === (r.id || '') ... '' : r.id || ''
+                          const nextId = routeEditId === (r.id || '') ? '' : r.id || ''
                           setRouteEditId(nextId)
                           setRoutePathMsg('')
                           if (nextId) {
                             try {
-                              const raw = r.path_points ...... []
+                              const raw = r.path_points ?? []
                               setRoutePathText(JSON.stringify(raw, null, 2))
                             } catch (err) {
                               console.warn('route path parse', err)
@@ -1451,7 +1308,7 @@ const SystemDashboard = () => {
                           }
                         }}
                       >
-                        {routeEditId === (r.id || '') ... 'Close edit' : 'Edit path'}
+                        {routeEditId === (r.id || '') ? 'Close edit' : 'Edit path'}
                       </button>
                       <button
                         className="btn ghost"
@@ -1465,11 +1322,11 @@ const SystemDashboard = () => {
                             await loadRoutes()
                             await loadRouteUsage()
                           } catch (err) {
-                            setRoutesError(err instanceof Error ... err.message : 'Toggle failed')
+                            setRoutesError(err instanceof Error ? err.message : 'Toggle failed')
                           }
                         }}
                       >
-                        {r.active ... 'Deactivate' : 'Activate'}
+                        {r.active ? 'Deactivate' : 'Activate'}
                       </button>
                       <button
                         className="btn ghost"
@@ -1488,7 +1345,7 @@ const SystemDashboard = () => {
                             await loadRoutes()
                             await loadRouteUsage()
                           } catch (err) {
-                            setRoutesError(err instanceof Error ... err.message : 'Delete failed')
+                            setRoutesError(err instanceof Error ? err.message : 'Delete failed')
                           }
                         }}
                       >
@@ -1501,7 +1358,7 @@ const SystemDashboard = () => {
             </tbody>
           </table>
         </div>
-        {routeEditId && selectedRoute ... (
+        {routeEditId && selectedRoute ? (
           <div className="card" style={{ marginTop: 12 }}>
             <div className="topline">
               <h4 style={{ margin: 0 }}>Edit path: {selectedRoute.name}</h4>
@@ -1517,7 +1374,7 @@ const SystemDashboard = () => {
                 onClick={() => setRouteMapOpen((v) => !v)}
                 title="Optional map helper using Leaflet + OSM tiles"
               >
-                {routeMapOpen ... 'Hide map editor' : 'Open map editor (beta)'}
+                {routeMapOpen ? 'Hide map editor' : 'Open map editor (beta)'}
               </button>
               <button
                 className="btn ghost"
@@ -1550,7 +1407,7 @@ const SystemDashboard = () => {
                     setRoutePathMsg('Path saved')
                     await loadRoutes()
                   } catch (err) {
-                    setRoutePathMsg(err instanceof Error ... err.message : 'Save failed')
+                    setRoutePathMsg(err instanceof Error ? err.message : 'Save failed')
                   }
                 }}
             >
@@ -1561,7 +1418,7 @@ const SystemDashboard = () => {
             </button>
             <span className="muted small">{routePathMsg}</span>
           </div>
-          {routeMapOpen ... (
+          {routeMapOpen ? (
             <div className="card" style={{ marginTop: 10 }}>
               <h4 style={{ margin: '0 0 6px' }}>Map editor</h4>
               <p className="muted small" style={{ marginTop: 0 }}>
@@ -1575,7 +1432,7 @@ const SystemDashboard = () => {
           ) : null}
           <div className="card" style={{ marginTop: 10, background: '#f8fafc' }}>
             <h4 style={{ margin: '0 0 6px' }}>Path preview</h4>
-            {parsedRoutePoints.length < 2 ... (
+            {parsedRoutePoints.length < 2 ? (
               <div className="muted small">Add at least two [lat,lng] points to preview.</div>
             ) : (
               <svg viewBox="0 0 600 320" style={{ width: '100%', maxWidth: '100%', height: 'auto', background: '#fff' }}>
@@ -1623,10 +1480,7 @@ const SystemDashboard = () => {
         </div>
       ) : null}
     </section>
-      </>
-      ) : null}
 
-      {activeSection === 'sys-ussd' ... (
       <section className="card">
         <div className="topline">
           <h3 style={{ margin: 0 }}>USSD assign</h3>
@@ -1644,7 +1498,7 @@ const SystemDashboard = () => {
                 await loadUssd()
                 await refreshOverview()
               } catch (err) {
-                setUssdMsg(err instanceof Error ... err.message : 'Assign failed')
+                setUssdMsg(err instanceof Error ? err.message : 'Assign failed')
               }
             }}
           >
@@ -1674,15 +1528,13 @@ const SystemDashboard = () => {
           <span className="muted small">{ussdMsg}</span>
         </div>
       </section>
-      ) : null}
 
-      {activeSection === 'sys-logins' ... (
-      <section id="sys-logins" className="card sys-anchor">
+      <section className="card">
         <div className="topline">
           <h3 style={{ margin: 0 }}>Logins</h3>
           <span className="muted small">{logins.length} login(s)</span>
         </div>
-        {loginError ... <div className="err">Logins error: {loginError}</div> : null}
+        {loginError ? <div className="err">Logins error: {loginError}</div> : null}
         <div className="row" style={{ marginBottom: 8 }}>
           <input
             className="input"
@@ -1739,7 +1591,7 @@ const SystemDashboard = () => {
                 setLoginForm({ email: '', password: '', role: 'SACCO', sacco_id: '', matatu_id: '' })
                 await loadLogins()
               } catch (err) {
-                setLoginMsg(err instanceof Error ... err.message : 'Create failed')
+                setLoginMsg(err instanceof Error ? err.message : 'Create failed')
               }
             }}
           >
@@ -1760,7 +1612,7 @@ const SystemDashboard = () => {
               </tr>
             </thead>
             <tbody>
-              {logins.length === 0 ... (
+              {logins.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="muted">
                     No logins.
@@ -1790,7 +1642,7 @@ const SystemDashboard = () => {
                             })
                             await loadLogins()
                           } catch (err) {
-                            setLoginError(err instanceof Error ... err.message : 'Update failed')
+                            setLoginError(err instanceof Error ? err.message : 'Update failed')
                           }
                         }}
                       >
@@ -1801,12 +1653,12 @@ const SystemDashboard = () => {
                         type="button"
                         onClick={async () => {
                           if (!row.user_id) return
-                          if (!confirm('Remove this login...')) return
+                          if (!confirm('Remove this login?')) return
                           try {
-                            await deleteJson(`/api/admin/user-roles/${row.user_id}...remove_user=true`)
+                            await deleteJson(`/api/admin/user-roles/${row.user_id}?remove_user=true`)
                             await loadLogins()
                           } catch (err) {
-                            setLoginError(err instanceof Error ... err.message : 'Delete failed')
+                            setLoginError(err instanceof Error ? err.message : 'Delete failed')
                           }
                         }}
                       >
@@ -1820,9 +1672,7 @@ const SystemDashboard = () => {
           </table>
         </div>
       </section>
-      ) : null}
 
-      {activeSection === 'sys-sms' || activeSection === 'sys-routes' ... (
       <section className="card">
         <h3 style={{ marginTop: 0 }}>SMS & routes</h3>
         <p className="muted" style={{ marginTop: 6 }}>
@@ -1830,7 +1680,6 @@ const SystemDashboard = () => {
           <a href="/public/system/dashboard.html">/public/system/dashboard.html</a>. We will mirror those actions in React next.
         </p>
       </section>
-      ) : null}
     </DashboardShell>
   )
 }

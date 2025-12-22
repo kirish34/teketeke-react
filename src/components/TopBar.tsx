@@ -1,9 +1,14 @@
-import { Link, useNavigate } from "react-router-dom";
-import { useAuth } from "../state/auth";
+import { Link, useNavigate } from 'react-router-dom'
+import { useAuth } from '../state/auth'
 
 export function TopBar() {
-  const { user, logout, loading } = useAuth();
-  const nav = useNavigate();
+  const { user, logout, loading } = useAuth()
+  const nav = useNavigate()
+
+  const handleLogout = () => {
+    logout()
+    nav('/login')
+  }
 
   return (
     <header className="topbar">
@@ -17,18 +22,12 @@ export function TopBar() {
         </nav>
       </div>
       <div className="topbar-right">
-        {loading ... (
+        {loading ? (
           <span className="pill">Checking...</span>
-        ) : user ... (
+        ) : user ? (
           <>
             <span className="pill">{user.email || user.role}</span>
-            <button
-              className="ghost"
-              onClick={() => {
-                logout();
-                nav("/login");
-              }}
-            >
+            <button className="ghost" onClick={handleLogout}>
               Logout
             </button>
           </>
@@ -37,5 +36,5 @@ export function TopBar() {
         )}
       </div>
     </header>
-  );
+  )
 }
