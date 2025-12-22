@@ -1,4 +1,4 @@
-require('dotenv').config();
+is this ok  require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -16,6 +16,7 @@ app.use(express.urlencoded({ extended: false }));
 // CORS (whitelist via CORS_ORIGINS="https://app1,https://app2")
 const defaultCors = [
   'https://teketeke.dev',
+  'https://www.teketeke.dev',
   'https://api.teketeke.dev',
   'https://teketeke-react.vercel.app',
   'https://teketeke-react-1oh3rpn5r-team-teke.vercel.app',
@@ -37,7 +38,7 @@ app.use(cors({
     if (!origin || allow.length === 0 || allow.includes(origin) || allowVercelPreview(origin)) {
       return cb(null, true);
     }
-    return cb(new Error('CORS blocked'), false);
+    return cb(new null, false);
   },
   credentials: true
 }));
