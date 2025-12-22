@@ -14,8 +14,16 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false }));
 
 // CORS (whitelist via CORS_ORIGINS="https://app1,https://app2")
-const allow = (process.env.CORS_ORIGINS || '')
-  .split(',').map(s => s.trim()).filter(Boolean);
+const defaultCors = [
+  'https://teketeke.dev',
+  'https://api.teketeke.dev',
+  'https://teketeke-react.vercel.app',
+  'https://teketeke-react-1oh3rpn5r-team-teke.vercel.app',
+];
+const allow = Array.from(new Set([
+  ...defaultCors,
+  ...(process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
+]));
 const allowVercelPreview = (origin = '') => {
   try {
     const host = new URL(origin).hostname;
