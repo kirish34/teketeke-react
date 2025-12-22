@@ -16,9 +16,19 @@ app.use(express.urlencoded({ extended: false }));
 // CORS (whitelist via CORS_ORIGINS="https://app1,https://app2")
 const allow = (process.env.CORS_ORIGINS || '')
   .split(',').map(s => s.trim()).filter(Boolean);
+const allowVercelPreview = (origin = '') => {
+  try {
+    const host = new URL(origin).hostname;
+    return host.endsWith('.vercel.app') && host.startsWith('teketeke-react-');
+  } catch {
+    return false;
+  }
+};
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin || allow.length === 0 || allow.includes(origin)) return cb(null, true);
+    if (!origin || allow.length === 0 || allow.includes(origin) || allowVercelPreview(origin)) {
+      return cb(null, true);
+    }
     return cb(new Error('CORS blocked'), false);
   },
   credentials: true
