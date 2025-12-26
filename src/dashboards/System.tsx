@@ -750,7 +750,7 @@ const SystemDashboard = () => {
   }
 
   return (
-    <DashboardShell title="System Admin" subtitle="React port of the system dashboard">
+    <DashboardShell title="System Admin" subtitle="React port of the system dashboard" hideNav>
       <nav className="sys-nav" aria-label="System admin sections">
         {tabs.map((t) => (
           <button

@@ -10,6 +10,7 @@ type Props = {
   nav?: ReactNode
   navLabel?: string
   hideShellChrome?: boolean
+  hideNav?: boolean
   children: ReactNode
 }
 
@@ -27,7 +28,7 @@ export const navLinks: Array<{ to: string; label: string; allow: string[] }> = [
   { to: '/boda', label: 'BodaBoda', allow: ['super_admin', 'boda'] },
 ]
 
-export function DashboardShell({ title, subtitle, actions, nav, navLabel, hideShellChrome, children }: Props) {
+export function DashboardShell({ title, subtitle, actions, nav, navLabel, hideShellChrome, hideNav, children }: Props) {
   const { user, logout, loading, error } = useAuth()
   const navigate = useNavigate()
 
@@ -76,19 +77,21 @@ export function DashboardShell({ title, subtitle, actions, nav, navLabel, hideSh
         </button>
       </header>
 
-      <nav className="tabs" aria-label={navLabel || 'Dashboards'}>
-        {nav ??
-          visibleLinks.map((link) => (
-            <NavLink
-              key={link.to}
-              to={link.to}
-              className={({ isActive }) => `tab${isActive ? ' active' : ''}`}
-            >
-              {link.label}
-            </NavLink>
-          ))}
-        {actions}
-      </nav>
+      {!hideNav ? (
+        <nav className="tabs" aria-label={navLabel || 'Dashboards'}>
+          {nav ??
+            visibleLinks.map((link) => (
+              <NavLink
+                key={link.to}
+                to={link.to}
+                className={({ isActive }) => `tab${isActive ? ' active' : ''}`}
+              >
+                {link.label}
+              </NavLink>
+            ))}
+          {actions}
+        </nav>
+      ) : null}
 
       <main className="app-main">{children}</main>
     </div>
