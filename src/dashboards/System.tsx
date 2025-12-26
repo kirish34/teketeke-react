@@ -129,6 +129,7 @@ type VehicleRow = {
   id?: string
   plate?: string
   registration?: string
+  vehicle_type?: string
   owner_name?: string
   owner_phone?: string
   sacco_name?: string
@@ -349,7 +350,7 @@ const SystemDashboard = () => {
   }
 
   const vehiclesFor = (kind: VehicleKind) =>
-    matatus.filter((v) => normalizeVehicleType(v.body_type || v.type) === kind)
+    matatus.filter((v) => normalizeVehicleType(v.vehicle_type || v.body_type || v.type) === kind)
 
   async function ensureLeaflet() {
     if (window.L) return window.L
@@ -681,12 +682,12 @@ const SystemDashboard = () => {
                 setMatatuMsg('Saving...')
                 try {
                   await sendJson('/api/admin/register-matatu', 'POST', {
-                    plate: matatuForm.plate.trim(),
-                    owner: matatuForm.owner.trim(),
-                    phone: matatuForm.phone.trim(),
-                    till: matatuForm.till.trim(),
-                    sacco: matatuForm.sacco || null,
-                    body_type: matatuForm.body || null,
+                    number_plate: matatuForm.plate.trim(),
+                    owner_name: matatuForm.owner.trim(),
+                    owner_phone: matatuForm.phone.trim(),
+                    till_number: matatuForm.till.trim(),
+                    sacco_id: matatuForm.sacco || null,
+                    vehicle_type: matatuForm.body || null,
                   })
                   setMatatuMsg(`${meta.label} registered`)
                   setMatatuForm({ plate: '', owner: '', phone: '', till: '', sacco: '', body: meta.type })
@@ -737,7 +738,7 @@ const SystemDashboard = () => {
                       <td>{v.owner_name || '-'}</td>
                       <td>{v.owner_phone || '-'}</td>
                       <td>{v.sacco_name || v.sacco || '-'}</td>
-                      <td>{normalizeVehicleType(v.body_type || v.type) || '-'}</td>
+                      <td>{normalizeVehicleType(v.vehicle_type || v.body_type || v.type) || '-'}</td>
                     </tr>
                   ))
                 )}
