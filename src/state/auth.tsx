@@ -117,6 +117,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     refreshProfile();
   }, [refreshProfile]);
 
+  useEffect(() => {
+    const handleLeave = () => {
+      clearAuthStorage();
+    };
+    window.addEventListener("pagehide", handleLeave);
+    window.addEventListener("beforeunload", handleLeave);
+    return () => {
+      window.removeEventListener("pagehide", handleLeave);
+      window.removeEventListener("beforeunload", handleLeave);
+    };
+  }, []);
+
   const value = useMemo<AuthCtx>(
     () => ({
       user,
