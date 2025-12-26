@@ -10,7 +10,7 @@ const {
 } = require('../wallet/wallet.service');
 const { sendB2CPayment } = require('../mpesa/mpesaB2C.service');
 
-router.use(requireAdminAccess);
+router.use('/wallets', requireAdminAccess);
 
 /**
  * GET /wallets/:virtualAccountCode
