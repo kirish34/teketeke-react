@@ -113,9 +113,17 @@ export async function authFetch(input: RequestInfo | URL, init?: RequestInit) {
 
   let target: RequestInfo | URL = input
   if (isRelative) {
-    const base = env.apiBase || '/'
-    const baseUrl = base.endsWith('/') ? base : `${base}/`
-    target = new URL(url.replace(/^\//, ''), baseUrl).toString()
+    const rawBase = (env.apiBase || '').trim()
+    if (!rawBase || rawBase === '/') {
+      target = input
+    } else {
+      let baseUrl = rawBase
+      if (!/^https?:\/\//i.test(baseUrl)) {
+        baseUrl = new URL(baseUrl, window.location.origin).toString()
+      }
+      if (!baseUrl.endsWith('/')) baseUrl += '/'
+      target = new URL(url.replace(/^\//, ''), baseUrl).toString()
+    }
   }
 
   return fetch(target, { ...(init || {}), headers })
