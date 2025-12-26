@@ -18,13 +18,13 @@ export const navLinks: Array<{ to: string; label: string; allow: string[] }> = [
   { to: '/system/payouts', label: 'Payouts', allow: ['super_admin', 'system_admin'] },
   { to: '/sacco/approvals', label: 'Approvals', allow: ['super_admin', 'system_admin', 'sacco_admin'] },
   { to: '/system/worker-monitor', label: 'Worker Monitor', allow: ['super_admin', 'system_admin'] },
+  { to: '/ops', label: 'Ops', allow: ['super_admin', 'system_admin'] },
   { to: '/sacco', label: 'SACCO', allow: ['super_admin', 'system_admin', 'sacco_admin'] },
   { to: '/sacco/staff', label: 'SACCO Staff', allow: ['super_admin', 'sacco_admin', 'sacco_staff'] },
   { to: '/matatu/owner', label: 'Matatu Owner', allow: ['super_admin', 'matatu_owner'] },
   { to: '/matatu/staff', label: 'Matatu Staff', allow: ['super_admin', 'matatu_staff'] },
   { to: '/taxi', label: 'Taxi', allow: ['super_admin', 'taxi'] },
   { to: '/boda', label: 'BodaBoda', allow: ['super_admin', 'boda'] },
-  { to: '/ops', label: 'Ops', allow: ['super_admin', 'system_admin'] },
 ]
 
 export function DashboardShell({ title, subtitle, actions, nav, navLabel, hideShellChrome, children }: Props) {

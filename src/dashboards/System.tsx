@@ -107,6 +107,12 @@ type AdminLogin = {
   matatu_id?: string | null
 }
 
+type SystemTabId = 'overview' | 'finance' | 'saccos' | 'matatu' | 'taxis' | 'bodabodas' | 'ussd' | 'logins' | 'routes'
+
+type VehicleKind = 'MATATU' | 'TAXI' | 'BODABODA'
+
+type VehicleTabKey = 'matatu' | 'taxis' | 'bodabodas'
+
 type SaccoRow = {
   id?: string
   sacco_id?: string
@@ -289,6 +295,26 @@ const SystemDashboard = () => {
   })
   const [loginMsg, setLoginMsg] = useState('')
 
+  const [activeTab, setActiveTab] = useState<SystemTabId>('overview')
+
+  const tabs: Array<{ id: SystemTabId; label: string }> = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'finance', label: 'Finance' },
+    { id: 'saccos', label: 'SACCOs' },
+    { id: 'matatu', label: 'Matatu' },
+    { id: 'taxis', label: 'Taxis' },
+    { id: 'bodabodas', label: 'BodaBodas' },
+    { id: 'ussd', label: 'USSD Pool' },
+    { id: 'logins', label: 'Logins' },
+    { id: 'routes', label: 'Routes Overview' },
+  ]
+
+  const vehicleTabMeta: Record<VehicleTabKey, { label: string; plural: string; type: VehicleKind }> = {
+    matatu: { label: 'Matatu', plural: 'Matatus', type: 'MATATU' },
+    taxis: { label: 'Taxi', plural: 'Taxis', type: 'TAXI' },
+    bodabodas: { label: 'BodaBoda', plural: 'BodaBodas', type: 'BODABODA' },
+  }
+
   const selectedRoute = useMemo(
     () => routes.find((r) => (r.id || '') === routeEditId) || null,
     [routes, routeEditId],
@@ -313,6 +339,17 @@ const SystemDashboard = () => {
       return []
     }
   }, [routePathText])
+
+  const normalizeVehicleType = (value?: string) => {
+    const val = (value || '').toUpperCase()
+    if (val === 'BODA' || val === 'BODABODA') return 'BODABODA'
+    if (val === 'MATATU') return 'MATATU'
+    if (val === 'TAXI') return 'TAXI'
+    return val
+  }
+
+  const vehiclesFor = (kind: VehicleKind) =>
+    matatus.filter((v) => normalizeVehicleType(v.body_type || v.type) === kind)
 
   async function ensureLeaflet() {
     if (window.L) return window.L
@@ -447,6 +484,13 @@ const SystemDashboard = () => {
     if (routeMapOpen) syncRouteMap()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [parsedRoutePoints])
+
+  useEffect(() => {
+    const forcedBody =
+      activeTab === 'matatu' ? 'MATATU' : activeTab === 'taxis' ? 'TAXI' : activeTab === 'bodabodas' ? 'BODABODA' : ''
+    if (!forcedBody) return
+    setMatatuForm((f) => (f.body === forcedBody ? f : { ...f, body: forcedBody }))
+  }, [activeTab])
 
   async function loadWallet(code: string) {
     const clean = code.trim()
@@ -584,8 +628,143 @@ const SystemDashboard = () => {
   const counts = overview?.counts || {}
   const pool = overview?.ussd_pool || {}
 
+  const renderVehicleTab = (meta: { label: string; plural: string; type: VehicleKind }) => {
+    const rows = vehiclesFor(meta.type)
+    return (
+      <>
+        <section className="card">
+          <h3 style={{ marginTop: 0 }}>Register {meta.label}</h3>
+          <div className="row">
+            <input
+              className="input"
+              placeholder="Plate (KDA123A)"
+              value={matatuForm.plate}
+              onChange={(e) => setMatatuForm((f) => ({ ...f, plate: e.target.value }))}
+            />
+            <input
+              className="input"
+              placeholder="Owner name"
+              value={matatuForm.owner}
+              onChange={(e) => setMatatuForm((f) => ({ ...f, owner: e.target.value }))}
+            />
+            <input
+              className="input"
+              placeholder="Owner phone"
+              value={matatuForm.phone}
+              onChange={(e) => setMatatuForm((f) => ({ ...f, phone: e.target.value }))}
+            />
+            <input
+              className="input"
+              placeholder="Till number"
+              value={matatuForm.till}
+              onChange={(e) => setMatatuForm((f) => ({ ...f, till: e.target.value }))}
+            />
+            <select
+              value={matatuForm.sacco}
+              onChange={(e) => setMatatuForm((f) => ({ ...f, sacco: e.target.value }))}
+              style={{ padding: 10 }}
+            >
+              <option value="">Select SACCO</option>
+              {saccos.map((s) => (
+                <option key={s.id || s.sacco_id} value={s.id || s.sacco_id || ''}>
+                  {s.name || s.sacco_name || s.sacco_id}
+                </option>
+              ))}
+            </select>
+            <select value={matatuForm.body} disabled style={{ padding: 10 }}>
+              <option value={meta.type}>{meta.label}</option>
+            </select>
+            <button
+              className="btn"
+              type="button"
+              onClick={async () => {
+                setMatatuMsg('Saving...')
+                try {
+                  await sendJson('/api/admin/register-matatu', 'POST', {
+                    plate: matatuForm.plate.trim(),
+                    owner: matatuForm.owner.trim(),
+                    phone: matatuForm.phone.trim(),
+                    till: matatuForm.till.trim(),
+                    sacco: matatuForm.sacco || null,
+                    body_type: matatuForm.body || null,
+                  })
+                  setMatatuMsg(`${meta.label} registered`)
+                  setMatatuForm({ plate: '', owner: '', phone: '', till: '', sacco: '', body: meta.type })
+                  await fetchList<VehicleRow>('/api/admin/matatus')
+                    .then((rows) => setMatatus(rows))
+                    .catch((err) => setVehiclesError(err instanceof Error ? err.message : String(err)))
+                } catch (err) {
+                  setMatatuMsg(err instanceof Error ? err.message : 'Create failed')
+                }
+              }}
+            >
+              Register {meta.label}
+            </button>
+          </div>
+          <div className="muted small">{matatuMsg}</div>
+        </section>
+
+        <section className="card">
+          <div className="topline">
+            <h3 style={{ margin: 0 }}>{meta.plural}</h3>
+            <span className="muted small">
+              Showing {rows.length} record{rows.length === 1 ? '' : 's'}
+            </span>
+          </div>
+          {vehiclesError ? <div className="err">Vehicle load error: {vehiclesError}</div> : null}
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Plate</th>
+                  <th>Owner</th>
+                  <th>Phone</th>
+                  <th>SACCO</th>
+                  <th>Type</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="muted">
+                      No vehicles yet.
+                    </td>
+                  </tr>
+                ) : (
+                  rows.map((v) => (
+                    <tr key={v.id || v.plate || v.registration}>
+                      <td>{v.plate || v.registration || '-'}</td>
+                      <td>{v.owner_name || '-'}</td>
+                      <td>{v.owner_phone || '-'}</td>
+                      <td>{v.sacco_name || v.sacco || '-'}</td>
+                      <td>{normalizeVehicleType(v.body_type || v.type) || '-'}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </>
+    )
+  }
+
   return (
     <DashboardShell title="System Admin" subtitle="React port of the system dashboard">
+      <nav className="sys-nav" aria-label="System admin sections">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            className={`sys-tab${activeTab === t.id ? ' active' : ''}`}
+            onClick={() => setActiveTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      {activeTab === 'overview' ? (
       <section className="card">
         <h3 style={{ margin: '0 0 8px' }}>Platform snapshot</h3>
         {overviewError ? <div className="err">Overview error: {overviewError}</div> : null}
@@ -620,238 +799,128 @@ const SystemDashboard = () => {
           </div>
         </div>
       </section>
+      ) : null}
 
-      <section className="card">
-        <div className="topline">
-          <h3 style={{ margin: 0 }}>SACCOs</h3>
-          <span className="muted small">
-            Showing {saccos.length} record{saccos.length === 1 ? '' : 's'}
-          </span>
-        </div>
-        {saccosError ? <div className="err">SACCO load error: {saccosError}</div> : null}
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Contact</th>
-                <th>Phone</th>
-                <th>Email</th>
-                <th>ID</th>
-              </tr>
-            </thead>
-            <tbody>
-              {saccos.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="muted">
-                    No SACCOs yet.
-                  </td>
-                </tr>
-              ) : (
-                saccos.map((sacco) => (
-                  <tr key={sacco.id || sacco.sacco_id || sacco.email}>
-                    <td>{sacco.name || sacco.sacco_name || '-'}</td>
-                    <td>{sacco.contact_name || '-'}</td>
-                    <td>{sacco.phone || sacco.contact_phone || '-'}</td>
-                    <td>{sacco.email || sacco.contact_email || '-'}</td>
-                    <td>{sacco.id || sacco.sacco_id || '-'}</td>
+      {activeTab === 'saccos' ? (
+        <>
+          <section className="card">
+            <h3 style={{ marginTop: 0 }}>Register SACCO</h3>
+            <div className="row">
+              <input
+                className="input"
+                placeholder="Name"
+                value={saccoForm.name}
+                onChange={(e) => setSaccoForm((f) => ({ ...f, name: e.target.value }))}
+              />
+              <input
+                className="input"
+                placeholder="Contact name"
+                value={saccoForm.contact_name}
+                onChange={(e) => setSaccoForm((f) => ({ ...f, contact_name: e.target.value }))}
+              />
+              <input
+                className="input"
+                placeholder="Phone"
+                value={saccoForm.contact_phone}
+                onChange={(e) => setSaccoForm((f) => ({ ...f, contact_phone: e.target.value }))}
+              />
+              <input
+                className="input"
+                placeholder="Email"
+                value={saccoForm.contact_email}
+                onChange={(e) => setSaccoForm((f) => ({ ...f, contact_email: e.target.value }))}
+              />
+              <input
+                className="input"
+                placeholder="Default till (optional)"
+                value={saccoForm.default_till}
+                onChange={(e) => setSaccoForm((f) => ({ ...f, default_till: e.target.value }))}
+              />
+              <button
+                className="btn"
+                type="button"
+                onClick={async () => {
+                  setSaccoMsg('Saving...')
+                  try {
+                    await sendJson('/api/admin/register-sacco', 'POST', {
+                      name: saccoForm.name.trim(),
+                      contact_name: saccoForm.contact_name.trim(),
+                      contact_phone: saccoForm.contact_phone.trim(),
+                      contact_email: saccoForm.contact_email.trim(),
+                      default_till: saccoForm.default_till.trim() || null,
+                    })
+                    setSaccoMsg('SACCO created')
+                    setSaccoForm({
+                      name: '',
+                      contact_name: '',
+                      contact_phone: '',
+                      contact_email: '',
+                      default_till: '',
+                    })
+                    await fetchList<SaccoRow>('/api/admin/saccos')
+                      .then((rows) => setSaccos(rows))
+                      .catch((err) => setSaccosError(err instanceof Error ? err.message : String(err)))
+                  } catch (err) {
+                    setSaccoMsg(err instanceof Error ? err.message : 'Create failed')
+                  }
+                }}
+              >
+                Register SACCO
+              </button>
+            </div>
+            <div className="muted small">{saccoMsg}</div>
+          </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>SACCOs</h3>
+              <span className="muted small">
+                Showing {saccos.length} record{saccos.length === 1 ? '' : 's'}
+              </span>
+            </div>
+            {saccosError ? <div className="err">SACCO load error: {saccosError}</div> : null}
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Contact</th>
+                    <th>Phone</th>
+                    <th>Email</th>
+                    <th>ID</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+                </thead>
+                <tbody>
+                  {saccos.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="muted">
+                        No SACCOs yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    saccos.map((sacco) => (
+                      <tr key={sacco.id || sacco.sacco_id || sacco.email}>
+                        <td>{sacco.name || sacco.sacco_name || '-'}</td>
+                        <td>{sacco.contact_name || '-'}</td>
+                        <td>{sacco.phone || sacco.contact_phone || '-'}</td>
+                        <td>{sacco.email || sacco.contact_email || '-'}</td>
+                        <td>{sacco.id || sacco.sacco_id || '-'}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      ) : null}
 
-      <section className="card">
-        <h3 style={{ marginTop: 0 }}>Register SACCO</h3>
-        <div className="row">
-          <input
-            className="input"
-            placeholder="Name"
-            value={saccoForm.name}
-            onChange={(e) => setSaccoForm((f) => ({ ...f, name: e.target.value }))}
-          />
-          <input
-            className="input"
-            placeholder="Contact name"
-            value={saccoForm.contact_name}
-            onChange={(e) => setSaccoForm((f) => ({ ...f, contact_name: e.target.value }))}
-          />
-          <input
-            className="input"
-            placeholder="Phone"
-            value={saccoForm.contact_phone}
-            onChange={(e) => setSaccoForm((f) => ({ ...f, contact_phone: e.target.value }))}
-          />
-          <input
-            className="input"
-            placeholder="Email"
-            value={saccoForm.contact_email}
-            onChange={(e) => setSaccoForm((f) => ({ ...f, contact_email: e.target.value }))}
-          />
-          <input
-            className="input"
-            placeholder="Default till (optional)"
-            value={saccoForm.default_till}
-            onChange={(e) => setSaccoForm((f) => ({ ...f, default_till: e.target.value }))}
-          />
-          <button
-            className="btn"
-            type="button"
-            onClick={async () => {
-              setSaccoMsg('Saving...')
-              try {
-                await sendJson('/api/admin/register-sacco', 'POST', {
-                  name: saccoForm.name.trim(),
-                  contact_name: saccoForm.contact_name.trim(),
-                  contact_phone: saccoForm.contact_phone.trim(),
-                  contact_email: saccoForm.contact_email.trim(),
-                  default_till: saccoForm.default_till.trim() || null,
-                })
-                setSaccoMsg('SACCO created')
-                setSaccoForm({
-                  name: '',
-                  contact_name: '',
-                  contact_phone: '',
-                  contact_email: '',
-                  default_till: '',
-                })
-                await fetchList<SaccoRow>('/api/admin/saccos')
-                  .then((rows) => setSaccos(rows))
-                  .catch((err) => setSaccosError(err instanceof Error ? err.message : String(err)))
-              } catch (err) {
-                setSaccoMsg(err instanceof Error ? err.message : 'Create failed')
-              }
-            }}
-          >
-            Register SACCO
-          </button>
-        </div>
-        <div className="muted small">{saccoMsg}</div>
-      </section>
+      {activeTab === 'matatu' ? renderVehicleTab(vehicleTabMeta.matatu) : null}
+      {activeTab === 'taxis' ? renderVehicleTab(vehicleTabMeta.taxis) : null}
+      {activeTab === 'bodabodas' ? renderVehicleTab(vehicleTabMeta.bodabodas) : null}
 
-      <section className="card">
-        <h3 style={{ marginTop: 0 }}>Register Vehicle</h3>
-        <div className="row">
-          <input
-            className="input"
-            placeholder="Plate (KDA123A)"
-            value={matatuForm.plate}
-            onChange={(e) => setMatatuForm((f) => ({ ...f, plate: e.target.value }))}
-          />
-          <input
-            className="input"
-            placeholder="Owner name"
-            value={matatuForm.owner}
-            onChange={(e) => setMatatuForm((f) => ({ ...f, owner: e.target.value }))}
-          />
-          <input
-            className="input"
-            placeholder="Owner phone"
-            value={matatuForm.phone}
-            onChange={(e) => setMatatuForm((f) => ({ ...f, phone: e.target.value }))}
-          />
-          <input
-            className="input"
-            placeholder="Till number"
-            value={matatuForm.till}
-            onChange={(e) => setMatatuForm((f) => ({ ...f, till: e.target.value }))}
-          />
-          <select
-            value={matatuForm.sacco}
-            onChange={(e) => setMatatuForm((f) => ({ ...f, sacco: e.target.value }))}
-            style={{ padding: 10 }}
-          >
-            <option value="">Select SACCO</option>
-            {saccos.map((s) => (
-              <option key={s.id || s.sacco_id} value={s.id || s.sacco_id || ''}>
-                {s.name || s.sacco_name || s.sacco_id}
-              </option>
-            ))}
-          </select>
-          <select
-            value={matatuForm.body}
-            onChange={(e) => setMatatuForm((f) => ({ ...f, body: e.target.value }))}
-            style={{ padding: 10 }}
-          >
-            <option value="">Type</option>
-            <option value="MATATU">Matatu</option>
-            <option value="TAXI">Taxi</option>
-            <option value="BODABODA">Boda</option>
-          </select>
-          <button
-            className="btn"
-            type="button"
-            onClick={async () => {
-              setMatatuMsg('Saving...')
-              try {
-                await sendJson('/api/admin/register-matatu', 'POST', {
-                  plate: matatuForm.plate.trim(),
-                  owner: matatuForm.owner.trim(),
-                  phone: matatuForm.phone.trim(),
-                  till: matatuForm.till.trim(),
-                  sacco: matatuForm.sacco || null,
-                  body_type: matatuForm.body || null,
-                })
-                setMatatuMsg('Vehicle registered')
-                setMatatuForm({ plate: '', owner: '', phone: '', till: '', sacco: '', body: '' })
-                await fetchList<VehicleRow>('/api/admin/matatus')
-                  .then((rows) => setMatatus(rows))
-                  .catch((err) => setVehiclesError(err instanceof Error ? err.message : String(err)))
-              } catch (err) {
-                setMatatuMsg(err instanceof Error ? err.message : 'Create failed')
-              }
-            }}
-          >
-            Register
-          </button>
-        </div>
-        <div className="muted small">{matatuMsg}</div>
-      </section>
-
-      <section className="card">
-        <div className="topline">
-          <h3 style={{ margin: 0 }}>Vehicles</h3>
-          <span className="muted small">
-            Showing {matatus.length} record{matatus.length === 1 ? '' : 's'}
-          </span>
-        </div>
-        {vehiclesError ? <div className="err">Vehicle load error: {vehiclesError}</div> : null}
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Plate</th>
-                <th>Owner</th>
-                <th>Phone</th>
-                <th>SACCO</th>
-                <th>Type</th>
-              </tr>
-            </thead>
-            <tbody>
-              {matatus.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="muted">
-                    No vehicles yet.
-                  </td>
-                </tr>
-              ) : (
-                matatus.map((v) => (
-                  <tr key={v.id || v.plate || v.registration}>
-                    <td>{v.plate || v.registration || '-'}</td>
-                    <td>{v.owner_name || '-'}</td>
-                    <td>{v.owner_phone || '-'}</td>
-                    <td>{v.sacco_name || v.sacco || '-'}</td>
-                    <td>{v.body_type || v.type || '-'}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
+      {activeTab === 'finance' ? (
+        <>
       <section className="card">
         <h3 style={{ marginTop: 0 }}>Finance overview</h3>
         {financeError ? <div className="err">Finance error: {financeError}</div> : null}
@@ -1051,6 +1120,58 @@ const SystemDashboard = () => {
           </div>
         </div>
       </section>
+        </>
+      ) : null}
+
+      {activeTab === 'ussd' ? (
+        <>
+      <section className="card">
+        <div className="topline">
+          <h3 style={{ margin: 0 }}>USSD assign</h3>
+          <button
+            className="btn"
+            type="button"
+            onClick={async () => {
+              setUssdMsg('Assigning...')
+              try {
+                await sendJson('/api/admin/ussd/pool/assign-next', 'POST', {
+                  sacco_id: ussdForm.sacco_id || null,
+                  telco: ussdForm.telco || null,
+                })
+                setUssdMsg('Assigned next USSD code')
+                await loadUssd()
+                await refreshOverview()
+              } catch (err) {
+                setUssdMsg(err instanceof Error ? err.message : 'Assign failed')
+              }
+            }}
+          >
+            Assign next
+          </button>
+        </div>
+        <div className="row" style={{ marginTop: 8 }}>
+          <select
+            value={ussdForm.sacco_id}
+            onChange={(e) => setUssdForm((f) => ({ ...f, sacco_id: e.target.value }))}
+            style={{ padding: 10, maxWidth: 220 }}
+          >
+            <option value="">SACCO (optional)</option>
+            {saccos.map((s) => (
+              <option key={s.id || s.sacco_id} value={s.id || s.sacco_id || ''}>
+                {s.name || s.sacco_name || s.sacco_id}
+              </option>
+            ))}
+          </select>
+          <input
+            className="input"
+            placeholder="Telco (optional)"
+            value={ussdForm.telco}
+            onChange={(e) => setUssdForm((f) => ({ ...f, telco: e.target.value }))}
+            style={{ maxWidth: 200 }}
+          />
+          <span className="muted small">{ussdMsg}</span>
+        </div>
+      </section>
 
       <section className="grid g2">
         <div className="card">
@@ -1180,7 +1301,11 @@ const SystemDashboard = () => {
           </div>
         </div>
       </section>
+        </>
+      ) : null}
 
+      {activeTab === 'routes' ? (
+        <>
       <section className="card">
         <h3 style={{ marginTop: 0 }}>Routes overview</h3>
         {routeError ? <div className="err">Route error: {routeError}</div> : null}
@@ -1480,55 +1605,10 @@ const SystemDashboard = () => {
         </div>
       ) : null}
     </section>
+        </>
+      ) : null}
 
-      <section className="card">
-        <div className="topline">
-          <h3 style={{ margin: 0 }}>USSD assign</h3>
-          <button
-            className="btn"
-            type="button"
-            onClick={async () => {
-              setUssdMsg('Assigning...')
-              try {
-                await sendJson('/api/admin/ussd/pool/assign-next', 'POST', {
-                  sacco_id: ussdForm.sacco_id || null,
-                  telco: ussdForm.telco || null,
-                })
-                setUssdMsg('Assigned next USSD code')
-                await loadUssd()
-                await refreshOverview()
-              } catch (err) {
-                setUssdMsg(err instanceof Error ? err.message : 'Assign failed')
-              }
-            }}
-          >
-            Assign next
-          </button>
-        </div>
-        <div className="row" style={{ marginTop: 8 }}>
-          <select
-            value={ussdForm.sacco_id}
-            onChange={(e) => setUssdForm((f) => ({ ...f, sacco_id: e.target.value }))}
-            style={{ padding: 10, maxWidth: 220 }}
-          >
-            <option value="">SACCO (optional)</option>
-            {saccos.map((s) => (
-              <option key={s.id || s.sacco_id} value={s.id || s.sacco_id || ''}>
-                {s.name || s.sacco_name || s.sacco_id}
-              </option>
-            ))}
-          </select>
-          <input
-            className="input"
-            placeholder="Telco (optional)"
-            value={ussdForm.telco}
-            onChange={(e) => setUssdForm((f) => ({ ...f, telco: e.target.value }))}
-            style={{ maxWidth: 200 }}
-          />
-          <span className="muted small">{ussdMsg}</span>
-        </div>
-      </section>
-
+      {activeTab === 'logins' ? (
       <section className="card">
         <div className="topline">
           <h3 style={{ margin: 0 }}>Logins</h3>
@@ -1672,7 +1752,9 @@ const SystemDashboard = () => {
           </table>
         </div>
       </section>
+      ) : null}
 
+      {activeTab === 'routes' ? (
       <section className="card">
         <h3 style={{ marginTop: 0 }}>SMS & routes</h3>
         <p className="muted" style={{ marginTop: 6 }}>
@@ -1680,6 +1762,7 @@ const SystemDashboard = () => {
           <a href="/public/system/dashboard.html">/public/system/dashboard.html</a>. We will mirror those actions in React next.
         </p>
       </section>
+      ) : null}
     </DashboardShell>
   )
 }

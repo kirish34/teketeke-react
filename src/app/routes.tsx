@@ -1,6 +1,8 @@
 import type { RouteObject } from "react-router-dom";
 import { Navigate } from "react-router-dom";
 import { RequireRole } from "../auth/RequireRole";
+import type { Role } from "../lib/types";
+import { useAuth } from "../state/auth";
 
 import { Login } from "../auth/Login";
 import { RoleSelect } from "../auth/RoleSelect";
@@ -20,8 +22,38 @@ import SaccoApprovals from "../pages/SaccoApprovals";
 import WorkerMonitor from "../pages/WorkerMonitor";
 import WithdrawalPhonesRoute from "../pages/WithdrawalPhonesRoute";
 
+const defaultRouteByRole: Record<Role, string> = {
+  super_admin: "/system",
+  system_admin: "/system",
+  sacco_admin: "/sacco",
+  sacco_staff: "/sacco/staff",
+  matatu_owner: "/matatu/owner",
+  matatu_staff: "/matatu/staff",
+  taxi: "/taxi",
+  boda: "/boda",
+};
+
+function HomeRedirect() {
+  const { user, loading, error } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="app-main">
+        <div className="card">Checking access...</div>
+      </div>
+    );
+  }
+
+  if (error || !user) {
+    return <Navigate to="/role" replace />;
+  }
+
+  const target = defaultRouteByRole[user.role] || "/role";
+  return <Navigate to={target} replace />;
+}
+
 export const routes: RouteObject[] = [
-  { path: "/", element: <Navigate to="/role" replace /> },
+  { path: "/", element: <HomeRedirect /> },
   { path: "/login", element: <Login /> },
   { path: "/role", element: <RoleSelect /> },
   {
