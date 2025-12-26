@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    { "source": "/u/:path*", "destination": "/api/index.js" },
+    { "source": "/api/:path*", "destination": "/api/index.js" },
+    { "source": "/mpesa/:path*", "destination": "/api/index.js" },
+    { "source": "/test/:path*", "destination": "/api/index.js" },
+    { "source": "/wallets/:path*", "destination": "/api/index.js" },
+    { "source": "/saccos/:path*", "destination": "/api/index.js" },
+    { "source": "/healthz", "destination": "/api/index.js" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
