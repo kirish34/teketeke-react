@@ -491,12 +491,14 @@ async function registerWalletForEntity({ entityType, entityId, numericRef }) {
       saccoId = entityId;
       break;
     case 'TAXI':
-      tableName = 'taxis';
+      tableName = 'matatus';
       walletType = 'matatu';
+      matatuId = entityId;
       break;
     case 'BODA':
-      tableName = 'bodabodas';
+      tableName = 'matatus';
       walletType = 'matatu';
+      matatuId = entityId;
       break;
     default:
       throw new Error(`Unknown entityType ${entityType}`);
