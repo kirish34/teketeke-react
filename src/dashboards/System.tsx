@@ -129,6 +129,7 @@ type SystemTabId =
   | 'taxis'
   | 'bodabodas'
   | 'ussd'
+  | 'paybill'
   | 'sms'
   | 'logins'
   | 'routes'
@@ -148,6 +149,7 @@ type SaccoRow = {
   contact_phone?: string
   email?: string
   contact_email?: string
+  default_till?: string
 }
 
 type VehicleRow = {
@@ -157,11 +159,13 @@ type VehicleRow = {
   vehicle_type?: string
   owner_name?: string
   owner_phone?: string
+  sacco_id?: string
   sacco_name?: string
   sacco?: string
   body_type?: string
   type?: string
   number_plate?: string
+  till_number?: string
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -264,6 +268,16 @@ function formatUssdOwner(row?: UssdPoolRow | null) {
   if (!row) return '-'
   if (row.allocated_to_type) return `${row.allocated_to_type} ${row.allocated_to_id || ''}`.trim()
   return row.sacco_id || row.allocated_to_id || '-'
+}
+
+function normalizeUssdInput(raw?: string) {
+  const trimmed = String(raw || '').trim()
+  if (!trimmed) return ''
+  const compact = trimmed.replace(/\s+/g, '')
+  if (compact.includes('*') || compact.includes('#')) {
+    return compact.endsWith('#') ? compact : `${compact}#`
+  }
+  return compact
 }
 type LatLng = [number, number]
 
@@ -378,6 +392,16 @@ const SystemDashboard = () => {
   const [ussdImportMsg, setUssdImportMsg] = useState('')
   const [ussdReleaseMsg, setUssdReleaseMsg] = useState('')
 
+  const [paybillForm, setPaybillForm] = useState({
+    level: 'MATATU',
+    sacco_id: '',
+    matatu_id: '',
+    paybill_account: '',
+    ussd_code: '',
+  })
+  const [paybillMsg, setPaybillMsg] = useState('')
+  const [paybillSearch, setPaybillSearch] = useState('')
+
   const [logins, setLogins] = useState<AdminLogin[]>([])
   const [loginError, setLoginError] = useState<string | null>(null)
   const [loginForm, setLoginForm] = useState({
@@ -402,6 +426,7 @@ const SystemDashboard = () => {
     { id: 'taxis', label: 'Taxis' },
     { id: 'bodabodas', label: 'BodaBodas' },
     { id: 'ussd', label: 'USSD' },
+    { id: 'paybill', label: 'Paybill' },
     { id: 'sms', label: 'SMS' },
     { id: 'logins', label: 'Logins' },
     { id: 'routes', label: 'Routes Overview' },
@@ -445,6 +470,48 @@ const SystemDashboard = () => {
     }
   }, [routePathText])
 
+  const matatuById = useMemo(() => {
+    const map = new Map<string, VehicleRow>()
+    matatus.forEach((row) => {
+      if (row.id) map.set(row.id, row)
+    })
+    return map
+  }, [matatus])
+
+  const saccoById = useMemo(() => {
+    const map = new Map<string, SaccoRow>()
+    saccos.forEach((row) => {
+      const id = row.id || row.sacco_id
+      if (id) map.set(id, row)
+    })
+    return map
+  }, [saccos])
+
+  const ussdByMatatuId = useMemo(() => {
+    const map = new Map<string, UssdPoolRow>()
+    ;(ussd?.allocated || []).forEach((row) => {
+      const type = (row.allocated_to_type || '').toUpperCase()
+      if (type === 'MATATU' && row.allocated_to_id) {
+        map.set(row.allocated_to_id, row)
+      }
+    })
+    return map
+  }, [ussd?.allocated])
+
+  const ussdBySaccoId = useMemo(() => {
+    const map = new Map<string, UssdPoolRow>()
+    ;(ussd?.allocated || []).forEach((row) => {
+      const type = (row.allocated_to_type || '').toUpperCase()
+      if (type === 'SACCO' && row.allocated_to_id) {
+        map.set(row.allocated_to_id, row)
+      }
+      if (!type && row.sacco_id) {
+        map.set(row.sacco_id, row)
+      }
+    })
+    return map
+  }, [ussd?.allocated])
+
   const filteredUssdAvailable = useMemo(() => {
     const rows = ussd?.available || []
     const q = ussdFilter.trim().toLowerCase()
@@ -481,6 +548,63 @@ const SystemDashboard = () => {
     () => filteredSmsRows.filter((row) => row.id && (row.status === 'FAILED' || row.status === 'PENDING')),
     [filteredSmsRows],
   )
+
+  const paybillRows = useMemo(() => {
+    const rows: Array<{
+      type: 'MATATU' | 'SACCO'
+      id: string
+      label: string
+      paybill_account: string
+      ussd_code: string
+      ussd_assigned_at: string
+      parent: string
+    }> = []
+
+    matatus.forEach((row) => {
+      if (!row.id) return
+      const ussdRow = ussdByMatatuId.get(row.id)
+      const sacco = row.sacco_id ? saccoById.get(row.sacco_id) : null
+      const saccoName = row.sacco_name || sacco?.name || sacco?.sacco_name || row.sacco || ''
+      rows.push({
+        type: 'MATATU',
+        id: row.id,
+        label: formatVehicleLabel(row),
+        paybill_account: row.till_number || '',
+        ussd_code: ussdRow ? formatUssdCode(ussdRow) : '',
+        ussd_assigned_at: ussdRow?.allocated_at || '',
+        parent: saccoName,
+      })
+    })
+
+    saccos.forEach((row) => {
+      const id = row.id || row.sacco_id
+      if (!id) return
+      const ussdRow = ussdBySaccoId.get(id)
+      rows.push({
+        type: 'SACCO',
+        id,
+        label: row.name || row.sacco_name || id,
+        paybill_account: row.default_till || '',
+        ussd_code: ussdRow ? formatUssdCode(ussdRow) : '',
+        ussd_assigned_at: ussdRow?.allocated_at || '',
+        parent: '',
+      })
+    })
+
+    return rows
+  }, [matatus, saccos, saccoById, ussdByMatatuId, ussdBySaccoId])
+
+  const filteredPaybillRows = useMemo(() => {
+    const q = paybillSearch.trim().toLowerCase()
+    if (!q) return paybillRows
+    return paybillRows.filter((row) => {
+      const hay = [row.type, row.label, row.id, row.parent, row.paybill_account, row.ussd_code]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return hay.includes(q)
+    })
+  }, [paybillRows, paybillSearch])
 
   const normalizeVehicleType = (value?: string) => {
     const val = (value || '').toUpperCase()
@@ -757,6 +881,139 @@ const SystemDashboard = () => {
       await refreshOverview()
     } catch (err) {
       setUssdImportMsg(err instanceof Error ? err.message : 'Import failed')
+    }
+  }
+
+  function resolveUssdMatch(input: string) {
+    const normalized = normalizeUssdInput(input)
+    const hasSymbols = /[*#]/.test(normalized)
+    const digits = normalized.replace(/\D/g, '')
+    if (!normalized) {
+      return { normalized: '', digits: '', row: null, source: null, hasSymbols }
+    }
+    const available = ussd?.available || []
+    const allocated = ussd?.allocated || []
+
+    const matches = (row: UssdPoolRow) => {
+      const full = row.full_code || row.code || ''
+      if (hasSymbols) {
+        return full === normalized || row.code === normalized
+      }
+      if (row.base && digits && row.base === digits) return true
+      return false
+    }
+
+    const allocatedRow = allocated.find(matches)
+    if (allocatedRow) return { normalized, digits, row: allocatedRow, source: 'allocated', hasSymbols }
+
+    const availableRow = available.find(matches)
+    if (availableRow) return { normalized, digits, row: availableRow, source: 'available', hasSymbols }
+
+    return { normalized, digits, row: null, source: null, hasSymbols }
+  }
+
+  function isSameUssdTarget(row: UssdPoolRow, level: string, targetId: string) {
+    const type = (row.allocated_to_type || '').toUpperCase()
+    if (level === 'MATATU') {
+      return type === 'MATATU' && row.allocated_to_id === targetId
+    }
+    if (level === 'SACCO') {
+      if (type === 'SACCO' && row.allocated_to_id === targetId) return true
+      if (!type && row.sacco_id === targetId) return true
+    }
+    return false
+  }
+
+  async function assignPaybill() {
+    setPaybillMsg('Saving...')
+    const level = paybillForm.level
+    const targetId = level === 'MATATU' ? paybillForm.matatu_id : paybillForm.sacco_id
+    const paybillAccount = paybillForm.paybill_account.trim()
+    const ussdInput = paybillForm.ussd_code.trim()
+
+    if (!targetId) {
+      setPaybillMsg(`Select a ${level === 'MATATU' ? 'matatu' : 'SACCO'}`)
+      return
+    }
+    if (!paybillAccount) {
+      setPaybillMsg('Enter a paybill account')
+      return
+    }
+
+    try {
+      if (level === 'MATATU') {
+        await sendJson('/api/admin/update-matatu', 'POST', { id: targetId, till_number: paybillAccount })
+        try {
+          const rows = await fetchList<VehicleRow>('/api/admin/matatus')
+          setMatatus(rows)
+        } catch (err) {
+          setVehiclesError(err instanceof Error ? err.message : String(err))
+        }
+      } else {
+        await sendJson('/api/admin/update-sacco', 'POST', { id: targetId, default_till: paybillAccount })
+        try {
+          const rows = await fetchList<SaccoRow>('/api/admin/saccos')
+          setSaccos(rows)
+        } catch (err) {
+          setSaccosError(err instanceof Error ? err.message : String(err))
+        }
+      }
+    } catch (err) {
+      setPaybillMsg(err instanceof Error ? err.message : 'Paybill update failed')
+      return
+    }
+
+    let msg = 'Paybill account saved'
+
+    if (ussdInput) {
+      const match = resolveUssdMatch(ussdInput)
+      if (match.row && match.source === 'allocated') {
+        if (isSameUssdTarget(match.row, level, targetId)) {
+          msg = `${msg}. USSD already linked`
+        } else {
+          msg = `${msg}. USSD ${formatUssdCode(match.row)} is allocated to ${formatUssdOwner(match.row)}`
+          setPaybillMsg(msg)
+          return
+        }
+      } else {
+        const fullCode = match.row?.full_code || match.row?.code || (match.hasSymbols ? match.normalized : '')
+        if (!fullCode) {
+          msg = `${msg}. USSD code not found in pool`
+        } else {
+          try {
+            await sendJson('/api/admin/ussd/bind-from-pool', 'POST', {
+              ussd_code: fullCode,
+              level,
+              sacco_id: level === 'SACCO' ? targetId : null,
+              matatu_id: level === 'MATATU' ? targetId : null,
+            })
+            await loadUssd()
+            await refreshOverview()
+            msg = `${msg}. USSD linked`
+          } catch (err) {
+            msg = `${msg}. USSD merge failed: ${err instanceof Error ? err.message : 'Bind failed'}`
+          }
+        }
+      }
+    }
+
+    setPaybillMsg(msg)
+    setPaybillForm((f) => ({ ...f, ussd_code: '' }))
+  }
+
+  async function refreshPaybillData() {
+    await loadUssd()
+    try {
+      const rows = await fetchList<SaccoRow>('/api/admin/saccos')
+      setSaccos(rows)
+    } catch (err) {
+      setSaccosError(err instanceof Error ? err.message : String(err))
+    }
+    try {
+      const rows = await fetchList<VehicleRow>('/api/admin/matatus')
+      setMatatus(rows)
+    } catch (err) {
+      setVehiclesError(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -1678,6 +1935,155 @@ const SystemDashboard = () => {
               </tbody>
             </table>
           </div>
+        </div>
+      </section>
+        </>
+      ) : null}
+
+      {activeTab === 'paybill' ? (
+        <>
+      <section className="card">
+        <div className="topline">
+          <h3 style={{ margin: 0 }}>Paybill assignment</h3>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn ghost" type="button" onClick={refreshPaybillData}>
+              Refresh
+            </button>
+          </div>
+        </div>
+        <div className="grid g2">
+          <label className="muted small">
+            Level
+            <select
+              value={paybillForm.level}
+              onChange={(e) =>
+                setPaybillForm((f) => ({
+                  ...f,
+                  level: e.target.value,
+                  sacco_id: '',
+                  matatu_id: '',
+                  paybill_account: '',
+                  ussd_code: '',
+                }))
+              }
+              style={{ padding: 10 }}
+            >
+              <option value="MATATU">MATATU</option>
+              <option value="SACCO">SACCO</option>
+            </select>
+          </label>
+          {paybillForm.level === 'MATATU' ? (
+            <label className="muted small">
+              Matatu
+              <select
+                value={paybillForm.matatu_id}
+                onChange={(e) => setPaybillForm((f) => ({ ...f, matatu_id: e.target.value }))}
+                style={{ padding: 10 }}
+              >
+                <option value="">Select matatu</option>
+                {vehiclesFor('MATATU').map((v) => (
+                  <option key={v.id || formatVehicleLabel(v)} value={v.id || ''}>
+                    {formatVehicleLabel(v)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <label className="muted small">
+              SACCO
+              <select
+                value={paybillForm.sacco_id}
+                onChange={(e) => setPaybillForm((f) => ({ ...f, sacco_id: e.target.value }))}
+                style={{ padding: 10 }}
+              >
+                <option value="">Select SACCO</option>
+                {saccos.map((s) => (
+                  <option key={s.id || s.sacco_id} value={s.id || s.sacco_id || ''}>
+                    {s.name || s.sacco_name || s.sacco_id}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className="muted small">
+            Paybill account
+            <input
+              className="input"
+              value={paybillForm.paybill_account}
+              onChange={(e) => setPaybillForm((f) => ({ ...f, paybill_account: e.target.value }))}
+              placeholder="Paybill account"
+            />
+          </label>
+          <label className="muted small">
+            USSD code (optional)
+            <input
+              className="input"
+              value={paybillForm.ussd_code}
+              onChange={(e) => setPaybillForm((f) => ({ ...f, ussd_code: e.target.value }))}
+              placeholder="*001*11013#"
+            />
+          </label>
+        </div>
+        <div className="row" style={{ marginTop: 8 }}>
+          <button className="btn" type="button" onClick={assignPaybill}>
+            Save paybill
+          </button>
+          <span className="muted small">{paybillMsg}</span>
+        </div>
+        <p className="muted small" style={{ marginTop: 8 }}>
+          Add a USSD code to bind it from the pool to the same matatu or SACCO.
+        </p>
+      </section>
+
+      <section className="card">
+        <div className="topline">
+          <h3 style={{ margin: 0 }}>Paybill accounts</h3>
+          <div className="row" style={{ gap: 8 }}>
+            <input
+              className="input"
+              placeholder="Search paybill or USSD"
+              value={paybillSearch}
+              onChange={(e) => setPaybillSearch(e.target.value)}
+              style={{ maxWidth: 240 }}
+            />
+            <span className="muted small">{filteredPaybillRows.length} row(s)</span>
+          </div>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Entity</th>
+                <th>Parent SACCO</th>
+                <th>Paybill</th>
+                <th>USSD code</th>
+                <th>USSD assigned</th>
+                <th>ID</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredPaybillRows.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="muted">
+                    No paybill records found.
+                  </td>
+                </tr>
+              ) : (
+                filteredPaybillRows.map((row) => (
+                  <tr key={`${row.type}-${row.id}`}>
+                    <td>{row.type}</td>
+                    <td>{row.label}</td>
+                    <td>{row.parent || '-'}</td>
+                    <td>{row.paybill_account || '-'}</td>
+                    <td>{row.ussd_code || '-'}</td>
+                    <td>{row.ussd_assigned_at ? new Date(row.ussd_assigned_at).toLocaleString() : '-'}</td>
+                    <td className="mono">{row.id}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </section>
         </>

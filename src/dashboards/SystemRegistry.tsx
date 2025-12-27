@@ -11,6 +11,7 @@ type SystemTabId =
   | 'taxis'
   | 'bodabodas'
   | 'ussd'
+  | 'paybill'
   | 'sms'
   | 'logins'
   | 'routes'
@@ -145,6 +146,7 @@ export default function SystemRegistry() {
     { id: 'taxis', label: 'Taxis' },
     { id: 'bodabodas', label: 'BodaBodas' },
     { id: 'ussd', label: 'USSD' },
+    { id: 'paybill', label: 'Paybill' },
     { id: 'sms', label: 'SMS' },
     { id: 'logins', label: 'Logins' },
     { id: 'routes', label: 'Routes Overview' },
