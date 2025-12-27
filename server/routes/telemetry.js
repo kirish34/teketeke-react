@@ -56,6 +56,19 @@ function updateDeviceLastSeen(deviceId, ts) {
   writeJson(DEVICES_FILE, store);
 }
 
+function updateDeviceStatus(deviceId, ts) {
+  if (!supabaseAdmin || !deviceId) return;
+  supabaseAdmin
+    .from('registry_devices')
+    .update({ last_seen_at: ts, status: 'online' })
+    .eq('id', deviceId)
+    .eq('domain', 'teketeke')
+    .then(({ error }) => {
+      if (error) console.warn('[telemetry] registry update failed', error.message);
+    })
+    .catch((err) => console.warn('[telemetry] registry update failed', err.message));
+}
+
 function ensureTelemetryAuth(req, res, next) {
   if (!TELEMETRY_TOKEN) return res.status(503).json({ ok: false, error: 'telemetry disabled: missing TELEMETRY_TOKEN' });
   const got = req.headers['x-telemetry-key'] || '';
@@ -89,6 +102,7 @@ router.post('/device/heartbeat', ensureTelemetryAuth, (req, res) => {
 
   appendJsonl(file, record);
   updateDeviceLastSeen(body.device_id, ts);
+  updateDeviceStatus(body.device_id, ts);
 
   if (supabaseAdmin) {
     supabaseAdmin
@@ -140,6 +154,7 @@ router.post('/device/telemetry', ensureTelemetryAuth, (req, res) => {
   };
 
   appendJsonl(file, record);
+  updateDeviceStatus(body.device_id, ts);
   if (supabaseAdmin) {
     supabaseAdmin
       .from('device_telemetry')
