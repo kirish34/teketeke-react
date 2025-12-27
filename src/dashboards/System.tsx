@@ -96,6 +96,31 @@ type SmsRow = {
   error_message?: string
 }
 
+type SmsTemplateRow = {
+  code?: string
+  label?: string
+  body?: string
+  is_active?: boolean
+  updated_at?: string
+}
+
+type SmsSettings = {
+  sender_id?: string | null
+  quiet_hours_start?: string | null
+  quiet_hours_end?: string | null
+  fee_paid_enabled?: boolean
+  fee_failed_enabled?: boolean
+  balance_enabled?: boolean
+  eod_enabled?: boolean
+  payout_paid_enabled?: boolean
+  payout_failed_enabled?: boolean
+  savings_paid_enabled?: boolean
+  savings_balance_enabled?: boolean
+  loan_paid_enabled?: boolean
+  loan_failed_enabled?: boolean
+  loan_balance_enabled?: boolean
+}
+
 type RouteUsageRow = {
   sacco_id?: string
   sacco_name?: string
@@ -280,6 +305,37 @@ function normalizeUssdInput(raw?: string) {
   return compact
 }
 
+const smsSettingsDefaults: SmsSettings = {
+  sender_id: '',
+  quiet_hours_start: '',
+  quiet_hours_end: '',
+  fee_paid_enabled: false,
+  fee_failed_enabled: true,
+  balance_enabled: true,
+  eod_enabled: true,
+  payout_paid_enabled: false,
+  payout_failed_enabled: true,
+  savings_paid_enabled: false,
+  savings_balance_enabled: true,
+  loan_paid_enabled: false,
+  loan_failed_enabled: true,
+  loan_balance_enabled: true,
+}
+
+const smsTemplateHints: Record<string, string> = {
+  fee_paid: 'Tokens: plate, amount, ref, balance',
+  fee_failed: 'Tokens: plate, amount, reason',
+  balance_request: 'Tokens: plate, balance, available, date',
+  eod_summary: 'Tokens: plate, collected, fee, savings, loan_paid, payout, balance, date',
+  payout_paid: 'Tokens: plate, amount, phone, ref, balance',
+  payout_failed: 'Tokens: plate, amount, reason, ref',
+  savings_paid: 'Tokens: plate, amount, savings_balance',
+  savings_balance: 'Tokens: plate, savings_balance, date',
+  loan_paid: 'Tokens: plate, amount, loan_balance',
+  loan_failed: 'Tokens: plate, amount, reason',
+  loan_balance: 'Tokens: plate, loan_balance, next_due',
+}
+
 function ussdDigitalRoot(value: string | number) {
   const num = Number(value)
   if (!Number.isFinite(num) || num <= 0) return null
@@ -352,6 +408,12 @@ const SystemDashboard = () => {
   const [smsSearch, setSmsSearch] = useState('')
   const [smsRows, setSmsRows] = useState<SmsRow[]>([])
   const [smsError, setSmsError] = useState<string | null>(null)
+  const [smsTemplates, setSmsTemplates] = useState<SmsTemplateRow[]>([])
+  const [smsTemplatesError, setSmsTemplatesError] = useState<string | null>(null)
+  const [smsTemplatesMsg, setSmsTemplatesMsg] = useState('')
+  const [smsSettingsForm, setSmsSettingsForm] = useState<SmsSettings>({ ...smsSettingsDefaults })
+  const [smsSettingsError, setSmsSettingsError] = useState<string | null>(null)
+  const [smsSettingsMsg, setSmsSettingsMsg] = useState('')
 
   const [routeUsage, setRouteUsage] = useState<RouteUsageRow[]>([])
   const [routeError, setRouteError] = useState<string | null>(null)
@@ -1124,6 +1186,69 @@ const SystemDashboard = () => {
     }
   }
 
+  async function loadSmsSettings() {
+    try {
+      const data = await fetchJson<{ settings?: SmsSettings | null }>('/api/admin/sms/settings')
+      const settings = data?.settings || {}
+      setSmsSettingsForm({ ...smsSettingsDefaults, ...settings })
+      setSmsSettingsError(null)
+    } catch (err) {
+      setSmsSettingsError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function loadSmsTemplates() {
+    try {
+      const rows = await fetchList<SmsTemplateRow>('/api/admin/sms/templates')
+      setSmsTemplates(rows)
+      setSmsTemplatesError(null)
+    } catch (err) {
+      setSmsTemplates([])
+      setSmsTemplatesError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  function updateSmsTemplate(code: string | undefined, patch: Partial<SmsTemplateRow>) {
+    if (!code) return
+    setSmsTemplates((rows) => rows.map((row) => (row.code === code ? { ...row, ...patch } : row)))
+  }
+
+  async function saveSmsSettings() {
+    setSmsSettingsMsg('Saving...')
+    try {
+      const payload = { ...smsSettingsForm }
+      const res = await sendJson<{ settings?: SmsSettings }>('/api/admin/sms/settings', 'PATCH', payload)
+      setSmsSettingsForm({ ...smsSettingsDefaults, ...(res?.settings || payload) })
+      setSmsSettingsMsg('SMS settings saved')
+    } catch (err) {
+      setSmsSettingsMsg(err instanceof Error ? err.message : 'Save failed')
+    }
+  }
+
+  async function saveSmsTemplate(code?: string) {
+    if (!code) return
+    const row = smsTemplates.find((item) => item.code === code)
+    if (!row) return
+    setSmsTemplatesMsg(`Saving ${code}...`)
+    try {
+      const res = await sendJson<{ template?: SmsTemplateRow }>(
+        `/api/admin/sms/templates/${encodeURIComponent(code)}`,
+        'PATCH',
+        {
+          label: row.label || '',
+          body: row.body || '',
+          is_active: row.is_active ?? true,
+        },
+      )
+      if (res?.template) {
+        setSmsTemplates((items) => items.map((item) => (item.code === code ? res.template || item : item)))
+      }
+      setSmsTemplatesMsg(`Saved ${code}`)
+    } catch (err) {
+      setSmsTemplatesMsg(err instanceof Error ? err.message : 'Save failed')
+    }
+  }
+
   async function retrySms(id?: string) {
     if (!id) return
     try {
@@ -1258,6 +1383,8 @@ const SystemDashboard = () => {
       await loadWithdrawals('', getRange('month'))
       await loadUssd()
       await loadSms('')
+      await loadSmsSettings()
+      await loadSmsTemplates()
       await loadRouteUsage()
       await loadRoutes()
       await loadLogins()
@@ -2278,6 +2405,226 @@ const SystemDashboard = () => {
 
       {activeTab === 'sms' ? (
         <>
+      <section className="card" style={{ background: '#f8fafc' }}>
+        <div className="topline">
+          <h3 style={{ margin: 0 }}>SMS settings</h3>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn ghost" type="button" onClick={() => void loadSmsSettings()}>
+              Refresh
+            </button>
+            <button className="btn" type="button" onClick={saveSmsSettings}>
+              Save settings
+            </button>
+          </div>
+        </div>
+        {smsSettingsError ? <div className="err">SMS settings error: {smsSettingsError}</div> : null}
+        <div className="grid g2">
+          <label className="muted small">
+            Sender ID
+            <input
+              className="input"
+              value={smsSettingsForm.sender_id || ''}
+              onChange={(e) => setSmsSettingsForm((f) => ({ ...f, sender_id: e.target.value }))}
+              placeholder="TEKETEKE"
+            />
+          </label>
+          <label className="muted small">
+            Quiet hours start
+            <input
+              className="input"
+              value={smsSettingsForm.quiet_hours_start || ''}
+              onChange={(e) => setSmsSettingsForm((f) => ({ ...f, quiet_hours_start: e.target.value }))}
+              placeholder="22:00"
+            />
+          </label>
+          <label className="muted small">
+            Quiet hours end
+            <input
+              className="input"
+              value={smsSettingsForm.quiet_hours_end || ''}
+              onChange={(e) => setSmsSettingsForm((f) => ({ ...f, quiet_hours_end: e.target.value }))}
+              placeholder="06:00"
+            />
+          </label>
+        </div>
+        <div className="grid g2" style={{ marginTop: 10 }}>
+          <label className="muted small">
+            <input
+              type="checkbox"
+              checked={!!smsSettingsForm.fee_paid_enabled}
+              onChange={(e) => setSmsSettingsForm((f) => ({ ...f, fee_paid_enabled: e.target.checked }))}
+              style={{ marginRight: 6 }}
+            />
+            Daily fee paid
+          </label>
+          <label className="muted small">
+            <input
+              type="checkbox"
+              checked={!!smsSettingsForm.fee_failed_enabled}
+              onChange={(e) => setSmsSettingsForm((f) => ({ ...f, fee_failed_enabled: e.target.checked }))}
+              style={{ marginRight: 6 }}
+            />
+            Daily fee failed
+          </label>
+          <label className="muted small">
+            <input
+              type="checkbox"
+              checked={!!smsSettingsForm.balance_enabled}
+              onChange={(e) => setSmsSettingsForm((f) => ({ ...f, balance_enabled: e.target.checked }))}
+              style={{ marginRight: 6 }}
+            />
+            Balance request
+          </label>
+          <label className="muted small">
+            <input
+              type="checkbox"
+              checked={!!smsSettingsForm.eod_enabled}
+              onChange={(e) => setSmsSettingsForm((f) => ({ ...f, eod_enabled: e.target.checked }))}
+              style={{ marginRight: 6 }}
+            />
+            End of day summary
+          </label>
+          <label className="muted small">
+            <input
+              type="checkbox"
+              checked={!!smsSettingsForm.payout_paid_enabled}
+              onChange={(e) => setSmsSettingsForm((f) => ({ ...f, payout_paid_enabled: e.target.checked }))}
+              style={{ marginRight: 6 }}
+            />
+            Payout paid
+          </label>
+          <label className="muted small">
+            <input
+              type="checkbox"
+              checked={!!smsSettingsForm.payout_failed_enabled}
+              onChange={(e) => setSmsSettingsForm((f) => ({ ...f, payout_failed_enabled: e.target.checked }))}
+              style={{ marginRight: 6 }}
+            />
+            Payout failed
+          </label>
+          <label className="muted small">
+            <input
+              type="checkbox"
+              checked={!!smsSettingsForm.savings_paid_enabled}
+              onChange={(e) => setSmsSettingsForm((f) => ({ ...f, savings_paid_enabled: e.target.checked }))}
+              style={{ marginRight: 6 }}
+            />
+            Savings paid
+          </label>
+          <label className="muted small">
+            <input
+              type="checkbox"
+              checked={!!smsSettingsForm.savings_balance_enabled}
+              onChange={(e) => setSmsSettingsForm((f) => ({ ...f, savings_balance_enabled: e.target.checked }))}
+              style={{ marginRight: 6 }}
+            />
+            Savings balance request
+          </label>
+          <label className="muted small">
+            <input
+              type="checkbox"
+              checked={!!smsSettingsForm.loan_paid_enabled}
+              onChange={(e) => setSmsSettingsForm((f) => ({ ...f, loan_paid_enabled: e.target.checked }))}
+              style={{ marginRight: 6 }}
+            />
+            Loan paid
+          </label>
+          <label className="muted small">
+            <input
+              type="checkbox"
+              checked={!!smsSettingsForm.loan_failed_enabled}
+              onChange={(e) => setSmsSettingsForm((f) => ({ ...f, loan_failed_enabled: e.target.checked }))}
+              style={{ marginRight: 6 }}
+            />
+            Loan failed
+          </label>
+          <label className="muted small">
+            <input
+              type="checkbox"
+              checked={!!smsSettingsForm.loan_balance_enabled}
+              onChange={(e) => setSmsSettingsForm((f) => ({ ...f, loan_balance_enabled: e.target.checked }))}
+              style={{ marginRight: 6 }}
+            />
+            Loan balance request
+          </label>
+        </div>
+        <div className="row" style={{ marginTop: 8 }}>
+          <span className="muted small">{smsSettingsMsg}</span>
+        </div>
+        <div className="muted small" style={{ marginTop: 8 }}>
+          Cost control: keep fee/savings/loan paid off and rely on EOD, send balance only on request, keep templates
+          under 160 characters.
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="topline">
+          <h3 style={{ margin: 0 }}>SMS templates</h3>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn ghost" type="button" onClick={() => void loadSmsTemplates()}>
+              Refresh
+            </button>
+            <span className="muted small">{smsTemplatesMsg}</span>
+          </div>
+        </div>
+        {smsTemplatesError ? <div className="err">SMS templates error: {smsTemplatesError}</div> : null}
+        <div className="table-wrap" style={{ marginTop: 8 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Template</th>
+                <th>Active</th>
+                <th>Body</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {smsTemplates.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="muted">
+                    No templates yet.
+                  </td>
+                </tr>
+              ) : (
+                smsTemplates.map((row, idx) => (
+                  <tr key={row.code || row.label || idx}>
+                    <td>
+                      <div>{row.label || row.code || '-'}</div>
+                      <div className="muted small mono">{row.code || '-'}</div>
+                    </td>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={row.is_active ?? true}
+                        onChange={(e) => updateSmsTemplate(row.code, { is_active: e.target.checked })}
+                      />
+                    </td>
+                    <td>
+                      <textarea
+                        className="input"
+                        style={{ minHeight: 90 }}
+                        value={row.body || ''}
+                        onChange={(e) => updateSmsTemplate(row.code, { body: e.target.value })}
+                      />
+                      {row.code && smsTemplateHints[row.code] ? (
+                        <div className="muted small" style={{ marginTop: 6 }}>
+                          {smsTemplateHints[row.code]}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td>
+                      <button className="btn ghost" type="button" onClick={() => saveSmsTemplate(row.code)}>
+                        Save
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section className="card">
         <div className="topline">
           <h3 style={{ margin: 0 }}>SMS control</h3>
