@@ -279,6 +279,21 @@ function normalizeUssdInput(raw?: string) {
   }
   return compact
 }
+
+function ussdDigitalRoot(value: string | number) {
+  const num = Number(value)
+  if (!Number.isFinite(num) || num <= 0) return null
+  return 1 + ((Math.floor(num) - 1) % 9)
+}
+
+function ussdTierFromBase(value?: string | number | null) {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return ''
+  if (num >= 1 && num <= 199) return 'A'
+  if (num >= 200 && num <= 699) return 'B'
+  if (num >= 700 && num <= 999) return 'C'
+  return ''
+}
 type LatLng = [number, number]
 
 declare global {
@@ -331,6 +346,7 @@ const SystemDashboard = () => {
   const [ussdError, setUssdError] = useState<string | null>(null)
 
   const [ussdFilter, setUssdFilter] = useState('')
+  const [ussdTierFilter, setUssdTierFilter] = useState('')
 
   const [smsFilter, setSmsFilter] = useState<string>('')
   const [smsSearch, setSmsSearch] = useState('')
@@ -373,18 +389,22 @@ const SystemDashboard = () => {
   const [matatuMsg, setMatatuMsg] = useState('')
 
   const [ussdAssignForm, setUssdAssignForm] = useState({
-    prefix: '*001*',
+    prefix: '',
+    tier: '',
     level: 'MATATU',
     sacco_id: '',
     matatu_id: '',
   })
   const [ussdBindForm, setUssdBindForm] = useState({
+    mode: 'full',
     ussd_code: '',
+    base_code: '',
     level: 'MATATU',
     sacco_id: '',
     matatu_id: '',
   })
   const [ussdImportForm, setUssdImportForm] = useState({
+    mode: 'short_full',
     prefix: '*001*',
     raw: '',
   })
@@ -505,24 +525,30 @@ const SystemDashboard = () => {
   }, [ussd?.allocated])
 
   const filteredUssdAvailable = useMemo(() => {
-    const rows = ussd?.available || []
+    let rows = ussd?.available || []
+    if (ussdTierFilter) {
+      rows = rows.filter((row) => ussdTierFromBase(row.base) === ussdTierFilter)
+    }
     const q = ussdFilter.trim().toLowerCase()
     if (!q) return rows
     return rows.filter((row) =>
-      `${formatUssdCode(row)} ${row.base || ''} ${row.status || ''}`.toLowerCase().includes(q),
+      `${formatUssdCode(row)} ${row.base || ''} ${row.status || ''} ${ussdTierFromBase(row.base)}`.toLowerCase().includes(q),
     )
-  }, [ussd?.available, ussdFilter])
+  }, [ussd?.available, ussdFilter, ussdTierFilter])
 
   const filteredUssdAllocated = useMemo(() => {
-    const rows = ussd?.allocated || []
+    let rows = ussd?.allocated || []
+    if (ussdTierFilter) {
+      rows = rows.filter((row) => ussdTierFromBase(row.base) === ussdTierFilter)
+    }
     const q = ussdFilter.trim().toLowerCase()
     if (!q) return rows
     return rows.filter((row) =>
       `${formatUssdCode(row)} ${formatUssdOwner(row)} ${row.allocated_to_id || ''} ${row.sacco_id || ''} ${
         row.allocated_to_type || ''
-      }`.toLowerCase().includes(q),
+      } ${ussdTierFromBase(row.base)}`.toLowerCase().includes(q),
     )
-  }, [ussd?.allocated, ussdFilter])
+  }, [ussd?.allocated, ussdFilter, ussdTierFilter])
 
   const filteredSmsRows = useMemo(() => {
     const q = smsSearch.trim().toLowerCase()
@@ -540,6 +566,42 @@ const SystemDashboard = () => {
     () => filteredSmsRows.filter((row) => row.id && (row.status === 'FAILED' || row.status === 'PENDING')),
     [filteredSmsRows],
   )
+
+  const ussdBindBaseValue = useMemo(() => {
+    if (ussdBindForm.mode !== 'base') return null
+    const digits = String(ussdBindForm.base_code || '').replace(/\D/g, '')
+    if (!digits) return null
+    const num = Number(digits)
+    if (!Number.isFinite(num) || num < 1 || num > 999) return null
+    return num
+  }, [ussdBindForm.base_code, ussdBindForm.mode])
+
+  const ussdBindCheckDigit = useMemo(() => {
+    if (ussdBindBaseValue === null) return null
+    return ussdDigitalRoot(ussdBindBaseValue)
+  }, [ussdBindBaseValue])
+
+  const ussdBindFullFromBase = useMemo(() => {
+    if (ussdBindBaseValue === null || ussdBindCheckDigit === null) return ''
+    return `${ussdBindBaseValue}${ussdBindCheckDigit}`
+  }, [ussdBindBaseValue, ussdBindCheckDigit])
+
+  const ussdBindTier = useMemo(() => {
+    if (ussdBindBaseValue === null) return ''
+    return ussdTierFromBase(ussdBindBaseValue)
+  }, [ussdBindBaseValue])
+
+  const ussdBindFullMeta = useMemo(() => {
+    const raw = ussdBindForm.ussd_code.trim()
+    if (!/^\d+$/.test(raw) || raw.length < 2) {
+      return { base: '', check: '', expected: null, valid: null }
+    }
+    const base = raw.slice(0, -1)
+    const check = raw.slice(-1)
+    const expected = ussdDigitalRoot(base)
+    const valid = expected !== null && String(expected) === check
+    return { base, check, expected, valid }
+  }, [ussdBindForm.ussd_code])
 
   const paybillRows = useMemo(() => {
     const rows: Array<{
@@ -597,6 +659,12 @@ const SystemDashboard = () => {
       return hay.includes(q)
     })
   }, [paybillRows, paybillSearch])
+
+  const ussdImportPlaceholder = useMemo(() => {
+    if (ussdImportForm.mode === 'legacy') return 'Paste legacy USSD codes, one per line'
+    if (ussdImportForm.mode === 'short_base') return 'Paste base codes (1-999), one per line'
+    return 'Paste full codes (base + check digit), one per line'
+  }, [ussdImportForm.mode])
 
   const normalizeVehicleType = (value?: string) => {
     const val = (value || '').toUpperCase()
@@ -783,7 +851,8 @@ const SystemDashboard = () => {
   async function assignNextUssd() {
     setUssdMsg('Assigning...')
     const payload = {
-      prefix: ussdAssignForm.prefix || '*001*',
+      prefix: ussdAssignForm.prefix || '',
+      tier: ussdAssignForm.tier || null,
       level: ussdAssignForm.level,
       sacco_id: ussdAssignForm.level === 'SACCO' ? ussdAssignForm.sacco_id || null : null,
       matatu_id: ussdAssignForm.level === 'MATATU' ? ussdAssignForm.matatu_id || null : null,
@@ -793,8 +862,16 @@ const SystemDashboard = () => {
       return
     }
     try {
-      await sendJson('/api/admin/ussd/pool/assign-next', 'POST', payload)
-      setUssdMsg('Assigned next USSD code')
+      const res = await sendJson<{ success?: boolean; error?: string; ussd_code?: string }>(
+        '/api/admin/ussd/pool/assign-next',
+        'POST',
+        payload,
+      )
+      if (res?.success === false) {
+        setUssdMsg(res.error || 'No available codes')
+        return
+      }
+      setUssdMsg(`Assigned ${res?.ussd_code || 'next USSD code'}`)
       await loadUssd()
       await refreshOverview()
     } catch (err) {
@@ -804,7 +881,25 @@ const SystemDashboard = () => {
 
   async function bindUssdCode() {
     setUssdMsg('Binding...')
-    const code = ussdBindForm.ussd_code.trim()
+    let code = ussdBindForm.ussd_code.trim()
+    if (ussdBindForm.mode === 'base') {
+      if (ussdBindBaseValue === null || ussdBindCheckDigit === null) {
+        setUssdMsg('Enter a base code between 1 and 999')
+        return
+      }
+      if (ussdBindBaseValue < 1 || ussdBindBaseValue > 999) {
+        setUssdMsg('Base code must be between 1 and 999')
+        return
+      }
+      code = ussdBindFullFromBase
+    } else if (code && /^\d+$/.test(code) && code.length >= 2) {
+      const expected = ussdDigitalRoot(code.slice(0, -1))
+      const given = code.slice(-1)
+      if (expected === null || String(expected) !== given) {
+        setUssdMsg('Checksum mismatch for the full code')
+        return
+      }
+    }
     if (!code) {
       setUssdMsg('Enter the USSD code to bind')
       return
@@ -822,7 +917,7 @@ const SystemDashboard = () => {
     try {
       await sendJson('/api/admin/ussd/bind-from-pool', 'POST', payload)
       setUssdMsg('USSD code bound')
-      setUssdBindForm((f) => ({ ...f, ussd_code: '' }))
+      setUssdBindForm((f) => ({ ...f, ussd_code: '', base_code: '' }))
       await loadUssd()
       await refreshOverview()
     } catch (err) {
@@ -856,13 +951,18 @@ const SystemDashboard = () => {
       return
     }
     try {
+      const inputMode = ussdImportForm.mode || 'short_full'
+      const payload: Record<string, unknown> = {
+        raw,
+        input_mode: inputMode,
+      }
+      if (inputMode === 'legacy') {
+        payload.prefix = ussdImportForm.prefix || '*001*'
+      }
       const res = await sendJson<{ ok?: boolean; inserted?: number; skipped?: number; errors?: string[] }>(
         '/api/admin/ussd/pool/import',
         'POST',
-        {
-          prefix: ussdImportForm.prefix || '*001*',
-          raw,
-        },
+        payload,
       )
       const inserted = res?.inserted ?? 0
       const skipped = res?.skipped ?? 0
@@ -890,6 +990,9 @@ const SystemDashboard = () => {
       const full = row.full_code || row.code || ''
       if (hasSymbols) {
         return full === normalized || row.code === normalized
+      }
+      if (digits && (full === digits || row.code === digits)) {
+        return true
       }
       if (row.base && digits && row.base === digits) return true
       return false
@@ -1668,6 +1771,16 @@ const SystemDashboard = () => {
 
       {activeTab === 'ussd' ? (
         <>
+      <section className="card" style={{ background: '#f8fafc' }}>
+        <h3 style={{ marginTop: 0 }}>USSD short code rules</h3>
+        <ul className="muted small" style={{ marginTop: 8, marginBottom: 0 }}>
+          <li>Base code is 1 to 999, check digit is the digital root of the base.</li>
+          <li>Full code = base + check digit (ex: 11 -&gt; 112, 99 -&gt; 999, 999 -&gt; 9999).</li>
+          <li>Tier A: 1-199, Tier B: 200-699, Tier C: 700-999.</li>
+          <li>USSD codes are for USSD flow; PayBill fallback uses plate number only.</li>
+        </ul>
+      </section>
+
       <section className="card">
         <div className="topline">
           <h3 style={{ margin: 0 }}>USSD allocation</h3>
@@ -1680,7 +1793,20 @@ const SystemDashboard = () => {
         {ussdError ? <div className="err">USSD error: {ussdError}</div> : null}
         <div className="grid g2">
           <label className="muted small">
-            Prefix
+            Tier
+            <select
+              value={ussdAssignForm.tier}
+              onChange={(e) => setUssdAssignForm((f) => ({ ...f, tier: e.target.value }))}
+              style={{ padding: 10 }}
+            >
+              <option value="">Any tier</option>
+              <option value="A">Tier A (1-199)</option>
+              <option value="B">Tier B (200-699)</option>
+              <option value="C">Tier C (700-999)</option>
+            </select>
+          </label>
+          <label className="muted small">
+            Prefix (legacy)
             <input
               className="input"
               value={ussdAssignForm.prefix}
@@ -1752,14 +1878,44 @@ const SystemDashboard = () => {
         </div>
         <div className="grid g2">
           <label className="muted small">
+            Code input
+            <select
+              value={ussdBindForm.mode}
+              onChange={(e) =>
+                setUssdBindForm((f) => ({
+                  ...f,
+                  mode: e.target.value,
+                  ussd_code: '',
+                  base_code: '',
+                }))
+              }
+              style={{ padding: 10 }}
+            >
+              <option value="full">Full code (base + check digit)</option>
+              <option value="base">Base code (1-999)</option>
+            </select>
+          </label>
+          {ussdBindForm.mode === 'base' ? (
+            <label className="muted small">
+              Base code
+              <input
+                className="input"
+                value={ussdBindForm.base_code}
+                onChange={(e) => setUssdBindForm((f) => ({ ...f, base_code: e.target.value }))}
+                placeholder="11"
+              />
+            </label>
+          ) : (
+          <label className="muted small">
             USSD code
             <input
               className="input"
               value={ussdBindForm.ussd_code}
               onChange={(e) => setUssdBindForm((f) => ({ ...f, ussd_code: e.target.value }))}
-              placeholder="*001*11013#"
+              placeholder="112"
             />
           </label>
+          )}
           <label className="muted small">
             Level
             <select
@@ -1807,6 +1963,17 @@ const SystemDashboard = () => {
             </label>
           )}
         </div>
+        {ussdBindForm.mode === 'base' ? (
+          <div className="muted small" style={{ marginTop: 8 }}>
+            Check digit: {ussdBindCheckDigit ?? '-'} | Full code: {ussdBindFullFromBase || '-'} | Tier:{' '}
+            {ussdBindTier ? `Tier ${ussdBindTier}` : '-'}
+          </div>
+        ) : ussdBindFullMeta.valid !== null ? (
+          <div className="muted small" style={{ marginTop: 8 }}>
+            Checksum {ussdBindFullMeta.valid ? 'ok' : 'invalid'} (expected{' '}
+            {ussdBindFullMeta.expected ?? '-'})
+          </div>
+        ) : null}
       </section>
 
       <section className="card">
@@ -1817,19 +1984,33 @@ const SystemDashboard = () => {
           </button>
         </div>
         <div className="row" style={{ marginTop: 8 }}>
-          <input
-            className="input"
-            placeholder="Prefix for base numbers"
-            value={ussdImportForm.prefix}
-            onChange={(e) => setUssdImportForm((f) => ({ ...f, prefix: e.target.value }))}
-            style={{ maxWidth: 200 }}
-          />
+          <label className="muted small">
+            Format
+            <select
+              value={ussdImportForm.mode}
+              onChange={(e) => setUssdImportForm((f) => ({ ...f, mode: e.target.value }))}
+              style={{ padding: 10 }}
+            >
+              <option value="short_full">Short codes (full code)</option>
+              <option value="short_base">Short codes (base only)</option>
+              <option value="legacy">Legacy *001* codes</option>
+            </select>
+          </label>
+          {ussdImportForm.mode === 'legacy' ? (
+            <input
+              className="input"
+              placeholder="Legacy prefix"
+              value={ussdImportForm.prefix}
+              onChange={(e) => setUssdImportForm((f) => ({ ...f, prefix: e.target.value }))}
+              style={{ maxWidth: 200 }}
+            />
+          ) : null}
           <span className="muted small">{ussdImportMsg}</span>
         </div>
         <textarea
           className="input"
           style={{ minHeight: 120, width: '100%' }}
-          placeholder="Paste USSD codes or base numbers, one per line"
+          placeholder={ussdImportPlaceholder}
           value={ussdImportForm.raw}
           onChange={(e) => setUssdImportForm((f) => ({ ...f, raw: e.target.value }))}
         />
@@ -1846,6 +2027,16 @@ const SystemDashboard = () => {
               onChange={(e) => setUssdFilter(e.target.value)}
               style={{ maxWidth: 240 }}
             />
+            <select
+              value={ussdTierFilter}
+              onChange={(e) => setUssdTierFilter(e.target.value)}
+              style={{ padding: 10 }}
+            >
+              <option value="">All tiers</option>
+              <option value="A">Tier A (1-199)</option>
+              <option value="B">Tier B (200-699)</option>
+              <option value="C">Tier C (700-999)</option>
+            </select>
             <span className="muted small">
               Available: {filteredUssdAvailable.length} | Allocated: {filteredUssdAllocated.length}
             </span>
@@ -1865,13 +2056,14 @@ const SystemDashboard = () => {
               <thead>
                 <tr>
                   <th>Code</th>
+                  <th>Tier</th>
                   <th>Status</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredUssdAvailable.length === 0 ? (
                   <tr>
-                    <td colSpan={2} className="muted">
+                    <td colSpan={3} className="muted">
                       No available codes.
                     </td>
                   </tr>
@@ -1879,6 +2071,7 @@ const SystemDashboard = () => {
                   filteredUssdAvailable.map((row, idx) => (
                     <tr key={row.id || row.full_code || row.code || idx}>
                       <td>{formatUssdCode(row)}</td>
+                      <td>{ussdTierFromBase(row.base) || '-'}</td>
                       <td>{row.status || 'AVAILABLE'}</td>
                     </tr>
                   ))
@@ -1898,6 +2091,7 @@ const SystemDashboard = () => {
               <thead>
                 <tr>
                   <th>Code</th>
+                  <th>Tier</th>
                   <th>Allocated to</th>
                   <th>Assigned</th>
                   <th>Action</th>
@@ -1906,7 +2100,7 @@ const SystemDashboard = () => {
               <tbody>
                 {filteredUssdAllocated.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="muted">
+                    <td colSpan={5} className="muted">
                       No allocated codes.
                     </td>
                   </tr>
@@ -1914,6 +2108,7 @@ const SystemDashboard = () => {
                   filteredUssdAllocated.map((row, idx) => (
                     <tr key={row.id || row.full_code || row.code || idx}>
                       <td>{formatUssdCode(row)}</td>
+                      <td>{ussdTierFromBase(row.base) || '-'}</td>
                       <td>{formatUssdOwner(row)}</td>
                       <td>{row.allocated_at ? new Date(row.allocated_at).toLocaleString() : '-'}</td>
                       <td>
@@ -2012,7 +2207,7 @@ const SystemDashboard = () => {
               className="input"
               value={paybillForm.ussd_code}
               onChange={(e) => setPaybillForm((f) => ({ ...f, ussd_code: e.target.value }))}
-              placeholder="*001*11013#"
+              placeholder="112 or *001*11013#"
             />
           </label>
         </div>

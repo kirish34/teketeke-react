@@ -519,11 +519,77 @@ function normalizeUssdPrefix(raw){
   return `${trimmed}*`;
 }
 
-function parseUssdEntry(entry, prefix){
+function digitalRoot(value){
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return null;
+  return 1 + ((Math.floor(num) - 1) % 9);
+}
+
+function resolveUssdTierRange(tier){
+  const key = String(tier || '').trim().toUpperCase();
+  if (key === 'A') return { min: 1, max: 199 };
+  if (key === 'B') return { min: 200, max: 699 };
+  if (key === 'C') return { min: 700, max: 999 };
+  return null;
+}
+
+function parseShortUssdEntry(entry, mode){
+  const cleaned = String(entry || '').trim().replace(/\s+/g, '');
+  const digits = cleaned.replace(/\D/g, '');
+  if (!digits) return { error: `invalid code: ${entry}` };
+
+  const asBase = () => {
+    const baseNum = Number(digits);
+    if (!Number.isFinite(baseNum) || baseNum < 1 || baseNum > 999) {
+      return { error: `base out of range: ${entry}` };
+    }
+    const checksum = digitalRoot(baseNum);
+    if (checksum === null) return { error: `invalid base: ${entry}` };
+    const base = String(baseNum);
+    return { full_code: `${base}${checksum}`, base, checksum };
+  };
+
+  const asFull = () => {
+    if (digits.length < 2) return { error: `invalid full code: ${entry}` };
+    const base = digits.slice(0, -1);
+    const check = digits.slice(-1);
+    const baseNum = Number(base);
+    if (!Number.isFinite(baseNum) || baseNum < 1 || baseNum > 999) {
+      return { error: `base out of range: ${entry}` };
+    }
+    const expected = digitalRoot(baseNum);
+    if (expected === null || String(expected) !== check) {
+      return { error: `checksum mismatch: ${entry}` };
+    }
+    return { full_code: digits, base: String(baseNum), checksum: expected };
+  };
+
+  if (mode === 'short_base') return asBase();
+  if (mode === 'short_full') return asFull();
+
+  if (digits.length >= 2) {
+    const base = digits.slice(0, -1);
+    const check = digits.slice(-1);
+    const expected = digitalRoot(base);
+    if (expected !== null && String(expected) === check) {
+      return { full_code: digits, base: String(Number(base)), checksum: expected };
+    }
+  }
+  return asBase();
+}
+
+function parseUssdEntry(entry, prefix, mode){
   const trimmed = String(entry || '').trim();
   if (!trimmed) return null;
   const cleaned = trimmed.replace(/\s+/g, '');
   const hasSymbols = cleaned.includes('*') || cleaned.includes('#');
+  const inputMode = mode || 'legacy';
+
+  if (inputMode !== 'legacy') {
+    if (hasSymbols) return { error: `legacy format not allowed: ${trimmed}` };
+    return parseShortUssdEntry(cleaned, inputMode);
+  }
+
   if (hasSymbols) {
     const full = cleaned.endsWith('#') ? cleaned : `${cleaned}#`;
     const lastStar = full.lastIndexOf('*');
@@ -559,14 +625,40 @@ router.get('/ussd/pool/allocated', async (_req,res)=>{
   res.json({ items: data||[] });
 });
 router.post('/ussd/pool/assign-next', async (req,res)=>{
-  const prefix = req.body?.prefix || '*001*';
-  let { data: row, error } = await supabaseAdmin.from('ussd_pool').select('*').eq('status','AVAILABLE').ilike('full_code', `${prefix}%`).order('base', {ascending:true}).limit(1).maybeSingle();
-  if (error) return res.status(500).json({ error: error.message });
-  if (!row) {
-    const alt = await supabaseAdmin.from('ussd_pool').select('*').eq('status','AVAILABLE').order('base', {ascending:true}).limit(1).maybeSingle();
-    row = alt.data; error = alt.error;
+  const prefix = req.body?.prefix || '';
+  const tierRange = resolveUssdTierRange(req.body?.tier);
+  let row = null;
+
+  if (tierRange) {
+    const { data, error } = await supabaseAdmin.from('ussd_pool').select('*').eq('status','AVAILABLE');
     if (error) return res.status(500).json({ error: error.message });
-    if (!row) return res.json({ success:false, error:'no available codes' });
+    let rows = data || [];
+    rows = rows.filter((item) => {
+      const baseNum = Number(item.base);
+      if (!Number.isFinite(baseNum)) return false;
+      return baseNum >= tierRange.min && baseNum <= tierRange.max;
+    });
+    if (prefix) {
+      const norm = String(prefix).toLowerCase();
+      rows = rows.filter((item) => String(item.full_code || '').toLowerCase().startsWith(norm));
+    }
+    if (!rows.length) return res.json({ success:false, error:'no available codes in tier' });
+    rows.sort((a, b) => Number(a.base) - Number(b.base));
+    row = rows[0];
+  } else {
+    let query = supabaseAdmin.from('ussd_pool').select('*').eq('status','AVAILABLE');
+    if (prefix) {
+      query = query.ilike('full_code', `${prefix}%`);
+    }
+    let result = await query.order('base', {ascending:true}).limit(1).maybeSingle();
+    row = result.data;
+    if (result.error) return res.status(500).json({ error: result.error.message });
+    if (!row) {
+      const alt = await supabaseAdmin.from('ussd_pool').select('*').eq('status','AVAILABLE').order('base', {ascending:true}).limit(1).maybeSingle();
+      row = alt.data;
+      if (alt.error) return res.status(500).json({ error: alt.error.message });
+      if (!row) return res.json({ success:false, error:'no available codes' });
+    }
   }
   const upd = { status:'ALLOCATED', allocated_at: new Date().toISOString(), allocated_to_type: req.body?.level||'MATATU', allocated_to_id: req.body?.matatu_id || req.body?.sacco_id || null };
   const { error: ue } = await supabaseAdmin.from('ussd_pool').update(upd).eq('id', row.id);
@@ -600,7 +692,11 @@ router.post('/ussd/pool/release', async (req,res)=>{
 });
 
 router.post('/ussd/pool/import', async (req,res)=>{
-  const prefix = normalizeUssdPrefix(req.body?.prefix || '*001*');
+  const inputModeRaw = String(req.body?.input_mode || 'legacy').trim().toLowerCase();
+  const inputMode = ['short_base', 'short_full', 'short_auto', 'legacy'].includes(inputModeRaw)
+    ? inputModeRaw
+    : 'legacy';
+  const prefix = inputMode === 'legacy' ? normalizeUssdPrefix(req.body?.prefix || '*001*') : '';
   const raw = req.body?.raw || '';
   const codes = Array.isArray(req.body?.codes) ? req.body.codes : null;
   const lines = codes && codes.length ? codes : String(raw).split(/\r?\n/);
@@ -608,7 +704,7 @@ router.post('/ussd/pool/import', async (req,res)=>{
   const parsed = [];
 
   for (const line of lines) {
-    const result = parseUssdEntry(line, prefix);
+    const result = parseUssdEntry(line, prefix, inputMode);
     if (!result) continue;
     if (result.error) {
       errors.push(result.error);
