@@ -1155,7 +1155,7 @@ const SystemDashboard = () => {
     }
 
     setPaybillMsg(msg)
-    setPaybillForm((f) => ({ ...f, ussd_code: '' }))
+    setPaybillForm((f) => ({ ...f, paybill_account: '', ussd_code: '' }))
   }
 
   async function refreshPaybillData() {
@@ -1461,7 +1461,16 @@ const SystemDashboard = () => {
                     .then((rows) => setMatatus(rows))
                     .catch((err) => setVehiclesError(err instanceof Error ? err.message : String(err)))
                 } catch (err) {
-                  setMatatuMsg(err instanceof Error ? err.message : 'Create failed')
+                  const msg = err instanceof Error ? err.message : 'Create failed'
+                  if (/created but wallet failed/i.test(msg)) {
+                    setMatatuMsg(msg)
+                    setMatatuForm({ plate: '', owner: '', phone: '', till: '', sacco: '', body: meta.type })
+                    await fetchList<VehicleRow>('/api/admin/matatus')
+                      .then((rows) => setMatatus(rows))
+                      .catch((loadErr) => setVehiclesError(loadErr instanceof Error ? loadErr.message : String(loadErr)))
+                    return
+                  }
+                  setMatatuMsg(msg)
                 }
               }}
             >
@@ -1634,7 +1643,22 @@ const SystemDashboard = () => {
                       .then((rows) => setSaccos(rows))
                       .catch((err) => setSaccosError(err instanceof Error ? err.message : String(err)))
                   } catch (err) {
-                    setSaccoMsg(err instanceof Error ? err.message : 'Create failed')
+                    const msg = err instanceof Error ? err.message : 'Create failed'
+                    if (/created but wallet failed/i.test(msg)) {
+                      setSaccoMsg(msg)
+                      setSaccoForm({
+                        name: '',
+                        contact_name: '',
+                        contact_phone: '',
+                        contact_email: '',
+                        default_till: '',
+                      })
+                      await fetchList<SaccoRow>('/api/admin/saccos')
+                        .then((rows) => setSaccos(rows))
+                        .catch((loadErr) => setSaccosError(loadErr instanceof Error ? loadErr.message : String(loadErr)))
+                      return
+                    }
+                    setSaccoMsg(msg)
                   }
                 }}
               >
