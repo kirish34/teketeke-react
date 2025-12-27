@@ -11,6 +11,7 @@ type SystemTabId =
   | 'taxis'
   | 'bodabodas'
   | 'ussd'
+  | 'sms'
   | 'logins'
   | 'routes'
   | 'registry'
@@ -143,7 +144,8 @@ export default function SystemRegistry() {
     { id: 'matatu', label: 'Matatu' },
     { id: 'taxis', label: 'Taxis' },
     { id: 'bodabodas', label: 'BodaBodas' },
-    { id: 'ussd', label: 'USSD Pool' },
+    { id: 'ussd', label: 'USSD' },
+    { id: 'sms', label: 'SMS' },
     { id: 'logins', label: 'Logins' },
     { id: 'routes', label: 'Routes Overview' },
   ]

@@ -68,9 +68,22 @@ type WalletTx = {
   source?: string
 }
 
+type UssdPoolRow = {
+  id?: string
+  code?: string
+  full_code?: string
+  base?: string
+  status?: string
+  allocated_to_type?: string
+  allocated_to_id?: string
+  allocated_at?: string
+  telco?: string
+  sacco_id?: string
+}
+
 type UssdPool = {
-  available?: Array<{ code?: string; telco?: string }>
-  allocated?: Array<{ code?: string; telco?: string; sacco_id?: string }>
+  available?: UssdPoolRow[]
+  allocated?: UssdPoolRow[]
 }
 
 type SmsRow = {
@@ -116,6 +129,7 @@ type SystemTabId =
   | 'taxis'
   | 'bodabodas'
   | 'ussd'
+  | 'sms'
   | 'logins'
   | 'routes'
   | 'registry'
@@ -203,6 +217,54 @@ async function deleteJson(url: string) {
 }
 
 const formatKes = (val?: number | null) => `KES ${(Number(val || 0)).toLocaleString('en-KE')}`
+
+type CsvHeader = { key: string; label: string }
+type CsvRow = Record<string, string | number | boolean | null | undefined>
+
+function csvEscape(value: CsvRow[keyof CsvRow]) {
+  if (value === null || value === undefined) return ''
+  const str = String(value)
+  if (/[",\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`
+  return str
+}
+
+function buildCsv(headers: CsvHeader[], rows: CsvRow[]) {
+  const headerLine = headers.map((h) => csvEscape(h.label)).join(',')
+  const body = rows.map((row) => headers.map((h) => csvEscape(row[h.key])).join(',')).join('\n')
+  return `${headerLine}\n${body}`
+}
+
+function downloadFile(filename: string, content: string, type: string) {
+  const blob = new Blob([content], { type })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+function downloadJson(filename: string, payload: unknown) {
+  downloadFile(filename, JSON.stringify(payload, null, 2), 'application/json')
+}
+
+function formatVehicleLabel(row?: VehicleRow | null) {
+  if (!row) return '-'
+  return row.number_plate || row.plate || row.registration || row.id || '-'
+}
+
+function formatUssdCode(row?: UssdPoolRow | null) {
+  if (!row) return '-'
+  return row.full_code || row.code || row.base || '-'
+}
+
+function formatUssdOwner(row?: UssdPoolRow | null) {
+  if (!row) return '-'
+  if (row.allocated_to_type) return `${row.allocated_to_type} ${row.allocated_to_id || ''}`.trim()
+  return row.sacco_id || row.allocated_to_id || '-'
+}
 type LatLng = [number, number]
 
 declare global {
@@ -254,7 +316,10 @@ const SystemDashboard = () => {
   const [ussd, setUssd] = useState<UssdPool | null>(null)
   const [ussdError, setUssdError] = useState<string | null>(null)
 
+  const [ussdFilter, setUssdFilter] = useState('')
+
   const [smsFilter, setSmsFilter] = useState<string>('')
+  const [smsSearch, setSmsSearch] = useState('')
   const [smsRows, setSmsRows] = useState<SmsRow[]>([])
   const [smsError, setSmsError] = useState<string | null>(null)
 
@@ -293,8 +358,25 @@ const SystemDashboard = () => {
   })
   const [matatuMsg, setMatatuMsg] = useState('')
 
-  const [ussdForm, setUssdForm] = useState({ sacco_id: '', telco: '' })
+  const [ussdAssignForm, setUssdAssignForm] = useState({
+    prefix: '*001*',
+    level: 'MATATU',
+    sacco_id: '',
+    matatu_id: '',
+  })
+  const [ussdBindForm, setUssdBindForm] = useState({
+    ussd_code: '',
+    level: 'MATATU',
+    sacco_id: '',
+    matatu_id: '',
+  })
+  const [ussdImportForm, setUssdImportForm] = useState({
+    prefix: '*001*',
+    raw: '',
+  })
   const [ussdMsg, setUssdMsg] = useState('')
+  const [ussdImportMsg, setUssdImportMsg] = useState('')
+  const [ussdReleaseMsg, setUssdReleaseMsg] = useState('')
 
   const [logins, setLogins] = useState<AdminLogin[]>([])
   const [loginError, setLoginError] = useState<string | null>(null)
@@ -319,7 +401,8 @@ const SystemDashboard = () => {
     { id: 'matatu', label: 'Matatu' },
     { id: 'taxis', label: 'Taxis' },
     { id: 'bodabodas', label: 'BodaBodas' },
-    { id: 'ussd', label: 'USSD Pool' },
+    { id: 'ussd', label: 'USSD' },
+    { id: 'sms', label: 'SMS' },
     { id: 'logins', label: 'Logins' },
     { id: 'routes', label: 'Routes Overview' },
   ]
@@ -361,6 +444,43 @@ const SystemDashboard = () => {
       return []
     }
   }, [routePathText])
+
+  const filteredUssdAvailable = useMemo(() => {
+    const rows = ussd?.available || []
+    const q = ussdFilter.trim().toLowerCase()
+    if (!q) return rows
+    return rows.filter((row) =>
+      `${formatUssdCode(row)} ${row.base || ''} ${row.status || ''}`.toLowerCase().includes(q),
+    )
+  }, [ussd?.available, ussdFilter])
+
+  const filteredUssdAllocated = useMemo(() => {
+    const rows = ussd?.allocated || []
+    const q = ussdFilter.trim().toLowerCase()
+    if (!q) return rows
+    return rows.filter((row) =>
+      `${formatUssdCode(row)} ${formatUssdOwner(row)} ${row.allocated_to_id || ''} ${row.sacco_id || ''} ${
+        row.allocated_to_type || ''
+      }`.toLowerCase().includes(q),
+    )
+  }, [ussd?.allocated, ussdFilter])
+
+  const filteredSmsRows = useMemo(() => {
+    const q = smsSearch.trim().toLowerCase()
+    if (!q) return smsRows
+    return smsRows.filter((row) => {
+      const hay = [row.to_phone, row.template_code, row.status, row.error_message, row.id]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return hay.includes(q)
+    })
+  }, [smsRows, smsSearch])
+
+  const retryableSmsRows = useMemo(
+    () => filteredSmsRows.filter((row) => row.id && (row.status === 'FAILED' || row.status === 'PENDING')),
+    [filteredSmsRows],
+  )
 
   const normalizeVehicleType = (value?: string) => {
     const val = (value || '').toUpperCase()
@@ -534,15 +654,109 @@ const SystemDashboard = () => {
 
   async function loadUssd() {
     try {
-      const available = await fetchList<{ code?: string; telco?: string }>('/api/admin/ussd/pool/available')
-      const allocated = await fetchList<{ code?: string; telco?: string; sacco_id?: string }>(
-        '/api/admin/ussd/pool/allocated',
-      )
+      const available = await fetchList<UssdPoolRow>('/api/admin/ussd/pool/available')
+      const allocated = await fetchList<UssdPoolRow>('/api/admin/ussd/pool/allocated')
       setUssd({ available, allocated })
       setUssdError(null)
     } catch (err) {
       setUssd(null)
       setUssdError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function assignNextUssd() {
+    setUssdMsg('Assigning...')
+    const payload = {
+      prefix: ussdAssignForm.prefix || '*001*',
+      level: ussdAssignForm.level,
+      sacco_id: ussdAssignForm.level === 'SACCO' ? ussdAssignForm.sacco_id || null : null,
+      matatu_id: ussdAssignForm.level === 'MATATU' ? ussdAssignForm.matatu_id || null : null,
+    }
+    if (!payload.sacco_id && !payload.matatu_id) {
+      setUssdMsg('Select a SACCO or Matatu for allocation')
+      return
+    }
+    try {
+      await sendJson('/api/admin/ussd/pool/assign-next', 'POST', payload)
+      setUssdMsg('Assigned next USSD code')
+      await loadUssd()
+      await refreshOverview()
+    } catch (err) {
+      setUssdMsg(err instanceof Error ? err.message : 'Assign failed')
+    }
+  }
+
+  async function bindUssdCode() {
+    setUssdMsg('Binding...')
+    const code = ussdBindForm.ussd_code.trim()
+    if (!code) {
+      setUssdMsg('Enter the USSD code to bind')
+      return
+    }
+    const payload = {
+      ussd_code: code,
+      level: ussdBindForm.level,
+      sacco_id: ussdBindForm.level === 'SACCO' ? ussdBindForm.sacco_id || null : null,
+      matatu_id: ussdBindForm.level === 'MATATU' ? ussdBindForm.matatu_id || null : null,
+    }
+    if (!payload.sacco_id && !payload.matatu_id) {
+      setUssdMsg('Select a SACCO or Matatu for allocation')
+      return
+    }
+    try {
+      await sendJson('/api/admin/ussd/bind-from-pool', 'POST', payload)
+      setUssdMsg('USSD code bound')
+      setUssdBindForm((f) => ({ ...f, ussd_code: '' }))
+      await loadUssd()
+      await refreshOverview()
+    } catch (err) {
+      setUssdMsg(err instanceof Error ? err.message : 'Bind failed')
+    }
+  }
+
+  async function releaseUssd(row: UssdPoolRow) {
+    if (!row) return
+    const code = formatUssdCode(row)
+    if (!confirm(`Release ${code} back to the pool?`)) return
+    setUssdReleaseMsg('Releasing...')
+    try {
+      await sendJson('/api/admin/ussd/pool/release', 'POST', {
+        id: row.id || null,
+        ussd_code: row.full_code || row.code || null,
+      })
+      setUssdReleaseMsg(`Released ${code}`)
+      await loadUssd()
+      await refreshOverview()
+    } catch (err) {
+      setUssdReleaseMsg(err instanceof Error ? err.message : 'Release failed')
+    }
+  }
+
+  async function importUssdPool() {
+    setUssdImportMsg('Importing...')
+    const raw = ussdImportForm.raw.trim()
+    if (!raw) {
+      setUssdImportMsg('Paste USSD codes or base numbers first')
+      return
+    }
+    try {
+      const res = await sendJson<{ ok?: boolean; inserted?: number; skipped?: number; errors?: string[] }>(
+        '/api/admin/ussd/pool/import',
+        'POST',
+        {
+          prefix: ussdImportForm.prefix || '*001*',
+          raw,
+        },
+      )
+      const inserted = res?.inserted ?? 0
+      const skipped = res?.skipped ?? 0
+      const errCount = res?.errors?.length || 0
+      setUssdImportMsg(`Imported ${inserted}, skipped ${skipped}${errCount ? `, errors ${errCount}` : ''}`)
+      setUssdImportForm((f) => ({ ...f, raw: '' }))
+      await loadUssd()
+      await refreshOverview()
+    } catch (err) {
+      setUssdImportMsg(err instanceof Error ? err.message : 'Import failed')
     }
   }
 
@@ -566,6 +780,58 @@ const SystemDashboard = () => {
     } catch (err) {
       setSmsError(err instanceof Error ? err.message : String(err))
     }
+  }
+
+  async function retrySmsBatch(rows: SmsRow[]) {
+    const ids = rows.map((row) => row.id).filter(Boolean) as string[]
+    if (!ids.length) return
+    if (!confirm(`Retry ${ids.length} SMS now?`)) return
+    setSmsError(null)
+    for (const id of ids) {
+      try {
+        await postJson(`/api/admin/sms/${id}/retry`)
+      } catch (err) {
+        setSmsError(err instanceof Error ? err.message : String(err))
+        break
+      }
+    }
+    await loadSms(smsFilter)
+  }
+
+  function exportSmsCsv() {
+    const headers: CsvHeader[] = [
+      { key: 'to_phone', label: 'To' },
+      { key: 'template_code', label: 'Template' },
+      { key: 'status', label: 'Status' },
+      { key: 'tries', label: 'Tries' },
+      { key: 'updated_at', label: 'Updated' },
+      { key: 'error_message', label: 'Error' },
+      { key: 'id', label: 'ID' },
+    ]
+    const rows: CsvRow[] = filteredSmsRows.map((row) => ({
+      to_phone: row.to_phone || '',
+      template_code: row.template_code || '',
+      status: row.status || '',
+      tries: row.tries ?? '',
+      updated_at: row.updated_at || '',
+      error_message: row.error_message || '',
+      id: row.id || '',
+    }))
+    const csv = buildCsv(headers, rows)
+    downloadFile('sms-log.csv', csv, 'text/csv;charset=utf-8;')
+  }
+
+  function exportSmsJson() {
+    const rows = filteredSmsRows.map((row) => ({
+      id: row.id || null,
+      to_phone: row.to_phone || null,
+      template_code: row.template_code || null,
+      status: row.status || null,
+      tries: row.tries ?? null,
+      updated_at: row.updated_at || null,
+      error_message: row.error_message || null,
+    }))
+    downloadJson('sms-log.json', rows)
   }
 
   async function loadRouteUsage() {
@@ -1155,104 +1421,216 @@ const SystemDashboard = () => {
         <>
       <section className="card">
         <div className="topline">
-          <h3 style={{ margin: 0 }}>USSD assign</h3>
-          <button
-            className="btn"
-            type="button"
-            onClick={async () => {
-              setUssdMsg('Assigning...')
-              try {
-                await sendJson('/api/admin/ussd/pool/assign-next', 'POST', {
-                  sacco_id: ussdForm.sacco_id || null,
-                  telco: ussdForm.telco || null,
-                })
-                setUssdMsg('Assigned next USSD code')
-                await loadUssd()
-                await refreshOverview()
-              } catch (err) {
-                setUssdMsg(err instanceof Error ? err.message : 'Assign failed')
+          <h3 style={{ margin: 0 }}>USSD allocation</h3>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn ghost" type="button" onClick={() => void loadUssd()}>
+              Refresh
+            </button>
+          </div>
+        </div>
+        {ussdError ? <div className="err">USSD error: {ussdError}</div> : null}
+        <div className="grid g2">
+          <label className="muted small">
+            Prefix
+            <input
+              className="input"
+              value={ussdAssignForm.prefix}
+              onChange={(e) => setUssdAssignForm((f) => ({ ...f, prefix: e.target.value }))}
+              placeholder="*001*"
+            />
+          </label>
+          <label className="muted small">
+            Level
+            <select
+              value={ussdAssignForm.level}
+              onChange={(e) =>
+                setUssdAssignForm((f) => ({ ...f, level: e.target.value, sacco_id: '', matatu_id: '' }))
               }
-            }}
-          >
-            Assign next
-          </button>
+              style={{ padding: 10 }}
+            >
+              <option value="MATATU">MATATU</option>
+              <option value="SACCO">SACCO</option>
+            </select>
+          </label>
+          {ussdAssignForm.level === 'MATATU' ? (
+            <label className="muted small">
+              Matatu
+              <select
+                value={ussdAssignForm.matatu_id}
+                onChange={(e) => setUssdAssignForm((f) => ({ ...f, matatu_id: e.target.value }))}
+                style={{ padding: 10 }}
+              >
+                <option value="">Select matatu</option>
+                {vehiclesFor('MATATU').map((v) => (
+                  <option key={v.id || formatVehicleLabel(v)} value={v.id || ''}>
+                    {formatVehicleLabel(v)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <label className="muted small">
+              SACCO
+              <select
+                value={ussdAssignForm.sacco_id}
+                onChange={(e) => setUssdAssignForm((f) => ({ ...f, sacco_id: e.target.value }))}
+                style={{ padding: 10 }}
+              >
+                <option value="">Select SACCO</option>
+                {saccos.map((s) => (
+                  <option key={s.id || s.sacco_id} value={s.id || s.sacco_id || ''}>
+                    {s.name || s.sacco_name || s.sacco_id}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
         <div className="row" style={{ marginTop: 8 }}>
-          <select
-            value={ussdForm.sacco_id}
-            onChange={(e) => setUssdForm((f) => ({ ...f, sacco_id: e.target.value }))}
-            style={{ padding: 10, maxWidth: 220 }}
-          >
-            <option value="">SACCO (optional)</option>
-            {saccos.map((s) => (
-              <option key={s.id || s.sacco_id} value={s.id || s.sacco_id || ''}>
-                {s.name || s.sacco_name || s.sacco_id}
-              </option>
-            ))}
-          </select>
-          <input
-            className="input"
-            placeholder="Telco (optional)"
-            value={ussdForm.telco}
-            onChange={(e) => setUssdForm((f) => ({ ...f, telco: e.target.value }))}
-            style={{ maxWidth: 200 }}
-          />
+          <button className="btn" type="button" onClick={assignNextUssd}>
+            Assign next
+          </button>
           <span className="muted small">{ussdMsg}</span>
         </div>
       </section>
 
+      <section className="card">
+        <div className="topline">
+          <h3 style={{ margin: 0 }}>Bind specific code</h3>
+          <button className="btn" type="button" onClick={bindUssdCode}>
+            Bind code
+          </button>
+        </div>
+        <div className="grid g2">
+          <label className="muted small">
+            USSD code
+            <input
+              className="input"
+              value={ussdBindForm.ussd_code}
+              onChange={(e) => setUssdBindForm((f) => ({ ...f, ussd_code: e.target.value }))}
+              placeholder="*001*11013#"
+            />
+          </label>
+          <label className="muted small">
+            Level
+            <select
+              value={ussdBindForm.level}
+              onChange={(e) =>
+                setUssdBindForm((f) => ({ ...f, level: e.target.value, sacco_id: '', matatu_id: '' }))
+              }
+              style={{ padding: 10 }}
+            >
+              <option value="MATATU">MATATU</option>
+              <option value="SACCO">SACCO</option>
+            </select>
+          </label>
+          {ussdBindForm.level === 'MATATU' ? (
+            <label className="muted small">
+              Matatu
+              <select
+                value={ussdBindForm.matatu_id}
+                onChange={(e) => setUssdBindForm((f) => ({ ...f, matatu_id: e.target.value }))}
+                style={{ padding: 10 }}
+              >
+                <option value="">Select matatu</option>
+                {vehiclesFor('MATATU').map((v) => (
+                  <option key={v.id || formatVehicleLabel(v)} value={v.id || ''}>
+                    {formatVehicleLabel(v)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <label className="muted small">
+              SACCO
+              <select
+                value={ussdBindForm.sacco_id}
+                onChange={(e) => setUssdBindForm((f) => ({ ...f, sacco_id: e.target.value }))}
+                style={{ padding: 10 }}
+              >
+                <option value="">Select SACCO</option>
+                {saccos.map((s) => (
+                  <option key={s.id || s.sacco_id} value={s.id || s.sacco_id || ''}>
+                    {s.name || s.sacco_name || s.sacco_id}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="topline">
+          <h3 style={{ margin: 0 }}>Import USSD pool</h3>
+          <button className="btn" type="button" onClick={importUssdPool}>
+            Import
+          </button>
+        </div>
+        <div className="row" style={{ marginTop: 8 }}>
+          <input
+            className="input"
+            placeholder="Prefix for base numbers"
+            value={ussdImportForm.prefix}
+            onChange={(e) => setUssdImportForm((f) => ({ ...f, prefix: e.target.value }))}
+            style={{ maxWidth: 200 }}
+          />
+          <span className="muted small">{ussdImportMsg}</span>
+        </div>
+        <textarea
+          className="input"
+          style={{ minHeight: 120, width: '100%' }}
+          placeholder="Paste USSD codes or base numbers, one per line"
+          value={ussdImportForm.raw}
+          onChange={(e) => setUssdImportForm((f) => ({ ...f, raw: e.target.value }))}
+        />
+      </section>
+
+      <section className="card">
+        <div className="topline">
+          <h3 style={{ margin: 0 }}>USSD pool</h3>
+          <div className="row" style={{ gap: 8 }}>
+            <input
+              className="input"
+              placeholder="Search code or allocation"
+              value={ussdFilter}
+              onChange={(e) => setUssdFilter(e.target.value)}
+              style={{ maxWidth: 240 }}
+            />
+            <span className="muted small">
+              Available: {filteredUssdAvailable.length} | Allocated: {filteredUssdAllocated.length}
+            </span>
+          </div>
+        </div>
+        {ussdReleaseMsg ? <div className="muted small">{ussdReleaseMsg}</div> : null}
+      </section>
+
       <section className="grid g2">
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>USSD pool</h3>
-          {ussdError ? <div className="err">USSD error: {ussdError}</div> : null}
+          <div className="topline">
+            <h3 style={{ margin: 0 }}>Available codes</h3>
+            <span className="muted small">{filteredUssdAvailable.length} available</span>
+          </div>
           <div className="table-wrap" style={{ maxHeight: 240 }}>
             <table>
               <thead>
                 <tr>
-                  <th>Available code</th>
-                  <th>Telco</th>
+                  <th>Code</th>
+                  <th>Status</th>
                 </tr>
               </thead>
               <tbody>
-                {!ussd?.available?.length ? (
+                {filteredUssdAvailable.length === 0 ? (
                   <tr>
                     <td colSpan={2} className="muted">
                       No available codes.
                     </td>
                   </tr>
                 ) : (
-                  ussd.available.map((row, idx) => (
-                    <tr key={`${row.code || ''}-${idx}`}>
-                      <td>{row.code || ''}</td>
-                      <td>{row.telco || ''}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-          <div className="table-wrap" style={{ maxHeight: 240, marginTop: 8 }}>
-            <table>
-              <thead>
-                <tr>
-                  <th>Allocated code</th>
-                  <th>Telco</th>
-                  <th>SACCO</th>
-                </tr>
-              </thead>
-              <tbody>
-                {!ussd?.allocated?.length ? (
-                  <tr>
-                    <td colSpan={3} className="muted">
-                      No allocated codes.
-                    </td>
-                  </tr>
-                ) : (
-                  ussd.allocated.map((row, idx) => (
-                    <tr key={`${row.code || ''}-${idx}`}>
-                      <td>{row.code || ''}</td>
-                      <td>{row.telco || ''}</td>
-                      <td>{row.sacco_id || ''}</td>
+                  filteredUssdAvailable.map((row, idx) => (
+                    <tr key={row.id || row.full_code || row.code || idx}>
+                      <td>{formatUssdCode(row)}</td>
+                      <td>{row.status || 'AVAILABLE'}</td>
                     </tr>
                   ))
                 )}
@@ -1263,70 +1641,144 @@ const SystemDashboard = () => {
 
         <div className="card">
           <div className="topline">
-            <h3 style={{ margin: 0 }}>SMS</h3>
-            <label className="muted small">
-              Status:{' '}
-              <select
-                value={smsFilter}
-                onChange={(e) => {
-                  const val = e.target.value
-                  setSmsFilter(val)
-                  loadSms(val)
-                }}
-              >
-                <option value="">Any</option>
-                <option value="FAILED">Failed</option>
-                <option value="PENDING">Pending</option>
-                <option value="SUCCESS">Success</option>
-              </select>
-            </label>
+            <h3 style={{ margin: 0 }}>Allocated codes</h3>
+            <span className="muted small">{filteredUssdAllocated.length} allocated</span>
           </div>
-          {smsError ? <div className="err">SMS error: {smsError}</div> : null}
-          <div className="table-wrap" style={{ maxHeight: 280 }}>
+          <div className="table-wrap" style={{ maxHeight: 240 }}>
             <table>
               <thead>
                 <tr>
-                  <th>To</th>
-                  <th>Template</th>
-                  <th>Status</th>
-                  <th>Tries</th>
-                  <th>Updated</th>
-                  <th>Error</th>
+                  <th>Code</th>
+                  <th>Allocated to</th>
+                  <th>Assigned</th>
                   <th>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {smsRows.length === 0 ? (
+                {filteredUssdAllocated.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="muted">
-                      No messages.
+                    <td colSpan={4} className="muted">
+                      No allocated codes.
                     </td>
                   </tr>
                 ) : (
-                  smsRows.map((row) => {
-                    const canRetry = row.status === 'FAILED' || row.status === 'PENDING'
-                    return (
-                      <tr key={row.id || row.updated_at}>
-                        <td>{row.to_phone || ''}</td>
-                        <td>{row.template_code || ''}</td>
-                        <td>{row.status || ''}</td>
-                        <td>{row.tries ?? ''}</td>
-                        <td>{row.updated_at ? new Date(row.updated_at).toLocaleString() : ''}</td>
-                        <td>{row.error_message || ''}</td>
-                        <td>
-                          {canRetry ? (
-                            <button className="btn ghost" type="button" onClick={() => retrySms(row.id)}>
-                              Retry
-                            </button>
-                          ) : null}
-                        </td>
-                      </tr>
-                    )
-                  })
+                  filteredUssdAllocated.map((row, idx) => (
+                    <tr key={row.id || row.full_code || row.code || idx}>
+                      <td>{formatUssdCode(row)}</td>
+                      <td>{formatUssdOwner(row)}</td>
+                      <td>{row.allocated_at ? new Date(row.allocated_at).toLocaleString() : '-'}</td>
+                      <td>
+                        <button className="btn ghost" type="button" onClick={() => releaseUssd(row)}>
+                          Release
+                        </button>
+                      </td>
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>
           </div>
+        </div>
+      </section>
+        </>
+      ) : null}
+
+      {activeTab === 'sms' ? (
+        <>
+      <section className="card">
+        <div className="topline">
+          <h3 style={{ margin: 0 }}>SMS control</h3>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn ghost" type="button" onClick={() => loadSms(smsFilter)}>
+              Refresh
+            </button>
+            <button
+              className="btn"
+              type="button"
+              onClick={() => retrySmsBatch(retryableSmsRows)}
+              disabled={retryableSmsRows.length === 0}
+            >
+              Retry failed/pending{retryableSmsRows.length ? ` (${retryableSmsRows.length})` : ''}
+            </button>
+            <button className="btn ghost" type="button" onClick={exportSmsCsv}>
+              Export CSV
+            </button>
+            <button className="btn ghost" type="button" onClick={exportSmsJson}>
+              Export JSON
+            </button>
+          </div>
+        </div>
+        <div className="row" style={{ marginTop: 8 }}>
+          <label className="muted small">
+            Status:{' '}
+            <select
+              value={smsFilter}
+              onChange={(e) => {
+                const val = e.target.value
+                setSmsFilter(val)
+                loadSms(val)
+              }}
+            >
+              <option value="">Any</option>
+              <option value="FAILED">Failed</option>
+              <option value="PENDING">Pending</option>
+              <option value="SUCCESS">Success</option>
+            </select>
+          </label>
+          <input
+            className="input"
+            placeholder="Search phone, template, error"
+            value={smsSearch}
+            onChange={(e) => setSmsSearch(e.target.value)}
+            style={{ maxWidth: 240 }}
+          />
+          <span className="muted small">{filteredSmsRows.length} message(s)</span>
+        </div>
+        {smsError ? <div className="err">SMS error: {smsError}</div> : null}
+        <div className="table-wrap" style={{ maxHeight: 360 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>To</th>
+                <th>Template</th>
+                <th>Status</th>
+                <th>Tries</th>
+                <th>Updated</th>
+                <th>Error</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredSmsRows.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="muted">
+                    No messages.
+                  </td>
+                </tr>
+              ) : (
+                filteredSmsRows.map((row) => {
+                  const canRetry = row.status === 'FAILED' || row.status === 'PENDING'
+                  return (
+                    <tr key={row.id || row.updated_at}>
+                      <td>{row.to_phone || ''}</td>
+                      <td>{row.template_code || ''}</td>
+                      <td>{row.status || ''}</td>
+                      <td>{row.tries ?? ''}</td>
+                      <td>{row.updated_at ? new Date(row.updated_at).toLocaleString() : ''}</td>
+                      <td>{row.error_message || ''}</td>
+                      <td>
+                        {canRetry ? (
+                          <button className="btn ghost" type="button" onClick={() => retrySms(row.id)}>
+                            Retry
+                          </button>
+                        ) : null}
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       </section>
         </>

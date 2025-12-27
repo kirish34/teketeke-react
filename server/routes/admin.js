@@ -512,6 +512,42 @@ router.delete('/user-roles/:user_id', async (req,res)=>{
 });
 
 // USSD Pool
+function normalizeUssdPrefix(raw){
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return '*001*';
+  if (trimmed.endsWith('*')) return trimmed;
+  return `${trimmed}*`;
+}
+
+function parseUssdEntry(entry, prefix){
+  const trimmed = String(entry || '').trim();
+  if (!trimmed) return null;
+  const cleaned = trimmed.replace(/\s+/g, '');
+  const hasSymbols = cleaned.includes('*') || cleaned.includes('#');
+  if (hasSymbols) {
+    const full = cleaned.endsWith('#') ? cleaned : `${cleaned}#`;
+    const lastStar = full.lastIndexOf('*');
+    if (lastStar === -1) return { error: `invalid ussd code: ${trimmed}` };
+    const body = full.slice(lastStar + 1).replace(/#$/, '');
+    if (body.length < 2) return { error: `invalid ussd code: ${trimmed}` };
+    const base = body.slice(0, -1);
+    const checksum = Number(body.slice(-1));
+    if (!/^\d+$/.test(base) || Number.isNaN(checksum)) {
+      return { error: `invalid ussd code: ${trimmed}` };
+    }
+    return { full_code: full, base, checksum };
+  }
+
+  const digits = cleaned.replace(/\D/g, '');
+  if (!digits) return { error: `invalid base: ${trimmed}` };
+  const checksum = Number(digits) % 9;
+  return {
+    full_code: `${prefix}${digits}${checksum}#`,
+    base: digits,
+    checksum,
+  };
+}
+
 router.get('/ussd/pool/available', async (_req,res)=>{
   const { data, error } = await supabaseAdmin.from('ussd_pool').select('*').eq('status','AVAILABLE').order('base');
   if (error) return res.status(500).json({ error: error.message });
@@ -546,6 +582,78 @@ router.post('/ussd/bind-from-pool', async (req,res)=>{
   const { error: ue } = await supabaseAdmin.from('ussd_pool').update(upd).eq('id', row.id);
   if (ue) return res.status(500).json({ success:false, error: ue.message });
   res.json({ success:true, ussd_code: code });
+});
+
+router.post('/ussd/pool/release', async (req,res)=>{
+  const id = req.body?.id || null;
+  const code = req.body?.ussd_code || null;
+  if (!id && !code) return res.status(400).json({ success:false, error:'id or ussd_code required' });
+  let q = supabaseAdmin.from('ussd_pool')
+    .update({ status:'AVAILABLE', allocated_at: null, allocated_to_type: null, allocated_to_id: null })
+    .eq('status','ALLOCATED');
+  if (id) q = q.eq('id', id);
+  if (code) q = q.eq('full_code', code);
+  const { data, error } = await q.select().maybeSingle();
+  if (error) return res.status(500).json({ success:false, error: error.message });
+  if (!data) return res.status(404).json({ success:false, error:'code not found' });
+  res.json({ success:true, ussd_code: data.full_code });
+});
+
+router.post('/ussd/pool/import', async (req,res)=>{
+  const prefix = normalizeUssdPrefix(req.body?.prefix || '*001*');
+  const raw = req.body?.raw || '';
+  const codes = Array.isArray(req.body?.codes) ? req.body.codes : null;
+  const lines = codes && codes.length ? codes : String(raw).split(/\r?\n/);
+  const errors = [];
+  const parsed = [];
+
+  for (const line of lines) {
+    const result = parseUssdEntry(line, prefix);
+    if (!result) continue;
+    if (result.error) {
+      errors.push(result.error);
+      continue;
+    }
+    parsed.push(result);
+  }
+
+  const deduped = new Map();
+  parsed.forEach((row) => {
+    if (row.full_code) deduped.set(row.full_code, row);
+  });
+
+  const rows = Array.from(deduped.values()).map((row) => ({
+    base: row.base,
+    checksum: row.checksum,
+    full_code: row.full_code,
+    status: 'AVAILABLE',
+  }));
+
+  if (!rows.length) {
+    return res.status(400).json({ ok:false, error:'no valid codes found', errors });
+  }
+
+  const fullCodes = rows.map((row) => row.full_code);
+  let existing = [];
+  if (fullCodes.length) {
+    const existingRes = await supabaseAdmin.from('ussd_pool').select('full_code').in('full_code', fullCodes);
+    if (existingRes.error) return res.status(500).json({ ok:false, error: existingRes.error.message, errors });
+    existing = existingRes.data || [];
+  }
+  const existingSet = new Set(existing.map((row) => row.full_code));
+  const toInsert = rows.filter((row) => !existingSet.has(row.full_code));
+
+  if (toInsert.length) {
+    const { error } = await supabaseAdmin.from('ussd_pool').insert(toInsert);
+    if (error) return res.status(500).json({ ok:false, error: error.message, errors });
+  }
+
+  res.json({
+    ok: true,
+    inserted: toInsert.length,
+    skipped: rows.length - toInsert.length,
+    errors,
+  });
 });
 
 // Transactions for dashboard tables
