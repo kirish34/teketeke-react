@@ -88,15 +88,46 @@ router.get('/ping', (_req,res)=> res.json({ ok:true }));
 // Overview
 router.get('/system-overview', async (_req, res) => {
   try {
-    const [{ count: saccos }, { count: matatus }, { count: staff }, { data: txTodayRows }] = await Promise.all([
-      supabaseAdmin.from('saccos').select('*', { count:'exact', head:true }),
-      supabaseAdmin.from('matatus').select('*', { count:'exact', head:true }),
-      supabaseAdmin.from('staff_profiles').select('*', { count:'exact', head:true }),
-      supabaseAdmin.rpc('count_tx_today')
+    const [
+      { count: saccos },
+      { count: matatus },
+      { count: taxis },
+      { count: bodas },
+      { count: staff },
+      { data: txTodayRows },
+    ] = await Promise.all([
+      supabaseAdmin.from('saccos').select('*', { count: 'exact', head: true }),
+      supabaseAdmin
+        .from('matatus')
+        .select('*', { count: 'exact', head: true })
+        .or('vehicle_type.eq.MATATU,vehicle_type.is.null'),
+      supabaseAdmin
+        .from('matatus')
+        .select('*', { count: 'exact', head: true })
+        .eq('vehicle_type', 'TAXI'),
+      supabaseAdmin
+        .from('matatus')
+        .select('*', { count: 'exact', head: true })
+        .or('vehicle_type.eq.BODABODA,vehicle_type.eq.BODA'),
+      supabaseAdmin.from('staff_profiles').select('*', { count: 'exact', head: true }),
+      supabaseAdmin.rpc('count_tx_today'),
     ]);
     const { data: poolAvail } = await supabaseAdmin.from('ussd_pool').select('id').eq('status','AVAILABLE');
     const { data: poolAll }   = await supabaseAdmin.from('ussd_pool').select('id', { count: 'exact' });
-    res.json({ counts: { saccos: saccos||0, matatus: matatus||0, cashiers: staff||0, tx_today: (txTodayRows||0) }, ussd_pool: { available: (poolAvail||[]).length, total: (poolAll?.length||0) } });
+    res.json({
+      counts: {
+        saccos: saccos || 0,
+        matatus: matatus || 0,
+        taxis: taxis || 0,
+        bodas: bodas || 0,
+        cashiers: staff || 0,
+        tx_today: txTodayRows || 0,
+      },
+      ussd_pool: {
+        available: (poolAvail || []).length,
+        total: poolAll?.length || 0,
+      },
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
