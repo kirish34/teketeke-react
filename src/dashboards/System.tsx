@@ -755,7 +755,7 @@ const SystemDashboard = () => {
                 ) : (
                   rows.map((v) => (
                     <tr key={v.id || v.plate || v.registration}>
-                      <td>{v.plate || v.registration || '-'}</td>
+                      <td>{v.plate || v.number_plate || v.registration || '-'}</td>
                       <td>{v.owner_name || '-'}</td>
                       <td>{v.owner_phone || '-'}</td>
                       <td>{v.sacco_name || v.sacco || '-'}</td>
