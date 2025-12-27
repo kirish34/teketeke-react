@@ -3,12 +3,13 @@
 require('dotenv').config();
 const { Pool } = require('pg');
 
-if (!process.env.SUPABASE_DB_URL) {
-  throw new Error('SUPABASE_DB_URL is not set in .env');
+const dbUrl = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
+if (!dbUrl) {
+  throw new Error('DATABASE_URL is not set in .env');
 }
 
 const pool = new Pool({
-  connectionString: process.env.SUPABASE_DB_URL,
+  connectionString: dbUrl,
   ssl: {
     rejectUnauthorized: false, // Supabase uses SSL; allow self-signed
   },
