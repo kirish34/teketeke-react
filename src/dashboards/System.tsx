@@ -470,14 +470,6 @@ const SystemDashboard = () => {
     }
   }, [routePathText])
 
-  const matatuById = useMemo(() => {
-    const map = new Map<string, VehicleRow>()
-    matatus.forEach((row) => {
-      if (row.id) map.set(row.id, row)
-    })
-    return map
-  }, [matatus])
-
   const saccoById = useMemo(() => {
     const map = new Map<string, SaccoRow>()
     saccos.forEach((row) => {
