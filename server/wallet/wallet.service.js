@@ -475,19 +475,28 @@ async function registerWalletForEntity({ entityType, entityId, numericRef }) {
   if (!entityId) throw new Error('entityId is required');
 
   const type = String(entityType).toUpperCase();
+  let walletType;
+  let saccoId = null;
+  let matatuId = null;
   let tableName;
   switch (type) {
     case 'MATATU':
       tableName = 'matatus';
+      walletType = 'matatu';
+      matatuId = entityId;
       break;
     case 'SACCO':
       tableName = 'saccos';
+      walletType = 'sacco';
+      saccoId = entityId;
       break;
     case 'TAXI':
       tableName = 'taxis';
+      walletType = 'matatu';
       break;
     case 'BODA':
       tableName = 'bodabodas';
+      walletType = 'matatu';
       break;
     default:
       throw new Error(`Unknown entityType ${entityType}`);
@@ -504,11 +513,13 @@ async function registerWalletForEntity({ entityType, entityId, numericRef }) {
       try {
         const walletRes = await client.query(
           `
-            INSERT INTO wallets (entity_type, entity_id, virtual_account_code, balance)
-            VALUES ($1, $2, $3, 0)
-            RETURNING id, virtual_account_code, balance
+            INSERT INTO wallets
+              (entity_type, entity_id, virtual_account_code, balance, wallet_type, wallet_code, sacco_id, matatu_id)
+            VALUES
+              ($1, $2, $3, 0, $4, $5, $6, $7)
+            RETURNING id, virtual_account_code, wallet_code, wallet_type, balance
           `,
-          [type, entityId, code]
+          [type, entityId, code, walletType, code, saccoId, matatuId]
         );
         walletRow = walletRes.rows[0];
         break;
