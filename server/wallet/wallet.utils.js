@@ -18,6 +18,7 @@ function generateVirtualAccountCode(entityType, numericRef) {
     case 'TAXI':
       return `TAX${pad(n, 4)}`;
     case 'BODA':
+    case 'BODABODA':
       return `BOD${pad(n, 4)}`;
     default:
       throw new Error(`Unknown entityType for wallet code: ${entityType}`);

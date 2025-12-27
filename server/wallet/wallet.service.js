@@ -495,6 +495,7 @@ async function registerWalletForEntity({ entityType, entityId, numericRef }) {
       walletType = 'matatu';
       matatuId = entityId;
       break;
+    case 'BODABODA':
     case 'BODA':
       tableName = 'matatus';
       walletType = 'matatu';
