@@ -98,16 +98,15 @@ html {
 .sys-nav {
   display: flex;
   gap: 8px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   margin: 12px 0 18px;
   align-items: center;
   background: linear-gradient(180deg, rgba(94, 234, 212, 0.34) 0%, rgba(94, 234, 212, 0.22) 100%);
-  padding: 8px;
-  border-radius: 999px;
+  padding: 10px;
+  border-radius: 16px;
   border: 1px solid rgba(15, 23, 42, 0.08);
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
-  overflow-x: auto;
-  scrollbar-width: none;
+  overflow-x: visible;
 }
 
 .sys-nav::-webkit-scrollbar {
