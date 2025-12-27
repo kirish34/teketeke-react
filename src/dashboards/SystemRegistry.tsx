@@ -17,6 +17,7 @@ export default function SystemRegistry() {
   const navigate = useNavigate()
   const tabs: Array<{ id: SystemTabId; label: string }> = [
     { id: 'overview', label: 'Overview' },
+    { id: 'registry', label: 'System Registry' },
     { id: 'finance', label: 'Finance' },
     { id: 'saccos', label: 'SACCOs' },
     { id: 'matatu', label: 'Matatu' },
@@ -25,7 +26,6 @@ export default function SystemRegistry() {
     { id: 'ussd', label: 'USSD Pool' },
     { id: 'logins', label: 'Logins' },
     { id: 'routes', label: 'Routes Overview' },
-    { id: 'registry', label: 'System Registry' },
   ]
   return (
     <DashboardShell title="System Registry" hideNav>

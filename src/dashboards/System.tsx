@@ -313,6 +313,7 @@ const SystemDashboard = () => {
 
   const tabs: Array<{ id: SystemTabId; label: string }> = [
     { id: 'overview', label: 'Overview' },
+    { id: 'registry', label: 'System Registry' },
     { id: 'finance', label: 'Finance' },
     { id: 'saccos', label: 'SACCOs' },
     { id: 'matatu', label: 'Matatu' },
@@ -321,7 +322,6 @@ const SystemDashboard = () => {
     { id: 'ussd', label: 'USSD Pool' },
     { id: 'logins', label: 'Logins' },
     { id: 'routes', label: 'Routes Overview' },
-    { id: 'registry', label: 'System Registry' },
   ]
 
   const tabFromState = tabs.find((t) => t.id === (location.state as { tab?: string } | null)?.tab)?.id || null
