@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import DashboardShell from '../components/DashboardShell'
 import { authFetch } from '../lib/auth'
 
@@ -107,7 +108,17 @@ type AdminLogin = {
   matatu_id?: string | null
 }
 
-type SystemTabId = 'overview' | 'finance' | 'saccos' | 'matatu' | 'taxis' | 'bodabodas' | 'ussd' | 'logins' | 'routes'
+type SystemTabId =
+  | 'overview'
+  | 'finance'
+  | 'saccos'
+  | 'matatu'
+  | 'taxis'
+  | 'bodabodas'
+  | 'ussd'
+  | 'logins'
+  | 'routes'
+  | 'registry'
 
 type VehicleKind = 'MATATU' | 'TAXI' | 'BODABODA'
 
@@ -297,6 +308,8 @@ const SystemDashboard = () => {
   const [loginMsg, setLoginMsg] = useState('')
 
   const [activeTab, setActiveTab] = useState<SystemTabId>('overview')
+  const navigate = useNavigate()
+  const location = useLocation()
 
   const tabs: Array<{ id: SystemTabId; label: string }> = [
     { id: 'overview', label: 'Overview' },
@@ -308,7 +321,15 @@ const SystemDashboard = () => {
     { id: 'ussd', label: 'USSD Pool' },
     { id: 'logins', label: 'Logins' },
     { id: 'routes', label: 'Routes Overview' },
+    { id: 'registry', label: 'System Registry' },
   ]
+
+  const tabFromState = tabs.find((t) => t.id === (location.state as { tab?: string } | null)?.tab)?.id || null
+
+  useEffect(() => {
+    if (!tabFromState || tabFromState === 'registry') return
+    setActiveTab((prev) => (prev === tabFromState ? prev : tabFromState))
+  }, [tabFromState])
 
   const vehicleTabMeta: Record<VehicleTabKey, { label: string; plural: string; type: VehicleKind }> = {
     matatu: { label: 'Matatu', plural: 'Matatus', type: 'MATATU' },
@@ -758,7 +779,13 @@ const SystemDashboard = () => {
             key={t.id}
             type="button"
             className={`sys-tab${activeTab === t.id ? ' active' : ''}`}
-            onClick={() => setActiveTab(t.id)}
+            onClick={() => {
+              if (t.id === 'registry') {
+                navigate('/system/registry')
+                return
+              }
+              setActiveTab(t.id)
+            }}
           >
             {t.label}
           </button>
