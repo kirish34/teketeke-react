@@ -1,7 +1,7 @@
 const express = require('express');
 const { supabaseAdmin } = require('../supabase');
 const pool = require('../db/pool');
-const { creditWallet, registerWalletForEntity } = require('../wallet/wallet.service');
+const { creditFareWithFees, creditWallet, registerWalletForEntity } = require('../wallet/wallet.service');
 const { requireUser } = require('../middleware/auth');
 const router = express.Router();
 
@@ -68,6 +68,20 @@ function parseDateRange(query = {}) {
     from: from.toISOString(),
     to: to.toISOString(),
   };
+}
+
+function normalizeDateBounds(fromRaw, toRaw) {
+  const from = fromRaw ? new Date(fromRaw) : null;
+  const to = toRaw ? new Date(toRaw) : null;
+  const dateOnly = (value) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+
+  if (from && Number.isNaN(from.getTime())) return { from: null, to: null };
+  if (to && Number.isNaN(to.getTime())) return { from: null, to: null };
+
+  if (from && dateOnly(fromRaw)) from.setHours(0, 0, 0, 0);
+  if (to && dateOnly(toRaw)) to.setHours(23, 59, 59, 999);
+
+  return { from, to };
 }
 
 function deriveNumericRef(...values) {
@@ -306,6 +320,172 @@ router.get('/withdrawals', async (req, res) => {
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// C2B payments log
+router.get('/c2b-payments', async (req, res) => {
+  const status = String(req.query.status || '').toLowerCase();
+  const q = String(req.query.q || '').trim();
+  const { from, to } = normalizeDateBounds(req.query.from, req.query.to);
+  const limitRaw = Number(req.query.limit);
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+  const offsetRaw = Number(req.query.offset);
+  const pageRaw = Number(req.query.page);
+  let offset = 0;
+  if (Number.isFinite(offsetRaw) && offsetRaw >= 0) {
+    offset = offsetRaw;
+  } else if (Number.isFinite(pageRaw) && pageRaw > 1) {
+    offset = (pageRaw - 1) * limit;
+  }
+
+  const params = [];
+  const where = [];
+  if (status === 'processed') where.push('processed = true');
+  if (status === 'pending') where.push('(processed = false OR processed IS NULL)');
+  if (q) {
+    params.push(`%${q}%`);
+    const idx = params.length;
+    where.push(
+      `(mpesa_receipt ILIKE $${idx} OR phone_number ILIKE $${idx} OR account_reference ILIKE $${idx} OR paybill_number ILIKE $${idx})`
+    );
+  }
+  if (from) {
+    params.push(from.toISOString());
+    where.push(`transaction_timestamp >= $${params.length}`);
+  }
+  if (to) {
+    params.push(to.toISOString());
+    where.push(`transaction_timestamp <= $${params.length}`);
+  }
+
+  const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  try {
+    const countRes = await pool.query(
+      `
+        SELECT COUNT(*)::int AS total
+        FROM paybill_payments_raw
+        ${whereClause}
+      `,
+      params
+    );
+    const total = countRes.rows[0]?.total || 0;
+
+    params.push(limit);
+    params.push(offset);
+    const { rows } = await pool.query(
+      `
+        SELECT
+          id,
+          mpesa_receipt,
+          phone_number,
+          amount,
+          paybill_number,
+          account_reference,
+          transaction_timestamp,
+          processed,
+          processed_at
+        FROM paybill_payments_raw
+        ${whereClause}
+        ORDER BY transaction_timestamp DESC NULLS LAST, id DESC
+        LIMIT $${params.length - 1}
+        OFFSET $${params.length}
+      `,
+      params
+    );
+    res.json({ ok: true, items: rows || [], total, limit, offset });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Fetch raw C2B payload
+router.get('/c2b-payments/:id/raw', async (req, res) => {
+  const id = req.params.id;
+  if (!id) return res.status(400).json({ ok: false, error: 'id required' });
+  try {
+    const { rows } = await pool.query(
+      `
+        SELECT raw_payload
+        FROM paybill_payments_raw
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [id]
+    );
+    if (!rows.length) return res.status(404).json({ ok: false, error: 'not found' });
+    res.json({ ok: true, payload: rows[0].raw_payload });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Reprocess a C2B payment
+router.post('/c2b-payments/:id/reprocess', async (req, res) => {
+  const id = req.params.id;
+  if (!id) return res.status(400).json({ ok: false, error: 'id required' });
+  try {
+    const { rows } = await pool.query(
+      `
+        SELECT
+          id,
+          mpesa_receipt,
+          phone_number,
+          amount,
+          account_reference,
+          processed
+        FROM paybill_payments_raw
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [id]
+    );
+    if (!rows.length) return res.status(404).json({ ok: false, error: 'not found' });
+    const row = rows[0];
+    if (row.processed) {
+      return res.status(400).json({ ok: false, error: 'already processed' });
+    }
+    if (!row.account_reference) {
+      return res.status(400).json({ ok: false, error: 'missing account reference' });
+    }
+    const amount = Number(row.amount || 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ ok: false, error: 'invalid amount' });
+    }
+
+    const sourceRef = row.mpesa_receipt || String(row.id);
+    const existing = await pool.query(
+      `
+        SELECT id
+        FROM wallet_transactions
+        WHERE source = 'MPESA_C2B' AND source_ref = $1
+        LIMIT 1
+      `,
+      [sourceRef]
+    );
+    if (existing.rows.length) {
+      await pool.query(
+        `UPDATE paybill_payments_raw SET processed = true, processed_at = now() WHERE id = $1`,
+        [row.id]
+      );
+      return res.json({ ok: true, message: 'Already credited; marked processed' });
+    }
+
+    const result = await creditFareWithFees({
+      virtualAccountCode: row.account_reference,
+      amount,
+      source: 'MPESA_C2B',
+      sourceRef,
+      description: `M-Pesa fare from ${row.phone_number || 'unknown'}`,
+    });
+
+    await pool.query(
+      `UPDATE paybill_payments_raw SET processed = true, processed_at = now() WHERE id = $1`,
+      [row.id]
+    );
+    return res.json({ ok: true, message: 'Reprocessed', data: result });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
   }
 });
 

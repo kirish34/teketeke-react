@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import DashboardShell from '../components/DashboardShell'
 import { authFetch } from '../lib/auth'
@@ -60,6 +60,31 @@ type WithdrawalInlineEdit = {
   busy?: boolean
   error?: string
   msg?: string
+}
+
+type C2bPaymentRow = {
+  id?: string
+  mpesa_receipt?: string
+  phone_number?: string
+  amount?: number
+  paybill_number?: string
+  account_reference?: string
+  transaction_timestamp?: string
+  processed?: boolean
+  processed_at?: string
+}
+
+type C2bActionState = {
+  busy?: boolean
+  error?: string
+  msg?: string
+}
+
+type C2bRawState = {
+  open?: boolean
+  loading?: boolean
+  payload?: string
+  error?: string
 }
 
 type WalletSummary = {
@@ -157,6 +182,7 @@ type AdminLogin = {
 type SystemTabId =
   | 'overview'
   | 'finance'
+  | 'c2b'
   | 'saccos'
   | 'matatu'
   | 'taxis'
@@ -418,6 +444,17 @@ const SystemDashboard = () => {
   const [withdrawals, setWithdrawals] = useState<WithdrawalRow[]>([])
   const [withdrawError, setWithdrawError] = useState<string | null>(null)
 
+  const [c2bRange, setC2bRange] = useState<'today' | 'week' | 'month'>('week')
+  const [c2bStatus, setC2bStatus] = useState('')
+  const [c2bSearch, setC2bSearch] = useState('')
+  const [c2bPage, setC2bPage] = useState(1)
+  const [c2bLimit, setC2bLimit] = useState(50)
+  const [c2bTotal, setC2bTotal] = useState(0)
+  const [c2bRows, setC2bRows] = useState<C2bPaymentRow[]>([])
+  const [c2bError, setC2bError] = useState<string | null>(null)
+  const [c2bActions, setC2bActions] = useState<Record<string, C2bActionState>>({})
+  const [c2bRawState, setC2bRawState] = useState<Record<string, C2bRawState>>({})
+
   const [walletCode, setWalletCode] = useState('')
   const [walletSummary, setWalletSummary] = useState<WalletSummary | null>(null)
   const [walletTx, setWalletTx] = useState<WalletTx[]>([])
@@ -555,6 +592,7 @@ const SystemDashboard = () => {
     { id: 'overview', label: 'Overview' },
     { id: 'registry', label: 'System Registry' },
     { id: 'finance', label: 'Finance' },
+    { id: 'c2b', label: 'C2B Payments' },
     { id: 'saccos', label: 'SACCOs' },
     { id: 'matatu', label: 'Matatu' },
     { id: 'taxis', label: 'Taxis' },
@@ -875,6 +913,116 @@ const SystemDashboard = () => {
     }
   }
 
+  function updateC2bAction(id: string, patch: Partial<C2bActionState>) {
+    setC2bActions((prev) => ({
+      ...prev,
+      [id]: { ...(prev[id] || {}), ...patch },
+    }))
+  }
+
+  async function loadC2bPayments({
+    rangeKey,
+    status,
+    search,
+    page,
+    limit,
+  }: {
+    rangeKey?: 'today' | 'week' | 'month'
+    status?: string
+    search?: string
+    page?: number
+    limit?: number
+  } = {}) {
+    const range = getRange(rangeKey || c2bRange)
+    const statusValue = status !== undefined ? status : c2bStatus
+    const searchValue = search !== undefined ? search : c2bSearch
+    const pageValue = page !== undefined ? page : c2bPage
+    const limitValue = limit !== undefined ? limit : c2bLimit
+    if (rangeKey) setC2bRange(rangeKey)
+    if (status !== undefined) setC2bStatus(statusValue)
+    if (search !== undefined) setC2bSearch(searchValue)
+    if (page !== undefined) setC2bPage(pageValue)
+    if (limit !== undefined) setC2bLimit(limitValue)
+    try {
+      const params = new URLSearchParams()
+      params.set('from', range.from)
+      params.set('to', range.to)
+      if (statusValue) params.set('status', statusValue)
+      if (searchValue.trim()) params.set('q', searchValue.trim())
+      params.set('limit', String(limitValue))
+      params.set('offset', String(Math.max(0, (pageValue - 1) * limitValue)))
+      const res = await fetchJson<{ items?: C2bPaymentRow[]; total?: number }>(
+        `/api/admin/c2b-payments?${params.toString()}`,
+      )
+      setC2bRows(res.items || [])
+      setC2bTotal(res.total || 0)
+      setC2bError(null)
+    } catch (err) {
+      setC2bRows([])
+      setC2bTotal(0)
+      setC2bError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function reprocessC2b(row: C2bPaymentRow) {
+    const id = row.id || ''
+    if (!id) return
+    updateC2bAction(id, { busy: true, error: '', msg: '' })
+    try {
+      const res = await sendJson<{ message?: string }>(
+        `/api/admin/c2b-payments/${encodeURIComponent(id)}/reprocess`,
+        'POST',
+        {},
+      )
+      updateC2bAction(id, { busy: false, error: '', msg: res?.message || 'Reprocessed' })
+      await loadC2bPayments()
+    } catch (err) {
+      updateC2bAction(id, {
+        busy: false,
+        error: err instanceof Error ? err.message : 'Reprocess failed',
+        msg: '',
+      })
+    }
+  }
+
+  function toggleC2bRaw(id: string) {
+    setC2bRawState((prev) => {
+      const current = prev[id] || {}
+      const open = !current.open
+      return { ...prev, [id]: { ...current, open } }
+    })
+  }
+
+  async function loadC2bRaw(id: string) {
+    setC2bRawState((prev) => ({
+      ...prev,
+      [id]: { ...(prev[id] || {}), loading: true, error: '' },
+    }))
+    try {
+      const res = await fetchJson<{ payload?: unknown }>(`/api/admin/c2b-payments/${encodeURIComponent(id)}/raw`)
+      const payload = JSON.stringify(res?.payload ?? null, null, 2)
+      setC2bRawState((prev) => ({
+        ...prev,
+        [id]: { ...(prev[id] || {}), loading: false, payload },
+      }))
+    } catch (err) {
+      setC2bRawState((prev) => ({
+        ...prev,
+        [id]: {
+          ...(prev[id] || {}),
+          loading: false,
+          error: err instanceof Error ? err.message : 'Failed to load payload',
+        },
+      }))
+    }
+  }
+
+  function ensureC2bRaw(id: string) {
+    const current = c2bRawState[id]
+    if (current?.payload || current?.loading) return
+    void loadC2bRaw(id)
+  }
+
   useEffect(() => {
     if (!routeMapOpen || !routeEditId) return
     let cancelled = false
@@ -1117,6 +1265,37 @@ const SystemDashboard = () => {
         msg: '',
       })
     }
+  }
+
+  function exportC2bCsv() {
+    const headers: CsvHeader[] = [
+      { key: 'id', label: 'ID' },
+      { key: 'mpesa_receipt', label: 'M-Pesa Receipt' },
+      { key: 'phone_number', label: 'Phone' },
+      { key: 'amount', label: 'Amount' },
+      { key: 'paybill_number', label: 'Paybill' },
+      { key: 'account_reference', label: 'Account' },
+      { key: 'transaction_timestamp', label: 'Transaction Time' },
+      { key: 'processed', label: 'Processed' },
+      { key: 'processed_at', label: 'Processed At' },
+    ]
+    const rows: CsvRow[] = c2bRows.map((row) => ({
+      id: row.id || '',
+      mpesa_receipt: row.mpesa_receipt || '',
+      phone_number: row.phone_number || '',
+      amount: row.amount ?? 0,
+      paybill_number: row.paybill_number || '',
+      account_reference: row.account_reference || '',
+      transaction_timestamp: row.transaction_timestamp || '',
+      processed: row.processed ? 'true' : 'false',
+      processed_at: row.processed_at || '',
+    }))
+    const csv = buildCsv(headers, rows)
+    downloadFile('c2b-payments.csv', csv, 'text/csv;charset=utf-8;')
+  }
+
+  function exportC2bJson() {
+    downloadJson('c2b-payments.json', c2bRows)
   }
 
   async function loadUssd() {
@@ -1602,6 +1781,7 @@ const SystemDashboard = () => {
 
       await loadSaccoSummary('month')
       await loadWithdrawals('', getRange('month'))
+      await loadC2bPayments()
       await loadUssd()
       await loadSms('')
       await loadSmsSettings()
@@ -2351,6 +2531,205 @@ const SystemDashboard = () => {
             <span className="muted small">{walletBankMsg}</span>
           </div>
           {walletBankError ? <div className="err">Bank withdrawal error: {walletBankError}</div> : null}
+        </div>
+      </section>
+        </>
+      ) : null}
+
+      {activeTab === 'c2b' ? (
+        <>
+      <section className="card">
+        <div className="topline">
+          <h3 style={{ margin: 0 }}>C2B payments log</h3>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn ghost" type="button" onClick={() => loadC2bPayments()}>
+              Refresh
+            </button>
+          </div>
+        </div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <label className="muted small">
+              Period:{' '}
+              <select
+                value={c2bRange}
+                onChange={(e) =>
+                  loadC2bPayments({
+                    rangeKey: (e.target.value as 'today' | 'week' | 'month') || 'week',
+                    page: 1,
+                  })
+                }
+              >
+                <option value="today">Today</option>
+                <option value="week">This week</option>
+                <option value="month">This month</option>
+              </select>
+            </label>
+            <label className="muted small">
+              Status:{' '}
+              <select
+                value={c2bStatus}
+                onChange={(e) => loadC2bPayments({ status: e.target.value, page: 1 })}
+              >
+                <option value="">Any</option>
+                <option value="pending">Pending</option>
+                <option value="processed">Processed</option>
+              </select>
+            </label>
+            <input
+              className="input"
+              placeholder="Search receipt, phone, paybill, account"
+              value={c2bSearch}
+              onChange={(e) => setC2bSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  void loadC2bPayments({ search: (e.currentTarget as HTMLInputElement).value, page: 1 })
+                }
+              }}
+              style={{ maxWidth: 260 }}
+            />
+          <button className="btn ghost" type="button" onClick={() => loadC2bPayments({ search: c2bSearch, page: 1 })}>
+            Apply
+          </button>
+          <button className="btn ghost" type="button" onClick={exportC2bCsv}>
+            Export CSV
+          </button>
+          <button className="btn ghost" type="button" onClick={exportC2bJson}>
+            Export JSON
+          </button>
+          <span className="muted small">
+            {c2bTotal ? `Showing ${(c2bPage - 1) * c2bLimit + 1}-${Math.min(c2bTotal, c2bPage * c2bLimit)} of ${c2bTotal}` : '0 rows'}
+          </span>
+        </div>
+        <div className="row" style={{ marginTop: 8 }}>
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={() => loadC2bPayments({ page: Math.max(1, c2bPage - 1) })}
+            disabled={c2bPage <= 1}
+          >
+            Prev
+          </button>
+          <span className="muted small">
+            Page {c2bPage} of {Math.max(1, Math.ceil(c2bTotal / c2bLimit || 1))}
+          </span>
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={() =>
+              loadC2bPayments({
+                page: Math.min(Math.max(1, Math.ceil(c2bTotal / c2bLimit || 1)), c2bPage + 1),
+              })
+            }
+            disabled={c2bPage >= Math.max(1, Math.ceil(c2bTotal / c2bLimit || 1))}
+          >
+            Next
+          </button>
+          <label className="muted small">
+            Page size:{' '}
+            <select
+              value={c2bLimit}
+              onChange={(e) => loadC2bPayments({ limit: Number(e.target.value), page: 1 })}
+            >
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={200}>200</option>
+            </select>
+          </label>
+        </div>
+        {c2bError ? <div className="err">C2B error: {c2bError}</div> : null}
+        <div className="table-wrap" style={{ marginTop: 8 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Receipt</th>
+                <th>Phone</th>
+                <th>Amount</th>
+                <th>Paybill</th>
+                <th>Account</th>
+                <th>Status</th>
+                <th>Processed at</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {c2bRows.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="muted">
+                    No C2B payments found.
+                  </td>
+                </tr>
+              ) : (
+                c2bRows.map((row) => {
+                  const id = row.id || ''
+                  const action = id ? c2bActions[id] : null
+                  const rawState = id ? c2bRawState[id] : null
+                  const processed = !!row.processed
+                  const open = !!rawState?.open
+                  return (
+                    <Fragment key={id || row.mpesa_receipt || row.transaction_timestamp}>
+                      <tr>
+                        <td className="mono">
+                          {row.transaction_timestamp ? new Date(row.transaction_timestamp).toLocaleString() : '-'}
+                        </td>
+                        <td className="mono">{row.mpesa_receipt || row.id || '-'}</td>
+                        <td>{row.phone_number || '-'}</td>
+                        <td>{formatKes(row.amount)}</td>
+                        <td>{row.paybill_number || '-'}</td>
+                        <td className="mono">{row.account_reference || '-'}</td>
+                        <td>{processed ? 'Processed' : 'Pending'}</td>
+                        <td className="mono">
+                          {row.processed_at ? new Date(row.processed_at).toLocaleString() : '-'}
+                        </td>
+                        <td>
+                          <div style={{ display: 'grid', gap: 6 }}>
+                            <button
+                              className="btn ghost"
+                              type="button"
+                              onClick={() => {
+                                if (!id) return
+                                toggleC2bRaw(id)
+                                if (!open) ensureC2bRaw(id)
+                              }}
+                              disabled={!id || !!rawState?.loading}
+                            >
+                              {open ? 'Hide raw' : 'View raw'}
+                            </button>
+                            <button
+                              className="btn ghost"
+                              type="button"
+                              onClick={() => reprocessC2b(row)}
+                              disabled={!id || processed || !!action?.busy}
+                            >
+                              {action?.busy ? 'Reprocessing...' : 'Reprocess'}
+                            </button>
+                            {action?.msg ? <span className="muted small">{action.msg}</span> : null}
+                            {action?.error ? <span className="err">Reprocess error: {action.error}</span> : null}
+                          </div>
+                        </td>
+                      </tr>
+                      {open ? (
+                        <tr>
+                          <td colSpan={9}>
+                            {rawState?.loading ? (
+                              <div className="muted small">Loading raw payload...</div>
+                            ) : rawState?.error ? (
+                              <div className="err">Raw payload error: {rawState.error}</div>
+                            ) : (
+                              <pre className="mono" style={{ whiteSpace: 'pre-wrap' }}>
+                                {rawState?.payload || ''}
+                              </pre>
+                            )}
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       </section>
         </>
