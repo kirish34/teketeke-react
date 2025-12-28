@@ -318,15 +318,6 @@ export default function SaccoDashboard() {
     })
   }, [txs, fromDate, toDate, txStatus])
 
-  const kinds = useMemo(() => {
-    const norm = (k?: string) => (k || '').toUpperCase()
-    return {
-      daily: filteredTx.filter((tx) => norm(tx.kind) === 'SACCO_FEE'),
-      savings: filteredTx.filter((tx) => norm(tx.kind) === 'SAVINGS'),
-      loans: filteredTx.filter((tx) => norm(tx.kind) === 'LOAN_REPAY'),
-    }
-  }, [filteredTx])
-
   const summary = useMemo(() => {
     const buckets: SummaryBuckets = {
       SACCO_FEE: { today: 0, week: 0, month: 0 },
