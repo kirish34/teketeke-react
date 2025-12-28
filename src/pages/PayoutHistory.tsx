@@ -56,6 +56,20 @@ const STATUS_TABS: (Status | "all")[] = [
   "cancelled",
 ];
 
+const STATUS_STYLES: Record<Status, { bg: string; color: string }> = {
+  pending: { bg: "#e2e8f0", color: "#1f2937" },
+  approved: { bg: "#dbeafe", color: "#1e40af" },
+  processing: { bg: "#fef9c3", color: "#854d0e" },
+  paid: { bg: "#dcfce7", color: "#166534" },
+  failed: { bg: "#fee2e2", color: "#991b1b" },
+  rejected: { bg: "#fee2e2", color: "#991b1b" },
+  cancelled: { bg: "#e2e8f0", color: "#1f2937" },
+};
+
+function getStatusStyle(status: Status) {
+  return STATUS_STYLES[status] || STATUS_STYLES.pending;
+}
+
 export default function PayoutHistory() {
   const supabase = useMemo(() => ensureSupabaseClient(), []);
   const [rows, setRows] = useState<Row[]>([]);
@@ -294,100 +308,97 @@ export default function PayoutHistory() {
   }
 
   return (
-    <div className="p-4 md:p-6 space-y-4">
-      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
+    <section className="card">
+      <div className="topline">
         <div>
-          <h1 className="text-2xl font-bold">Payout History</h1>
-          <p className="text-sm text-gray-600">Audit trail for all payouts across statuses.</p>
+          <h3 style={{ margin: 0 }}>B2C payout history</h3>
+          <div className="muted small">Audit trail for all payouts across statuses.</div>
         </div>
-
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="row" style={{ gap: 8 }}>
           <button
-            className="px-3 py-2 rounded border text-sm"
+            className="btn ghost"
+            type="button"
             onClick={requeueStuck}
             disabled={loading}
             title="Requeue payouts stuck in processing too long"
           >
             Requeue stuck
           </button>
-
-          <button className="px-3 py-2 rounded bg-black text-white text-sm" onClick={load} disabled={loading}>
+          <button className="btn" type="button" onClick={load} disabled={loading}>
             Refresh
           </button>
         </div>
       </div>
 
-      <div className="rounded border bg-white p-3 space-y-3">
-        <div className="flex flex-wrap gap-2">
-          {STATUS_TABS.map((s) => (
-            <button
-              key={s}
-              className={`px-3 py-1.5 rounded text-sm border ${status === s ? "bg-black text-white" : "bg-white"}`}
-              onClick={() => setStatus(s)}
-              disabled={loading}
-            >
-              {s.toUpperCase()}
-            </button>
-          ))}
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-          <div>
-            <label className="text-xs text-gray-600">From</label>
-            <input className="w-full border rounded p-2 text-sm" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
-          </div>
-          <div>
-            <label className="text-xs text-gray-600">To</label>
-            <input className="w-full border rounded p-2 text-sm" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
-          </div>
-          <div className="md:col-span-3">
-            <label className="text-xs text-gray-600">Search (wallet code/label, phone, provider ref, payout id)</label>
-            <input
-              className="w-full border rounded p-2 text-sm"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="e.g. 21001 / Owner John / 2547... / ConversationID..."
-            />
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-          <div className="text-gray-600">Showing up to 200 rows</div>
-          <div className="font-semibold">Total shown: {fmtKES(totalAmount)}</div>
-        </div>
+      <div className="row" style={{ marginTop: 10 }}>
+        {STATUS_TABS.map((s) => (
+          <button
+            key={s}
+            className={status === s ? "btn" : "btn ghost"}
+            type="button"
+            onClick={() => setStatus(s)}
+            disabled={loading}
+            style={{ padding: "6px 12px", fontSize: 12 }}
+          >
+            {s.toUpperCase()}
+          </button>
+        ))}
       </div>
 
-      {err && (
-        <div className="p-3 rounded border border-red-200 bg-red-50 text-red-800 text-sm">
-          {err}
-        </div>
-      )}
+      <div className="grid g2" style={{ marginTop: 10 }}>
+        <label className="muted small">
+          From
+          <input className="input" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+        </label>
+        <label className="muted small">
+          To
+          <input className="input" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+        </label>
+        <label className="muted small" style={{ gridColumn: "1 / -1" }}>
+          Search (wallet code/label, phone, provider ref, payout id)
+          <input
+            className="input"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="e.g. 21001 / Owner John / 2547... / ConversationID..."
+          />
+        </label>
+      </div>
 
-      <div className="overflow-x-auto rounded border bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-gray-50 text-gray-700">
+      <div className="row" style={{ marginTop: 10, justifyContent: "space-between" }}>
+        <span className="muted small">Showing up to 200 rows</span>
+        <span className="small" style={{ fontWeight: 700 }}>
+          Total shown: {fmtKES(totalAmount)}
+        </span>
+      </div>
+
+      {err ? <div className="err">Payouts error: {err}</div> : null}
+
+      <div className="table-wrap" style={{ marginTop: 10 }}>
+        <table>
+          <thead>
             <tr>
-              <th className="text-left p-3">Created</th>
-              <th className="text-left p-3">Wallet</th>
-              <th className="text-left p-3">Status</th>
-              <th className="text-left p-3">Amount</th>
-              <th className="text-left p-3">Destination</th>
-              <th className="text-left p-3">Provider Ref</th>
-              <th className="text-left p-3">Attempts</th>
-              <th className="text-left p-3">Last Error</th>
-              <th className="text-left p-3">Actions</th>
+              <th>Created</th>
+              <th>Wallet</th>
+              <th>Status</th>
+              <th>Amount</th>
+              <th>Destination</th>
+              <th>Provider Ref</th>
+              <th>Attempts</th>
+              <th>Last Error</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading && rows.length === 0 ? (
               <tr>
-                <td className="p-4 text-gray-500" colSpan={9}>
+                <td className="muted" colSpan={9}>
                   Loading...
                 </td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td className="p-4 text-gray-500" colSpan={9}>
+                <td className="muted" colSpan={9}>
                   No payouts in this range.
                 </td>
               </tr>
@@ -395,65 +406,75 @@ export default function PayoutHistory() {
               rows.map((r) => {
                 const stuckMins = r.status === "processing" ? minutesSince(r.processing_started_at) : null;
                 const canRetry = r.status === "failed" || r.status === "processing" || r.status === "approved";
+                const statusStyle = getStatusStyle(r.status);
 
                 return (
-                  <tr key={r.id} className="border-t align-top">
-                    <td className="p-3 whitespace-nowrap">
+                  <tr key={r.id}>
+                    <td className="mono">
                       <div>{fmtDate(r.created_at)}</div>
-                      <div className="text-xs text-gray-500">Upd: {fmtDate(r.updated_at)}</div>
+                      <div className="muted small">Upd: {fmtDate(r.updated_at)}</div>
                       {stuckMins !== null && (
-                        <div className={`text-xs mt-1 ${stuckMins >= 10 ? "text-red-700" : "text-gray-600"}`}>
+                        <div
+                          className="small"
+                          style={{ color: stuckMins >= 10 ? "#b91c1c" : "#475569", marginTop: 4 }}
+                        >
                           Processing: {stuckMins} min
                         </div>
                       )}
                     </td>
 
-                    <td className="p-3">
-                      <div className="font-semibold">{r.wallet_code}</div>
-                      <div className="text-gray-600">{r.wallet_label || "N/A"}</div>
-                      <div className="text-xs text-gray-500 break-all">{r.wallet_id}</div>
+                    <td>
+                      <div style={{ fontWeight: 700 }}>{r.wallet_code}</div>
+                      <div className="muted">{r.wallet_label || "N/A"}</div>
+                      <div className="muted small mono" style={{ wordBreak: "break-all" }}>
+                        {r.wallet_id}
+                      </div>
                     </td>
 
-                    <td className="p-3">
+                    <td>
                       <span
-                        className={`px-2 py-1 rounded text-xs ${
-                          r.status === "paid"
-                            ? "bg-green-100 text-green-800"
-                            : r.status === "failed"
-                            ? "bg-red-100 text-red-800"
-                            : r.status === "processing"
-                            ? "bg-yellow-100 text-yellow-800"
-                            : r.status === "approved"
-                            ? "bg-blue-100 text-blue-800"
-                            : r.status === "pending"
-                            ? "bg-gray-100 text-gray-800"
-                            : "bg-gray-100 text-gray-800"
-                        }`}
+                        className="small"
+                        style={{
+                          background: statusStyle.bg,
+                          color: statusStyle.color,
+                          padding: "4px 8px",
+                          borderRadius: 999,
+                          display: "inline-block",
+                          fontWeight: 800,
+                          letterSpacing: "0.02em",
+                        }}
                       >
                         {r.status.toUpperCase()}
                       </span>
 
-                      {r.reason_code && <div className="text-xs text-gray-600 mt-1">Reason: {r.reason_code}</div>}
+                      {r.reason_code ? (
+                        <div className="muted small" style={{ marginTop: 6 }}>
+                          Reason: {r.reason_code}
+                        </div>
+                      ) : null}
                     </td>
 
-                    <td className="p-3 font-semibold whitespace-nowrap">{fmtKES(r.amount)}</td>
+                    <td style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{fmtKES(r.amount)}</td>
 
-                    <td className="p-3">
-                      <div>{r.destination_phone}</div>
+                    <td className="mono">{r.destination_phone}</td>
+
+                    <td className="mono" style={{ wordBreak: "break-all" }}>
+                      {r.provider_reference || "N/A"}
                     </td>
 
-                    <td className="p-3 break-all">{r.provider_reference || "N/A"}</td>
+                    <td>{r.attempts ?? 0}</td>
 
-                    <td className="p-3">{r.attempts ?? 0}</td>
-
-                    <td className="p-3">
-                      <div className="text-xs text-gray-700 whitespace-pre-wrap">{r.last_error ? r.last_error : "N/A"}</div>
+                    <td>
+                      <div className="muted small" style={{ whiteSpace: "pre-wrap" }}>
+                        {r.last_error ? r.last_error : "N/A"}
+                      </div>
                     </td>
 
-                    <td className="p-3">
-                      <div className="flex gap-2">
+                    <td>
+                      <div className="row" style={{ gap: 6 }}>
                         <button
-                          className={`px-3 py-1.5 rounded text-white text-sm ${canRetry ? "bg-black" : "bg-gray-300"}`}
+                          className="btn"
+                          type="button"
                           onClick={() => retryNow(r.id)}
                           disabled={loading || !canRetry}
                           title="Schedules retry in ~1 minute"
@@ -462,7 +483,7 @@ export default function PayoutHistory() {
                         </button>
                         <Link
                           to={`/matatu/withdrawal-phones/${encodeURIComponent(r.wallet_id)}`}
-                          className="px-3 py-1.5 rounded border text-sm"
+                          className="btn ghost"
                           title="Manage approved withdrawal phones for this wallet"
                         >
                           Phones
@@ -476,6 +497,6 @@ export default function PayoutHistory() {
           </tbody>
         </table>
       </div>
-    </div>
+    </section>
   );
 }
