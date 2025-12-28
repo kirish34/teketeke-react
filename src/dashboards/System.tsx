@@ -868,6 +868,12 @@ const SystemDashboard = () => {
   function startSaccoEdit(row: SaccoRow) {
     const id = row.id || row.sacco_id
     if (!id) return
+    if (saccoEditId === id) {
+      setSaccoEditId('')
+      setSaccoEditMsg('')
+      setSaccoEditError(null)
+      return
+    }
     setSaccoEditId(id)
     setSaccoEditMsg('')
     setSaccoEditError(null)
@@ -921,6 +927,13 @@ const SystemDashboard = () => {
   function startVehicleEdit(row: VehicleRow, kind: VehicleKind) {
     const id = row.id
     if (!id) return
+    if (vehicleEditId === id && vehicleEditKind === kind) {
+      setVehicleEditId('')
+      setVehicleEditKind('')
+      setVehicleEditMsg('')
+      setVehicleEditError(null)
+      return
+    }
     setVehicleEditId(id)
     setVehicleEditKind(kind)
     setVehicleEditMsg('')
@@ -1949,7 +1962,6 @@ const SystemDashboard = () => {
   const renderVehicleTab = (meta: { label: string; plural: string; type: VehicleKind }) => {
     const rows = vehiclesFor(meta.type)
     const editActive = vehicleEditId && vehicleEditKind === meta.type
-    const editRow = editActive ? matatus.find((v) => v.id === vehicleEditId) : null
     return (
       <>
         <section className="card">
@@ -2060,113 +2072,121 @@ const SystemDashboard = () => {
                       No vehicles yet.
                     </td>
                   </tr>
-                ) : (
-                  rows.map((v) => (
-                    <tr key={v.id || v.plate || v.registration}>
-                      <td>{v.plate || v.number_plate || v.registration || '-'}</td>
-                      <td>{v.owner_name || '-'}</td>
-                      <td>{v.owner_phone || '-'}</td>
-                      <td>{v.sacco_name || v.sacco || '-'}</td>
-                      <td>{normalizeVehicleType(v.vehicle_type || v.body_type || v.type) || '-'}</td>
-                      <td>
-                        <button className="btn ghost" type="button" onClick={() => startVehicleEdit(v, meta.type)}>
-                          Edit
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
+                  ) : (
+                  rows.map((v) => {
+                    const isEditing = !!v.id && editActive && v.id === vehicleEditId
+                    return (
+                      <Fragment key={v.id || v.plate || v.registration}>
+                        <tr>
+                          <td>{v.plate || v.number_plate || v.registration || '-'}</td>
+                          <td>{v.owner_name || '-'}</td>
+                          <td>{v.owner_phone || '-'}</td>
+                          <td>{v.sacco_name || v.sacco || '-'}</td>
+                          <td>{normalizeVehicleType(v.vehicle_type || v.body_type || v.type) || '-'}</td>
+                          <td>
+                            <button className="btn ghost" type="button" onClick={() => startVehicleEdit(v, meta.type)}>
+                              {isEditing ? 'Close' : 'Edit'}
+                            </button>
+                          </td>
+                        </tr>
+                        {isEditing ? (
+                          <tr>
+                            <td colSpan={6}>
+                              <div className="card" style={{ margin: '6px 0' }}>
+                                <div className="topline">
+                                  <h3 style={{ margin: 0 }}>Edit {meta.label}</h3>
+                                  <span className="muted small">
+                                    {formatVehicleLabel(v)} | ID: {vehicleEditId}
+                                  </span>
+                                </div>
+                                {vehicleEditError ? <div className="err">Update error: {vehicleEditError}</div> : null}
+                                <div className="grid g2">
+                                  <label className="muted small">
+                                    Plate
+                                    <input
+                                      className="input"
+                                      value={vehicleEditForm.number_plate}
+                                      onChange={(e) => setVehicleEditForm((f) => ({ ...f, number_plate: e.target.value }))}
+                                    />
+                                  </label>
+                                  <label className="muted small">
+                                    Owner name
+                                    <input
+                                      className="input"
+                                      value={vehicleEditForm.owner_name}
+                                      onChange={(e) => setVehicleEditForm((f) => ({ ...f, owner_name: e.target.value }))}
+                                    />
+                                  </label>
+                                  <label className="muted small">
+                                    Owner phone
+                                    <input
+                                      className="input"
+                                      value={vehicleEditForm.owner_phone}
+                                      onChange={(e) => setVehicleEditForm((f) => ({ ...f, owner_phone: e.target.value }))}
+                                    />
+                                  </label>
+                                  <label className="muted small">
+                                    {meta.type === 'MATATU' ? 'SACCO' : 'SACCO (optional)'}
+                                    <select
+                                      value={vehicleEditForm.sacco_id}
+                                      onChange={(e) => setVehicleEditForm((f) => ({ ...f, sacco_id: e.target.value }))}
+                                      style={{ padding: 10 }}
+                                    >
+                                      <option value="">Select SACCO</option>
+                                      {saccos.map((s) => (
+                                        <option key={s.id || s.sacco_id} value={s.id || s.sacco_id || ''}>
+                                          {s.name || s.sacco_name || s.sacco_id}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <label className="muted small">
+                                    TLB number
+                                    <input
+                                      className="input"
+                                      value={vehicleEditForm.tlb_number}
+                                      onChange={(e) => setVehicleEditForm((f) => ({ ...f, tlb_number: e.target.value }))}
+                                    />
+                                  </label>
+                                  <label className="muted small">
+                                    Till number
+                                    <input
+                                      className="input"
+                                      value={vehicleEditForm.till_number}
+                                      onChange={(e) => setVehicleEditForm((f) => ({ ...f, till_number: e.target.value }))}
+                                    />
+                                  </label>
+                                </div>
+                                <div className="row" style={{ marginTop: 8 }}>
+                                  <button className="btn" type="button" onClick={saveVehicleEdit}>
+                                    Save changes
+                                  </button>
+                                  <button
+                                    className="btn ghost"
+                                    type="button"
+                                    onClick={() => {
+                                      setVehicleEditId('')
+                                      setVehicleEditKind('')
+                                      setVehicleEditMsg('')
+                                      setVehicleEditError(null)
+                                    }}
+                                  >
+                                    Close
+                                  </button>
+                                  <span className="muted small">{vehicleEditMsg}</span>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    )
+                  })
+                  )}
               </tbody>
             </table>
           </div>
         </section>
-
-        {editActive ? (
-        <section className="card">
-          <div className="topline">
-            <h3 style={{ margin: 0 }}>Edit {meta.label}</h3>
-            <span className="muted small">
-              {formatVehicleLabel(editRow)} | ID: {vehicleEditId}
-            </span>
-          </div>
-          {vehicleEditError ? <div className="err">Update error: {vehicleEditError}</div> : null}
-          <div className="grid g2">
-            <label className="muted small">
-              Plate
-              <input
-                className="input"
-                value={vehicleEditForm.number_plate}
-                onChange={(e) => setVehicleEditForm((f) => ({ ...f, number_plate: e.target.value }))}
-              />
-            </label>
-            <label className="muted small">
-              Owner name
-              <input
-                className="input"
-                value={vehicleEditForm.owner_name}
-                onChange={(e) => setVehicleEditForm((f) => ({ ...f, owner_name: e.target.value }))}
-              />
-            </label>
-            <label className="muted small">
-              Owner phone
-              <input
-                className="input"
-                value={vehicleEditForm.owner_phone}
-                onChange={(e) => setVehicleEditForm((f) => ({ ...f, owner_phone: e.target.value }))}
-              />
-            </label>
-            <label className="muted small">
-              {meta.type === 'MATATU' ? 'SACCO' : 'SACCO (optional)'}
-              <select
-                value={vehicleEditForm.sacco_id}
-                onChange={(e) => setVehicleEditForm((f) => ({ ...f, sacco_id: e.target.value }))}
-                style={{ padding: 10 }}
-              >
-                <option value="">Select SACCO</option>
-                {saccos.map((s) => (
-                  <option key={s.id || s.sacco_id} value={s.id || s.sacco_id || ''}>
-                    {s.name || s.sacco_name || s.sacco_id}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="muted small">
-              TLB number
-              <input
-                className="input"
-                value={vehicleEditForm.tlb_number}
-                onChange={(e) => setVehicleEditForm((f) => ({ ...f, tlb_number: e.target.value }))}
-              />
-            </label>
-            <label className="muted small">
-              Till number
-              <input
-                className="input"
-                value={vehicleEditForm.till_number}
-                onChange={(e) => setVehicleEditForm((f) => ({ ...f, till_number: e.target.value }))}
-              />
-            </label>
-          </div>
-          <div className="row" style={{ marginTop: 8 }}>
-            <button className="btn" type="button" onClick={saveVehicleEdit}>
-              Save changes
-            </button>
-            <button
-              className="btn ghost"
-              type="button"
-              onClick={() => {
-                setVehicleEditId('')
-                setVehicleEditKind('')
-                setVehicleEditMsg('')
-                setVehicleEditError(null)
-              }}
-            >
-              Close
-            </button>
-            <span className="muted small">{vehicleEditMsg}</span>
-          </div>
-        </section>
-        ) : null}
       </>
     )
   }
@@ -2342,94 +2362,103 @@ const SystemDashboard = () => {
                       </td>
                     </tr>
                   ) : (
-                    saccos.map((sacco) => (
-                      <tr key={sacco.id || sacco.sacco_id || sacco.email}>
-                        <td>{sacco.name || sacco.sacco_name || '-'}</td>
-                        <td>{sacco.contact_name || '-'}</td>
-                        <td>{sacco.phone || sacco.contact_phone || '-'}</td>
-                        <td>{sacco.email || sacco.contact_email || '-'}</td>
-                        <td>{sacco.id || sacco.sacco_id || '-'}</td>
-                        <td>
-                          <button className="btn ghost" type="button" onClick={() => startSaccoEdit(sacco)}>
-                            Edit
-                          </button>
-                        </td>
-                      </tr>
-                    ))
+                    saccos.map((sacco) => {
+                      const saccoId = sacco.id || sacco.sacco_id || ''
+                      const isEditing = !!saccoId && saccoEditId === saccoId
+                      return (
+                        <Fragment key={sacco.id || sacco.sacco_id || sacco.email}>
+                          <tr>
+                            <td>{sacco.name || sacco.sacco_name || '-'}</td>
+                            <td>{sacco.contact_name || '-'}</td>
+                            <td>{sacco.phone || sacco.contact_phone || '-'}</td>
+                            <td>{sacco.email || sacco.contact_email || '-'}</td>
+                            <td>{saccoId || '-'}</td>
+                            <td>
+                              <button className="btn ghost" type="button" onClick={() => startSaccoEdit(sacco)}>
+                                {isEditing ? 'Close' : 'Edit'}
+                              </button>
+                            </td>
+                          </tr>
+                          {isEditing ? (
+                            <tr>
+                              <td colSpan={6}>
+                                <div className="card" style={{ margin: '6px 0' }}>
+                                  <div className="topline">
+                                    <h3 style={{ margin: 0 }}>Edit SACCO</h3>
+                                    <span className="muted small">ID: {saccoEditId}</span>
+                                  </div>
+                                  {saccoEditError ? <div className="err">Update error: {saccoEditError}</div> : null}
+                                  <div className="grid g2">
+                                    <label className="muted small">
+                                      Name
+                                      <input
+                                        className="input"
+                                        value={saccoEditForm.name}
+                                        onChange={(e) => setSaccoEditForm((f) => ({ ...f, name: e.target.value }))}
+                                      />
+                                    </label>
+                                    <label className="muted small">
+                                      Contact person
+                                      <input
+                                        className="input"
+                                        value={saccoEditForm.contact_name}
+                                        onChange={(e) => setSaccoEditForm((f) => ({ ...f, contact_name: e.target.value }))}
+                                      />
+                                    </label>
+                                    <label className="muted small">
+                                      Contact phone
+                                      <input
+                                        className="input"
+                                        value={saccoEditForm.contact_phone}
+                                        onChange={(e) => setSaccoEditForm((f) => ({ ...f, contact_phone: e.target.value }))}
+                                      />
+                                    </label>
+                                    <label className="muted small">
+                                      Contact email
+                                      <input
+                                        className="input"
+                                        value={saccoEditForm.contact_email}
+                                        onChange={(e) => setSaccoEditForm((f) => ({ ...f, contact_email: e.target.value }))}
+                                      />
+                                    </label>
+                                    <label className="muted small">
+                                      Default till
+                                      <input
+                                        className="input"
+                                        value={saccoEditForm.default_till}
+                                        onChange={(e) => setSaccoEditForm((f) => ({ ...f, default_till: e.target.value }))}
+                                      />
+                                    </label>
+                                  </div>
+                                  <div className="row" style={{ marginTop: 8 }}>
+                                    <button className="btn" type="button" onClick={saveSaccoEdit}>
+                                      Save changes
+                                    </button>
+                                    <button
+                                      className="btn ghost"
+                                      type="button"
+                                      onClick={() => {
+                                        setSaccoEditId('')
+                                        setSaccoEditMsg('')
+                                        setSaccoEditError(null)
+                                      }}
+                                    >
+                                      Close
+                                    </button>
+                                    <span className="muted small">{saccoEditMsg}</span>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          ) : null}
+                        </Fragment>
+                      )
+                    })
                   )}
                 </tbody>
               </table>
             </div>
           </section>
-
-          {saccoEditId ? (
-          <section className="card">
-            <div className="topline">
-              <h3 style={{ margin: 0 }}>Edit SACCO</h3>
-              <span className="muted small">ID: {saccoEditId}</span>
-            </div>
-            {saccoEditError ? <div className="err">Update error: {saccoEditError}</div> : null}
-            <div className="grid g2">
-              <label className="muted small">
-                Name
-                <input
-                  className="input"
-                  value={saccoEditForm.name}
-                  onChange={(e) => setSaccoEditForm((f) => ({ ...f, name: e.target.value }))}
-                />
-              </label>
-              <label className="muted small">
-                Contact person
-                <input
-                  className="input"
-                  value={saccoEditForm.contact_name}
-                  onChange={(e) => setSaccoEditForm((f) => ({ ...f, contact_name: e.target.value }))}
-                />
-              </label>
-              <label className="muted small">
-                Contact phone
-                <input
-                  className="input"
-                  value={saccoEditForm.contact_phone}
-                  onChange={(e) => setSaccoEditForm((f) => ({ ...f, contact_phone: e.target.value }))}
-                />
-              </label>
-              <label className="muted small">
-                Contact email
-                <input
-                  className="input"
-                  value={saccoEditForm.contact_email}
-                  onChange={(e) => setSaccoEditForm((f) => ({ ...f, contact_email: e.target.value }))}
-                />
-              </label>
-              <label className="muted small">
-                Default till
-                <input
-                  className="input"
-                  value={saccoEditForm.default_till}
-                  onChange={(e) => setSaccoEditForm((f) => ({ ...f, default_till: e.target.value }))}
-                />
-              </label>
-            </div>
-            <div className="row" style={{ marginTop: 8 }}>
-              <button className="btn" type="button" onClick={saveSaccoEdit}>
-                Save changes
-              </button>
-              <button
-                className="btn ghost"
-                type="button"
-                onClick={() => {
-                  setSaccoEditId('')
-                  setSaccoEditMsg('')
-                  setSaccoEditError(null)
-                }}
-              >
-                Close
-              </button>
-              <span className="muted small">{saccoEditMsg}</span>
-            </div>
-          </section>
-          ) : null}
         </>
       ) : null}
 
