@@ -54,6 +54,14 @@ type WithdrawalRow = {
   status?: string
 }
 
+type WithdrawalInlineEdit = {
+  status?: string
+  note?: string
+  busy?: boolean
+  error?: string
+  msg?: string
+}
+
 type WalletSummary = {
   virtual_account_code?: string
   balance?: number
@@ -247,6 +255,23 @@ async function deleteJson(url: string) {
 
 const formatKes = (val?: number | null) => `KES ${(Number(val || 0)).toLocaleString('en-KE')}`
 
+const WITHDRAW_STATUS_OPTIONS = ['PENDING', 'PROCESSING', 'SENT', 'SUCCESS', 'FAILED']
+
+function parseAmountInput(value: string) {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return null
+  return num
+}
+
+function normalizeFeePercentInput(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  const num = Number(trimmed)
+  if (!Number.isFinite(num) || num < 0) return null
+  if (num === 0) return 0
+  return num / 100
+}
+
 type CsvHeader = { key: string; label: string }
 type CsvRow = Record<string, string | number | boolean | null | undefined>
 
@@ -397,6 +422,33 @@ const SystemDashboard = () => {
   const [walletSummary, setWalletSummary] = useState<WalletSummary | null>(null)
   const [walletTx, setWalletTx] = useState<WalletTx[]>([])
   const [walletError, setWalletError] = useState<string | null>(null)
+  const [walletCreditForm, setWalletCreditForm] = useState({
+    wallet_code: '',
+    amount: '',
+    reference: '',
+    description: '',
+  })
+  const [walletCreditMsg, setWalletCreditMsg] = useState('')
+  const [walletCreditError, setWalletCreditError] = useState<string | null>(null)
+  const [walletB2CForm, setWalletB2CForm] = useState({
+    wallet_code: '',
+    amount: '',
+    phone_number: '',
+  })
+  const [walletB2CMsg, setWalletB2CMsg] = useState('')
+  const [walletB2CError, setWalletB2CError] = useState<string | null>(null)
+  const [walletBankForm, setWalletBankForm] = useState({
+    wallet_code: '',
+    amount: '',
+    bank_name: '',
+    bank_branch: '',
+    bank_account_number: '',
+    bank_account_name: '',
+    fee_percent: '',
+  })
+  const [walletBankMsg, setWalletBankMsg] = useState('')
+  const [walletBankError, setWalletBankError] = useState<string | null>(null)
+  const [withdrawInlineEdits, setWithdrawInlineEdits] = useState<Record<string, WithdrawalInlineEdit>>({})
 
   const [ussd, setUssd] = useState<UssdPool | null>(null)
   const [ussdError, setUssdError] = useState<string | null>(null)
@@ -895,6 +947,175 @@ const SystemDashboard = () => {
       setWalletSummary(null)
       setWalletTx([])
       setWalletError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function submitWalletCredit() {
+    const code = walletCreditForm.wallet_code.trim()
+    const amount = parseAmountInput(walletCreditForm.amount)
+    if (!code) {
+      setWalletCreditError('Wallet code is required')
+      setWalletCreditMsg('')
+      return
+    }
+    if (!amount || amount <= 0) {
+      setWalletCreditError('Amount must be greater than 0')
+      setWalletCreditMsg('')
+      return
+    }
+    setWalletCreditMsg('Crediting wallet...')
+    setWalletCreditError(null)
+    try {
+      const res = await sendJson<{ message?: string }>(
+        '/api/admin/wallets/credit',
+        'POST',
+        {
+          virtualAccountCode: code,
+          amount,
+          source: 'ADMIN_ADJUST',
+          sourceRef: walletCreditForm.reference.trim() || null,
+          description: walletCreditForm.description.trim() || null,
+        },
+      )
+      setWalletCreditMsg(res?.message || 'Wallet credited')
+      setWalletCreditForm((f) => ({ ...f, amount: '' }))
+      if (!walletCode.trim() || walletCode.trim().toLowerCase() === code.toLowerCase()) {
+        setWalletCode(code)
+        await loadWallet(code)
+      }
+    } catch (err) {
+      setWalletCreditError(err instanceof Error ? err.message : 'Credit failed')
+      setWalletCreditMsg('')
+    }
+  }
+
+  async function submitWalletB2C() {
+    const code = walletB2CForm.wallet_code.trim()
+    const amount = parseAmountInput(walletB2CForm.amount)
+    const phone = walletB2CForm.phone_number.trim()
+    if (!code) {
+      setWalletB2CError('Wallet code is required')
+      setWalletB2CMsg('')
+      return
+    }
+    if (!amount || amount <= 0) {
+      setWalletB2CError('Amount must be greater than 0')
+      setWalletB2CMsg('')
+      return
+    }
+    if (!phone) {
+      setWalletB2CError('Phone number is required')
+      setWalletB2CMsg('')
+      return
+    }
+    setWalletB2CMsg('Submitting B2C withdrawal...')
+    setWalletB2CError(null)
+    try {
+      const res = await sendJson<{ message?: string }>(
+        `/wallets/${encodeURIComponent(code)}/withdraw`,
+        'POST',
+        { amount, phoneNumber: phone },
+      )
+      setWalletB2CMsg(res?.message || 'Withdrawal initiated')
+      setWalletB2CForm((f) => ({ ...f, amount: '', phone_number: '' }))
+      if (!walletCode.trim() || walletCode.trim().toLowerCase() === code.toLowerCase()) {
+        setWalletCode(code)
+        await loadWallet(code)
+      }
+      await loadWithdrawals(withdrawStatus, getRange('month'))
+    } catch (err) {
+      setWalletB2CError(err instanceof Error ? err.message : 'Withdrawal failed')
+      setWalletB2CMsg('')
+    }
+  }
+
+  async function submitWalletBank() {
+    const code = walletBankForm.wallet_code.trim()
+    const amount = parseAmountInput(walletBankForm.amount)
+    const bankName = walletBankForm.bank_name.trim()
+    const bankAccountNumber = walletBankForm.bank_account_number.trim()
+    const bankAccountName = walletBankForm.bank_account_name.trim()
+    const feePercent = normalizeFeePercentInput(walletBankForm.fee_percent)
+    if (!code) {
+      setWalletBankError('Wallet code is required')
+      setWalletBankMsg('')
+      return
+    }
+    if (!amount || amount <= 0) {
+      setWalletBankError('Amount must be greater than 0')
+      setWalletBankMsg('')
+      return
+    }
+    if (!bankName || !bankAccountNumber || !bankAccountName) {
+      setWalletBankError('Bank name, account number, and account name are required')
+      setWalletBankMsg('')
+      return
+    }
+    if (walletBankForm.fee_percent.trim() && feePercent === null) {
+      setWalletBankError('Fee percent must be a number')
+      setWalletBankMsg('')
+      return
+    }
+    setWalletBankMsg('Submitting bank withdrawal...')
+    setWalletBankError(null)
+    try {
+      const payload: Record<string, unknown> = {
+        amount,
+        bankName,
+        bankBranch: walletBankForm.bank_branch.trim() || null,
+        bankAccountNumber,
+        bankAccountName,
+      }
+      if (feePercent !== null) payload.feePercent = feePercent
+      const res = await sendJson<{ message?: string }>(
+        `/wallets/${encodeURIComponent(code)}/withdraw/bank`,
+        'POST',
+        payload,
+      )
+      setWalletBankMsg(res?.message || 'Bank withdrawal created')
+      setWalletBankForm((f) => ({ ...f, amount: '' }))
+      if (!walletCode.trim() || walletCode.trim().toLowerCase() === code.toLowerCase()) {
+        setWalletCode(code)
+        await loadWallet(code)
+      }
+      await loadWithdrawals(withdrawStatus, getRange('month'))
+    } catch (err) {
+      setWalletBankError(err instanceof Error ? err.message : 'Bank withdrawal failed')
+      setWalletBankMsg('')
+    }
+  }
+
+  function updateWithdrawInline(id: string, patch: Partial<WithdrawalInlineEdit>) {
+    setWithdrawInlineEdits((prev) => ({
+      ...prev,
+      [id]: { ...(prev[id] || {}), ...patch },
+    }))
+  }
+
+  async function submitWithdrawInline(row: WithdrawalRow) {
+    const id = row.id || ''
+    if (!id) return
+    const current = withdrawInlineEdits[id] || {}
+    const status = String(current.status || row.status || '').toUpperCase()
+    if (!status || !WITHDRAW_STATUS_OPTIONS.includes(status)) {
+      updateWithdrawInline(id, { error: 'Invalid status', msg: '' })
+      return
+    }
+    updateWithdrawInline(id, { busy: true, error: '', msg: '' })
+    try {
+      await sendJson(
+        `/api/admin/withdrawals/${encodeURIComponent(id)}/status`,
+        'POST',
+        { status, internalNote: current.note?.trim() || null },
+      )
+      updateWithdrawInline(id, { busy: false, error: '', msg: 'Saved' })
+      await loadWithdrawals(withdrawStatus, getRange('month'))
+    } catch (err) {
+      updateWithdrawInline(id, {
+        busy: false,
+        error: err instanceof Error ? err.message : 'Update failed',
+        msg: '',
+      })
     }
   }
 
@@ -1833,25 +2054,67 @@ const SystemDashboard = () => {
                   <th>Phone</th>
                   <th>Amount</th>
                   <th>Status</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {withdrawals.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="muted">
+                    <td colSpan={6} className="muted">
                       No withdrawals found.
                     </td>
                   </tr>
                 ) : (
-                  withdrawals.map((row) => (
-                    <tr key={row.id || row.created_at}>
-                      <td className="mono">{row.created_at ? new Date(row.created_at).toLocaleString() : ''}</td>
-                      <td>{row.matatu_plate || row.sacco_name || '-'}</td>
-                      <td>{row.phone || ''}</td>
-                      <td>{formatKes(row.amount)}</td>
-                      <td>{row.status || ''}</td>
-                    </tr>
-                  ))
+                  withdrawals.map((row) => {
+                    const rowId = row.id || ''
+                    const inline = rowId ? withdrawInlineEdits[rowId] : null
+                    const statusValue = String(inline?.status || row.status || 'PENDING').toUpperCase()
+                    const noteValue = inline?.note || ''
+                    const busy = inline?.busy
+                    return (
+                      <tr key={rowId || row.created_at}>
+                        <td className="mono">{row.created_at ? new Date(row.created_at).toLocaleString() : ''}</td>
+                        <td>{row.matatu_plate || row.sacco_name || '-'}</td>
+                        <td>{row.phone || ''}</td>
+                        <td>{formatKes(row.amount)}</td>
+                        <td>
+                          <select
+                            value={statusValue}
+                            onChange={(e) => rowId && updateWithdrawInline(rowId, { status: e.target.value, msg: '', error: '' })}
+                            disabled={!rowId || !!busy}
+                            style={{ padding: 6, minWidth: 120 }}
+                          >
+                            {WITHDRAW_STATUS_OPTIONS.map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>
+                          <div style={{ display: 'grid', gap: 6 }}>
+                            <input
+                              className="input"
+                              value={noteValue}
+                              onChange={(e) => rowId && updateWithdrawInline(rowId, { note: e.target.value, msg: '', error: '' })}
+                              placeholder="Note (optional)"
+                              disabled={!rowId || !!busy}
+                            />
+                            <button
+                              className="btn ghost"
+                              type="button"
+                              onClick={() => submitWithdrawInline(row)}
+                              disabled={!rowId || !!busy}
+                            >
+                              {busy ? 'Saving...' : 'Save'}
+                            </button>
+                          </div>
+                          {inline?.msg ? <div className="muted small">{inline.msg}</div> : null}
+                          {inline?.error ? <div className="err">Update error: {inline.error}</div> : null}
+                        </td>
+                      </tr>
+                    )
+                  })
                 )}
               </tbody>
             </table>
@@ -1915,6 +2178,179 @@ const SystemDashboard = () => {
               </tbody>
             </table>
           </div>
+        </div>
+      </section>
+      <section className="grid g2">
+        <div className="card" style={{ gridColumn: '1 / -1' }}>
+          <h3 style={{ marginTop: 0 }}>Wallet actions</h3>
+
+          <h4 style={{ margin: '8px 0' }}>Manual credit</h4>
+          <div className="grid g2">
+            <label className="muted small">
+              Wallet code
+              <input
+                className="input"
+                value={walletCreditForm.wallet_code}
+                onChange={(e) => setWalletCreditForm((f) => ({ ...f, wallet_code: e.target.value }))}
+                placeholder="MAT0021"
+              />
+            </label>
+            <label className="muted small">
+              Amount (KES)
+              <input
+                className="input"
+                inputMode="numeric"
+                value={walletCreditForm.amount}
+                onChange={(e) => setWalletCreditForm((f) => ({ ...f, amount: e.target.value }))}
+                placeholder="500"
+              />
+            </label>
+            <label className="muted small">
+              Reference (optional)
+              <input
+                className="input"
+                value={walletCreditForm.reference}
+                onChange={(e) => setWalletCreditForm((f) => ({ ...f, reference: e.target.value }))}
+                placeholder="ADJ-2025-01"
+              />
+            </label>
+            <label className="muted small">
+              Description (optional)
+              <input
+                className="input"
+                value={walletCreditForm.description}
+                onChange={(e) => setWalletCreditForm((f) => ({ ...f, description: e.target.value }))}
+                placeholder="Manual adjustment"
+              />
+            </label>
+          </div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <button className="btn" type="button" onClick={submitWalletCredit}>
+              Credit wallet
+            </button>
+            <span className="muted small">{walletCreditMsg}</span>
+          </div>
+          {walletCreditError ? <div className="err">Credit error: {walletCreditError}</div> : null}
+
+          <h4 style={{ margin: '16px 0 8px' }}>B2C withdrawal</h4>
+          <div className="grid g2">
+            <label className="muted small">
+              Wallet code
+              <input
+                className="input"
+                value={walletB2CForm.wallet_code}
+                onChange={(e) => setWalletB2CForm((f) => ({ ...f, wallet_code: e.target.value }))}
+                placeholder="MAT0021"
+              />
+            </label>
+            <label className="muted small">
+              Amount (KES)
+              <input
+                className="input"
+                inputMode="numeric"
+                value={walletB2CForm.amount}
+                onChange={(e) => setWalletB2CForm((f) => ({ ...f, amount: e.target.value }))}
+                placeholder="1500"
+              />
+            </label>
+            <label className="muted small">
+              Phone number
+              <input
+                className="input"
+                inputMode="numeric"
+                value={walletB2CForm.phone_number}
+                onChange={(e) => setWalletB2CForm((f) => ({ ...f, phone_number: e.target.value }))}
+                placeholder="2547XXXXXXXX"
+              />
+            </label>
+          </div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <button className="btn" type="button" onClick={submitWalletB2C}>
+              Send B2C
+            </button>
+            <span className="muted small">{walletB2CMsg}</span>
+          </div>
+          {walletB2CError ? <div className="err">B2C error: {walletB2CError}</div> : null}
+
+          <h4 style={{ margin: '16px 0 8px' }}>Bank withdrawal request</h4>
+          <div className="grid g2">
+            <label className="muted small">
+              Wallet code
+              <input
+                className="input"
+                value={walletBankForm.wallet_code}
+                onChange={(e) => setWalletBankForm((f) => ({ ...f, wallet_code: e.target.value }))}
+                placeholder="MAT0021"
+              />
+            </label>
+            <label className="muted small">
+              Amount (KES)
+              <input
+                className="input"
+                inputMode="numeric"
+                value={walletBankForm.amount}
+                onChange={(e) => setWalletBankForm((f) => ({ ...f, amount: e.target.value }))}
+                placeholder="5000"
+              />
+            </label>
+            <label className="muted small">
+              Bank name
+              <input
+                className="input"
+                value={walletBankForm.bank_name}
+                onChange={(e) => setWalletBankForm((f) => ({ ...f, bank_name: e.target.value }))}
+                placeholder="KCB"
+              />
+            </label>
+            <label className="muted small">
+              Bank branch (optional)
+              <input
+                className="input"
+                value={walletBankForm.bank_branch}
+                onChange={(e) => setWalletBankForm((f) => ({ ...f, bank_branch: e.target.value }))}
+                placeholder="Nairobi"
+              />
+            </label>
+            <label className="muted small">
+              Account number
+              <input
+                className="input"
+                inputMode="numeric"
+                value={walletBankForm.bank_account_number}
+                onChange={(e) => setWalletBankForm((f) => ({ ...f, bank_account_number: e.target.value }))}
+                placeholder="0012345678"
+              />
+            </label>
+            <label className="muted small">
+              Account name
+              <input
+                className="input"
+                value={walletBankForm.bank_account_name}
+                onChange={(e) => setWalletBankForm((f) => ({ ...f, bank_account_name: e.target.value }))}
+                placeholder="SACCO Main"
+              />
+            </label>
+            <label className="muted small">
+              Fee percent (optional)
+              <input
+                className="input"
+                inputMode="numeric"
+                value={walletBankForm.fee_percent}
+                onChange={(e) => setWalletBankForm((f) => ({ ...f, fee_percent: e.target.value }))}
+                placeholder="1"
+              />
+            </label>
+          </div>
+          <div className="muted small" style={{ marginTop: 6 }}>
+            Fee percent accepts 1 for 1%.
+          </div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <button className="btn" type="button" onClick={submitWalletBank}>
+              Create bank withdrawal
+            </button>
+            <span className="muted small">{walletBankMsg}</span>
+          </div>
+          {walletBankError ? <div className="err">Bank withdrawal error: {walletBankError}</div> : null}
         </div>
       </section>
         </>

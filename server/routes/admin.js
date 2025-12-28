@@ -1,7 +1,7 @@
 const express = require('express');
 const { supabaseAdmin } = require('../supabase');
 const pool = require('../db/pool');
-const { registerWalletForEntity } = require('../wallet/wallet.service');
+const { creditWallet, registerWalletForEntity } = require('../wallet/wallet.service');
 const { requireUser } = require('../middleware/auth');
 const router = express.Router();
 
@@ -130,6 +130,29 @@ router.get('/system-overview', async (_req, res) => {
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// Manual wallet credit (admin adjustment)
+router.post('/wallets/credit', async (req, res) => {
+  try {
+    const {
+      virtualAccountCode,
+      amount,
+      source,
+      sourceRef,
+      description,
+    } = req.body || {};
+    const result = await creditWallet({
+      virtualAccountCode,
+      amount,
+      source: source || 'ADMIN_ADJUST',
+      sourceRef: sourceRef || null,
+      description: description || null,
+    });
+    res.json({ ok: true, message: 'Wallet credited', data: result });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message || 'Credit failed' });
   }
 });
 

@@ -38,7 +38,7 @@ router.get('/admin/withdrawals', async (req, res) => {
 });
 
 // Update withdrawal status (for finance/manual processing)
-router.post('/admin/withdrawals/:id/status', async (req, res) => {
+async function updateWithdrawalStatus(req, res) {
   const { id } = req.params;
   const { status, internalNote } = req.body || {};
   const allowed = ['PENDING', 'PROCESSING', 'SENT', 'SUCCESS', 'FAILED'];
@@ -65,6 +65,9 @@ router.post('/admin/withdrawals/:id/status', async (req, res) => {
     console.error('Error in POST /admin/withdrawals/:id/status:', err.message);
     return res.status(500).json({ ok: false, error: err.message });
   }
-});
+}
+
+router.post('/admin/withdrawals/:id/status', updateWithdrawalStatus);
+router.post('/withdrawals/:id/status', updateWithdrawalStatus);
 
 module.exports = router;
