@@ -93,6 +93,8 @@ type LoanDue = Loan & {
   due_status?: string
 }
 
+type SaccoTabId = 'overview' | 'matatus' | 'transactions' | 'loans' | 'routes' | 'staff' | 'payments'
+
 function fmtKES(v: number | undefined | null) {
   return `KES ${(Number(v || 0)).toLocaleString('en-KE')}`
 }
@@ -123,6 +125,7 @@ export default function SaccoDashboard() {
   const [saccos, setSaccos] = useState<SaccoOption[]>([])
   const [currentSacco, setCurrentSacco] = useState<string | null>(null)
   const [statusMsg, setStatusMsg] = useState('Loading SACCOs...')
+  const [activeTab, setActiveTab] = useState<SaccoTabId>('overview')
 
   const [fromDate, setFromDate] = useState(todayIso())
   const [toDate, setToDate] = useState(todayIso())
@@ -211,6 +214,16 @@ export default function SaccoDashboard() {
   const [routeEditForm, setRouteEditForm] = useState({ name: '', code: '', start: '', end: '' })
   const [routeEditMsg, setRouteEditMsg] = useState('')
   const [routeEditError, setRouteEditError] = useState<string | null>(null)
+
+  const tabs: Array<{ id: SaccoTabId; label: string }> = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'matatus', label: 'Matatus' },
+    { id: 'transactions', label: 'Transactions' },
+    { id: 'loans', label: 'Loans' },
+    { id: 'routes', label: 'Routes' },
+    { id: 'staff', label: 'Staff' },
+    { id: 'payments', label: 'Payments' },
+  ]
 
   const matatuMap = useMemo(() => {
     const map = new Map<string, string>()
@@ -1118,51 +1131,69 @@ export default function SaccoDashboard() {
         </div>
       </section>
 
-      {notifications.length ? (
-        <section className="card" style={{ background: '#f8fafc' }}>
-          <div className="topline">
-            <h3 style={{ margin: 0 }}>Notifications</h3>
-            <button type="button" className="btn ghost" onClick={loadNotifications}>
-              Refresh
-            </button>
-          </div>
-          <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>
-            {notifications.map((n, idx) => (
-              <li key={idx} style={{ margin: '4px 0' }}>
-                {n}
-              </li>
-            ))}
-          </ul>
-        </section>
+      <nav className="sys-nav" aria-label="SACCO admin sections">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            className={`sys-tab${activeTab === t.id ? ' active' : ''}`}
+            onClick={() => setActiveTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      {activeTab === 'overview' ? (
+        <>
+          {notifications.length ? (
+            <section className="card" style={{ background: '#f8fafc' }}>
+              <div className="topline">
+                <h3 style={{ margin: 0 }}>Notifications</h3>
+                <button type="button" className="btn ghost" onClick={loadNotifications}>
+                  Refresh
+                </button>
+              </div>
+              <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>
+                {notifications.map((n, idx) => (
+                  <li key={idx} style={{ margin: '4px 0' }}>
+                    {n}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          <section className="card">
+            <h3 style={{ marginTop: 0 }}>Collections summary</h3>
+            <div className="grid metrics">
+              <div className="metric">
+                <div className="k">Daily Fee (today / week / month)</div>
+                <div className="v">
+                  {fmtKES(summary.SACCO_FEE.today)} / {fmtKES(summary.SACCO_FEE.week)} /{' '}
+                  {fmtKES(summary.SACCO_FEE.month)}
+                </div>
+              </div>
+              <div className="metric">
+                <div className="k">Savings (today / week / month)</div>
+                <div className="v">
+                  {fmtKES(summary.SAVINGS.today)} / {fmtKES(summary.SAVINGS.week)} / {fmtKES(summary.SAVINGS.month)}
+                </div>
+              </div>
+              <div className="metric">
+                <div className="k">Loan Repay (today / week / month)</div>
+                <div className="v">
+                  {fmtKES(summary.LOAN_REPAY.today)} / {fmtKES(summary.LOAN_REPAY.week)} /{' '}
+                  {fmtKES(summary.LOAN_REPAY.month)}
+                </div>
+              </div>
+            </div>
+          </section>
+        </>
       ) : null}
 
-      <section className="card">
-        <h3 style={{ marginTop: 0 }}>Collections summary</h3>
-        <div className="grid metrics">
-          <div className="metric">
-            <div className="k">Daily Fee (today / week / month)</div>
-            <div className="v">
-              {fmtKES(summary.SACCO_FEE.today)} / {fmtKES(summary.SACCO_FEE.week)} /{' '}
-              {fmtKES(summary.SACCO_FEE.month)}
-            </div>
-          </div>
-          <div className="metric">
-            <div className="k">Savings (today / week / month)</div>
-            <div className="v">
-              {fmtKES(summary.SAVINGS.today)} / {fmtKES(summary.SAVINGS.week)} / {fmtKES(summary.SAVINGS.month)}
-            </div>
-          </div>
-          <div className="metric">
-            <div className="k">Loan Repay (today / week / month)</div>
-            <div className="v">
-              {fmtKES(summary.LOAN_REPAY.today)} / {fmtKES(summary.LOAN_REPAY.week)} /{' '}
-              {fmtKES(summary.LOAN_REPAY.month)}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="card">
+      {activeTab === 'matatus' ? (
+        <section className="card">
         <div className="topline">
           <h3 style={{ margin: 0 }}>Matatus</h3>
           <input
@@ -1355,8 +1386,10 @@ export default function SaccoDashboard() {
           </div>
         </div>
       </section>
+      ) : null}
 
-      <section className="card">
+      {activeTab === 'transactions' ? (
+        <section className="card">
         <div className="topline">
           <h3 style={{ margin: 0 }}>Transactions in range</h3>
           <span className="muted small">
@@ -1481,8 +1514,11 @@ export default function SaccoDashboard() {
           </table>
         </div>
       </section>
+      ) : null}
 
-      <section className="card">
+      {activeTab === 'loans' ? (
+        <>
+        <section className="card">
         <div className="topline">
           <h3 style={{ margin: 0 }}>Loan requests</h3>
           <button type="button" className="btn ghost" onClick={loadLoanRequests}>
@@ -1674,8 +1710,11 @@ export default function SaccoDashboard() {
           </table>
         </div>
       </section>
+        </>
+      ) : null}
 
-      <section className="card">
+      {activeTab === 'routes' ? (
+        <section className="card">
         <div className="topline">
           <h3 style={{ margin: 0 }}>Routes</h3>
           <div className="row" style={{ gap: 6 }}>
@@ -1825,8 +1864,11 @@ export default function SaccoDashboard() {
           </div>
         </div>
       </section>
+      ) : null}
 
-      <section className="card">
+      {activeTab === 'loans' ? (
+        <>
+        <section className="card">
         <div className="topline">
           <h3 style={{ margin: 0 }}>Loans</h3>
           <div className="row" style={{ gap: 8 }}>
@@ -2042,8 +2084,11 @@ export default function SaccoDashboard() {
           </table>
         </div>
       </section>
+        </>
+      ) : null}
 
-      <section className="card">
+      {activeTab === 'payments' ? (
+        <section className="card">
         <div className="topline">
           <h3 style={{ margin: 0 }}>Payments (STK)</h3>
           <button type="button" className="btn ghost" onClick={sendStk}>
@@ -2073,8 +2118,11 @@ export default function SaccoDashboard() {
         </div>
         <pre className="mono" style={{ background: '#f8fafc', padding: 12 }}>{stkResp || '{}'}</pre>
       </section>
+      ) : null}
 
-      <section className="card">
+      {activeTab === 'staff' ? (
+        <>
+        <section className="card">
         <div className="topline">
           <h3 style={{ margin: 0 }}>SACCO staff</h3>
           <span className="muted small">{staff.length} staff</span>
@@ -2319,6 +2367,8 @@ export default function SaccoDashboard() {
           </div>
         </div>
       </section>
+        </>
+      ) : null}
 
     </DashboardShell>
   )
