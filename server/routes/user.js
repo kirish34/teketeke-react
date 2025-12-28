@@ -442,25 +442,106 @@ router.patch('/sacco/:id/routes/:routeId', async (req, res) => {
   }
 });
 
+// Delete a SACCO route
+router.delete('/sacco/:id/routes/:routeId', async (req, res) => {
+  const saccoId = req.params.id;
+  const routeId = req.params.routeId;
+  if (!saccoId || !routeId) return res.status(400).json({ error: 'sacco_id and routeId required' });
+  try {
+    const { allowed } = await ensureSaccoAccess(req.user.id, saccoId);
+    if (!allowed) return res.status(403).json({ error: 'Forbidden' });
+
+    const { data, error } = await supabaseAdmin
+      .from('routes')
+      .delete()
+      .eq('id', routeId)
+      .eq('sacco_id', saccoId)
+      .select('*')
+      .maybeSingle();
+
+    if (error) {
+      if (error.code === PG_ROW_NOT_FOUND) return res.status(404).json({ error: 'Route not found' });
+      throw error;
+    }
+    if (!data) return res.status(404).json({ error: 'Route not found' });
+
+    res.json({ deleted: 1, route: data });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Failed to delete route' });
+  }
+});
+
 router.get('/sacco/:id/transactions', async (req, res) => {
   const saccoId = req.params.id;
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 2000);
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const offset = (page - 1) * limit;
   try {
     const { allowed, ctx } = await ensureSaccoAccess(req.user.id, saccoId);
     if (!allowed) return res.status(403).json({ error: 'Forbidden' });
     let query = supabaseAdmin
       .from('transactions')
-      .select('*')
+      .select('*', { count: 'exact' })
       .eq('sacco_id', saccoId)
-      .order('created_at', { ascending: false })
-      .limit(limit);
+      .order('created_at', { ascending: false });
     if (ctx.role?.matatu_id && ctx.matatu?.id) {
       // Matatu-scoped roles only see their vehicle's records
       query = query.eq('matatu_id', ctx.matatu.id);
     }
-    const { data, error } = await query;
+
+    const fromParam = req.query.from ? new Date(String(req.query.from)) : null;
+    const toParam = req.query.to ? new Date(String(req.query.to)) : null;
+    if (fromParam && !Number.isNaN(fromParam.getTime())) {
+      query = query.gte('created_at', startOfDayISO(fromParam));
+    }
+    if (toParam && !Number.isNaN(toParam.getTime())) {
+      query = query.lte('created_at', endOfDayISO(toParam));
+    }
+
+    const status = (req.query.status || '').toString().trim().toUpperCase();
+    if (status) query = query.eq('status', status);
+
+    const kind = (req.query.kind || '').toString().trim().toUpperCase();
+    if (kind) query = query.eq('kind', kind);
+
+    const search = (req.query.search || '').toString().trim();
+    if (search) {
+      const like = `%${search}%`;
+      const orFilters = [
+        `created_by_name.ilike.${like}`,
+        `created_by_email.ilike.${like}`,
+        `passenger_msisdn.ilike.${like}`,
+        `notes.ilike.${like}`,
+        `status.ilike.${like}`,
+        `kind.ilike.${like}`,
+      ];
+
+      try {
+        const { data: mats, error: mErr } = await supabaseAdmin
+          .from('matatus')
+          .select('id')
+          .eq('sacco_id', saccoId)
+          .ilike('number_plate', like);
+        if (!mErr && mats && mats.length) {
+          const ids = mats.map((m) => m.id).filter(Boolean);
+          if (ids.length) {
+            const quoted = ids.map((id) => `"${id}"`).join(',');
+            orFilters.push(`matatu_id.in.(${quoted})`);
+          }
+        }
+      } catch (_) {
+        // ignore plate lookup failures
+      }
+
+      if (orFilters.length) {
+        query = query.or(orFilters.join(','));
+      }
+    }
+
+    query = query.range(offset, offset + limit - 1);
+    const { data, error, count } = await query;
     if (error) throw error;
-    res.json({ items: data || [] });
+    res.json({ items: data || [], total: count || 0, page, limit });
   } catch (error) {
     res.status(500).json({ error: error.message || 'Failed to load transactions' });
   }
@@ -501,6 +582,63 @@ router.get('/matatu/by-plate', async (req,res)=>{
     res.json(matatu);
   }catch(e){
     res.status(500).json({ error: e.message || 'Failed to lookup matatu' });
+  }
+});
+
+router.patch('/matatu/:id', async (req,res)=>{
+  const matatuId = req.params.id;
+  if (!matatuId) return res.status(400).json({ error:'matatu_id required' });
+  try{
+    const { allowed, ctx, matatu } = await ensureMatatuAccess(req.user.id, matatuId);
+    if (!allowed) return res.status(403).json({ error:'Forbidden' });
+    if (!matatu) return res.status(404).json({ error:'Matatu not found' });
+
+    const roleName = (ctx?.role?.role || '').toString().toUpperCase();
+    if (!['SACCO','SACCO_ADMIN'].includes(roleName)) {
+      return res.status(403).json({ error:'Forbidden' });
+    }
+
+    const updates = {};
+    if ('number_plate' in req.body){
+      const plate = (req.body?.number_plate || '').toString().trim().toUpperCase();
+      if (!plate) return res.status(400).json({ error:'number_plate required' });
+      updates.number_plate = plate;
+    }
+    if ('owner_name' in req.body){
+      const owner = (req.body?.owner_name || '').toString().trim();
+      updates.owner_name = owner || null;
+    }
+    if ('owner_phone' in req.body){
+      const phone = (req.body?.owner_phone || '').toString().trim();
+      updates.owner_phone = phone || null;
+    }
+    if ('tlb_number' in req.body){
+      const tlb = (req.body?.tlb_number || '').toString().trim();
+      updates.tlb_number = tlb || null;
+    }
+    if ('till_number' in req.body){
+      const till = (req.body?.till_number || '').toString().trim();
+      updates.till_number = till || null;
+    }
+
+    if (!Object.keys(updates).length){
+      return res.status(400).json({ error:'No updates provided' });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('matatus')
+      .update(updates)
+      .eq('id', matatuId)
+      .select('*')
+      .maybeSingle();
+    if (error){
+      if (error.code === PG_ROW_NOT_FOUND) return res.status(404).json({ error:'Matatu not found' });
+      throw error;
+    }
+    if (!data) return res.status(404).json({ error:'Matatu not found' });
+    res.json(data);
+  }catch(e){
+    res.status(500).json({ error: e.message || 'Failed to update matatu' });
   }
 });
 
@@ -665,6 +803,75 @@ router.post('/sacco/:id/staff', async (req,res)=>{
   }
 });
 
+router.patch('/sacco/:id/staff/:staffId', async (req,res)=>{
+  const saccoId = req.params.id; const staffId = req.params.staffId;
+  if (!saccoId || !staffId) return res.status(400).json({ error:'sacco_id and staffId required' });
+  try{
+    const { allowed, ctx } = await ensureSaccoAccess(req.user.id, saccoId);
+    if (!allowed) return res.status(403).json({ error:'Forbidden' });
+    const roleName = (ctx?.role?.role || '').toString().toUpperCase();
+    if (!['SACCO','SACCO_ADMIN'].includes(roleName)) {
+      return res.status(403).json({ error:'Forbidden' });
+    }
+
+    const updates = {};
+    if ('name' in req.body){
+      const name = (req.body?.name || '').toString().trim();
+      if (!name) return res.status(400).json({ error:'name required' });
+      updates.name = name;
+    }
+    if ('phone' in req.body){
+      const phone = (req.body?.phone || '').toString().trim();
+      updates.phone = phone || null;
+    }
+    if ('email' in req.body){
+      const email = (req.body?.email || '').toString().trim();
+      updates.email = email || null;
+    }
+    let roleReq = null;
+    if ('role' in req.body){
+      roleReq = (req.body?.role || '').toString().toUpperCase().trim();
+      if (!roleReq) return res.status(400).json({ error:'role required' });
+      if (!['SACCO_STAFF','SACCO_ADMIN','SACCO'].includes(roleReq)) {
+        return res.status(400).json({ error:'Invalid role' });
+      }
+      updates.role = roleReq;
+    }
+
+    if (!Object.keys(updates).length){
+      return res.status(400).json({ error:'No updates provided' });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('staff_profiles')
+      .update(updates)
+      .eq('id', staffId)
+      .eq('sacco_id', saccoId)
+      .select('*')
+      .maybeSingle();
+    if (error) {
+      if (error.code === PG_ROW_NOT_FOUND) return res.status(404).json({ error:'Staff not found' });
+      throw error;
+    }
+    if (!data) return res.status(404).json({ error:'Staff not found' });
+
+    if (roleReq && data.user_id){
+      const normalizedRole = (roleReq === 'DRIVER' || roleReq === 'MATATU_STAFF') ? 'STAFF' : roleReq;
+      const { error: urErr } = await supabaseAdmin
+        .from('user_roles')
+        .upsert(
+          { user_id: data.user_id, role: normalizedRole, sacco_id: saccoId, matatu_id: null },
+          { onConflict: 'user_id' }
+        );
+      if (urErr) throw urErr;
+    }
+
+    res.json(data);
+  }catch(e){
+    res.status(500).json({ error: e.message || 'Failed to update staff' });
+  }
+});
+
 // Delete staff and revoke SACCO role access
 router.delete('/sacco/:id/staff/:staffId', async (req,res)=>{
   const saccoId = req.params.id; const staffId = req.params.staffId;
@@ -751,7 +958,11 @@ router.post('/sacco/:id/daily-fee-rates', async (req,res)=>{
 // Loan requests
 router.get('/sacco/:id/loan-requests', async (req,res)=>{
   const saccoId = req.params.id;
-  const status = (req.query.status || '').toString().toUpperCase();
+  const statusRaw = (req.query.status || '').toString().toUpperCase();
+  const statuses = statusRaw
+    .split(',')
+    .map((status) => status.trim())
+    .filter(Boolean);
   try{
     const { allowed } = await ensureSaccoAccess(req.user.id, saccoId);
     if (!allowed) return res.status(403).json({ error:'Forbidden' });
@@ -760,7 +971,8 @@ router.get('/sacco/:id/loan-requests', async (req,res)=>{
       .select('*')
       .eq('sacco_id', saccoId)
       .order('created_at', { ascending:false });
-    if (status) query = query.eq('status', status);
+    if (statuses.length === 1) query = query.eq('status', statuses[0]);
+    if (statuses.length > 1) query = query.in('status', statuses);
     const { data, error } = await query;
     if (error) throw error;
     res.json({ items: data || [] });
