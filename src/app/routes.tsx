@@ -15,9 +15,7 @@ import SystemDashboard from "../dashboards/System";
 import SystemRegistry from "../dashboards/SystemRegistry";
 import OpsDashboard from "../dashboards/Ops";
 import DashHome from "../dashboards/DashHome";
-import PayoutHistory from "../pages/PayoutHistory";
 import SaccoApprovals from "../pages/SaccoApprovals";
-import WorkerMonitor from "../pages/WorkerMonitor";
 import WithdrawalPhonesRoute from "../pages/WithdrawalPhonesRoute";
 
 export const routes: RouteObject[] = [
@@ -112,7 +110,7 @@ export const routes: RouteObject[] = [
     path: "/system/payouts",
     element: (
       <RequireRole allow={["super_admin", "system_admin"]}>
-        <PayoutHistory />
+        <SystemDashboard />
       </RequireRole>
     ),
   },
@@ -128,7 +126,7 @@ export const routes: RouteObject[] = [
     path: "/system/worker-monitor",
     element: (
       <RequireRole allow={["super_admin", "system_admin"]}>
-        <WorkerMonitor />
+        <SystemDashboard />
       </RequireRole>
     ),
   },

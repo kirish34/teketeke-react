@@ -2,6 +2,8 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import DashboardShell from '../components/DashboardShell'
 import { authFetch } from '../lib/auth'
+import PayoutHistory from '../pages/PayoutHistory'
+import WorkerMonitor from '../pages/WorkerMonitor'
 
 type OverviewCounts = {
   saccos?: number
@@ -183,6 +185,8 @@ type SystemTabId =
   | 'overview'
   | 'finance'
   | 'c2b'
+  | 'payouts'
+  | 'worker_monitor'
   | 'saccos'
   | 'matatu'
   | 'taxis'
@@ -593,6 +597,8 @@ const SystemDashboard = () => {
     { id: 'registry', label: 'System Registry' },
     { id: 'finance', label: 'Finance' },
     { id: 'c2b', label: 'C2B Payments' },
+    { id: 'payouts', label: 'B2C Payouts' },
+    { id: 'worker_monitor', label: 'Worker Monitor' },
     { id: 'saccos', label: 'SACCOs' },
     { id: 'matatu', label: 'Matatu' },
     { id: 'taxis', label: 'Taxis' },
@@ -605,11 +611,18 @@ const SystemDashboard = () => {
   ]
 
   const tabFromState = tabs.find((t) => t.id === (location.state as { tab?: string } | null)?.tab)?.id || null
+  const tabFromPath =
+    location.pathname === '/system/payouts'
+      ? 'payouts'
+      : location.pathname === '/system/worker-monitor'
+        ? 'worker_monitor'
+        : null
 
   useEffect(() => {
-    if (!tabFromState || tabFromState === 'registry') return
-    setActiveTab((prev) => (prev === tabFromState ? prev : tabFromState))
-  }, [tabFromState])
+    const next = tabFromState || tabFromPath
+    if (!next || next === 'registry') return
+    setActiveTab((prev) => (prev === next ? prev : next))
+  }, [tabFromState, tabFromPath])
 
   const vehicleTabMeta: Record<VehicleTabKey, { label: string; plural: string; type: VehicleKind }> = {
     matatu: { label: 'Matatu', plural: 'Matatus', type: 'MATATU' },
@@ -2734,6 +2747,10 @@ const SystemDashboard = () => {
       </section>
         </>
       ) : null}
+
+      {activeTab === 'payouts' ? <PayoutHistory /> : null}
+
+      {activeTab === 'worker_monitor' ? <WorkerMonitor /> : null}
 
       {activeTab === 'ussd' ? (
         <>
