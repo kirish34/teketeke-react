@@ -93,7 +93,16 @@ type LoanDue = Loan & {
   due_status?: string
 }
 
-type SaccoTabId = 'overview' | 'matatus' | 'transactions' | 'loans' | 'routes' | 'staff' | 'payments'
+type SaccoTabId =
+  | 'matatus'
+  | 'collections'
+  | 'transactions'
+  | 'staff_collections'
+  | 'payments'
+  | 'staff'
+  | 'loans'
+  | 'routes'
+  | 'loan_requests'
 
 function fmtKES(v: number | undefined | null) {
   return `KES ${(Number(v || 0)).toLocaleString('en-KE')}`
@@ -125,7 +134,7 @@ export default function SaccoDashboard() {
   const [saccos, setSaccos] = useState<SaccoOption[]>([])
   const [currentSacco, setCurrentSacco] = useState<string | null>(null)
   const [statusMsg, setStatusMsg] = useState('Loading SACCOs...')
-  const [activeTab, setActiveTab] = useState<SaccoTabId>('overview')
+  const [activeTab, setActiveTab] = useState<SaccoTabId>('collections')
 
   const [fromDate, setFromDate] = useState(todayIso())
   const [toDate, setToDate] = useState(todayIso())
@@ -216,13 +225,15 @@ export default function SaccoDashboard() {
   const [routeEditError, setRouteEditError] = useState<string | null>(null)
 
   const tabs: Array<{ id: SaccoTabId; label: string }> = [
-    { id: 'overview', label: 'Overview' },
     { id: 'matatus', label: 'Matatus' },
+    { id: 'collections', label: 'Collections' },
     { id: 'transactions', label: 'Transactions' },
+    { id: 'staff_collections', label: 'Staff Collections' },
+    { id: 'payments', label: 'Payments (STK)' },
+    { id: 'staff', label: 'Staff' },
     { id: 'loans', label: 'Loans' },
     { id: 'routes', label: 'Routes' },
-    { id: 'staff', label: 'Staff' },
-    { id: 'payments', label: 'Payments' },
+    { id: 'loan_requests', label: 'Loan Requests' },
   ]
 
   const matatuMap = useMemo(() => {
@@ -1087,7 +1098,7 @@ export default function SaccoDashboard() {
   }
 
   return (
-    <DashboardShell title="SACCO Dashboard" subtitle="React port of SACCO console">
+    <DashboardShell title="SACCO Dashboard" subtitle="React port of SACCO console" hideNav>
       <section className="card">
         <div className="row" style={{ alignItems: 'flex-end', gap: 12 }}>
           <label>
@@ -1144,26 +1155,26 @@ export default function SaccoDashboard() {
         ))}
       </nav>
 
-      {activeTab === 'overview' ? (
-        <>
-          {notifications.length ? (
-            <section className="card" style={{ background: '#f8fafc' }}>
-              <div className="topline">
-                <h3 style={{ margin: 0 }}>Notifications</h3>
-                <button type="button" className="btn ghost" onClick={loadNotifications}>
-                  Refresh
-                </button>
-              </div>
-              <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>
-                {notifications.map((n, idx) => (
-                  <li key={idx} style={{ margin: '4px 0' }}>
-                    {n}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
+      {notifications.length ? (
+        <section className="card" style={{ background: '#f8fafc' }}>
+          <div className="topline">
+            <h3 style={{ margin: 0 }}>Notifications</h3>
+            <button type="button" className="btn ghost" onClick={loadNotifications}>
+              Refresh
+            </button>
+          </div>
+          <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>
+            {notifications.map((n, idx) => (
+              <li key={idx} style={{ margin: '4px 0' }}>
+                {n}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
+      {activeTab === 'collections' ? (
+        <>
           <section className="card">
             <h3 style={{ marginTop: 0 }}>Collections summary</h3>
             <div className="grid metrics">
@@ -1516,7 +1527,7 @@ export default function SaccoDashboard() {
       </section>
       ) : null}
 
-      {activeTab === 'loans' ? (
+      {activeTab === 'loan_requests' ? (
         <>
         <section className="card">
         <div className="topline">
@@ -2121,8 +2132,7 @@ export default function SaccoDashboard() {
       ) : null}
 
       {activeTab === 'staff' ? (
-        <>
-        <section className="card">
+      <section className="card">
         <div className="topline">
           <h3 style={{ margin: 0 }}>SACCO staff</h3>
           <span className="muted small">{staff.length} staff</span>
@@ -2292,7 +2302,9 @@ export default function SaccoDashboard() {
           </table>
         </div>
       </section>
+      ) : null}
 
+      {activeTab === 'staff_collections' ? (
       <section className="card">
         <h3 style={{ marginTop: 0 }}>Staff collections (SUCCESS only in range)</h3>
         <div className="grid g2">
@@ -2367,7 +2379,6 @@ export default function SaccoDashboard() {
           </div>
         </div>
       </section>
-        </>
       ) : null}
 
     </DashboardShell>
