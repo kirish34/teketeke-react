@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import DashboardShell from '../components/DashboardShell'
 import { authFetch } from '../lib/auth'
+import { defaultOperatorType, getOperatorConfig, normalizeOperatorType, type OperatorType } from '../lib/operatorConfig'
 import PayoutHistory from '../pages/PayoutHistory'
 import WorkerMonitor from '../pages/WorkerMonitor'
 
@@ -207,6 +208,16 @@ type SaccoRow = {
   sacco_id?: string
   name?: string
   sacco_name?: string
+  display_name?: string
+  legal_name?: string | null
+  registration_no?: string | null
+  operator_type?: string | null
+  org_type?: string | null
+  fee_label?: string | null
+  savings_enabled?: boolean | null
+  loans_enabled?: boolean | null
+  routes_enabled?: boolean | null
+  status?: string | null
   contact_name?: string
   phone?: string
   contact_phone?: string
@@ -301,6 +312,65 @@ function normalizeFeePercentInput(value: string) {
   if (!Number.isFinite(num) || num < 0) return null
   if (num === 0) return 0
   return num / 100
+}
+
+const operatorTypeOptions: Array<{ value: OperatorType; label: string }> = [
+  { value: 'MATATU_SACCO', label: 'Matatu SACCO' },
+  { value: 'MATATU_COMPANY', label: 'Matatu Company / Fleet' },
+  { value: 'BODA_GROUP', label: 'Boda Boda Group' },
+  { value: 'TAXI_FLEET', label: 'Taxi Fleet / Company' },
+]
+
+function buildOperatorDefaults(operatorType?: string | null) {
+  const normalized = normalizeOperatorType(operatorType)
+  const config = getOperatorConfig(normalized)
+  return {
+    operator_type: normalized,
+    fee_label: config.feeLabel,
+    routes_enabled: config.showRouteMap,
+  }
+}
+
+function createOperatorForm(operatorType?: string | null) {
+  const defaults = buildOperatorDefaults(operatorType)
+  return {
+    display_name: '',
+    operator_type: defaults.operator_type,
+    legal_name: '',
+    registration_no: '',
+    status: 'ACTIVE',
+    contact_phone: '',
+    contact_email: '',
+    default_till: '',
+    settlement_method: 'MPESA',
+    fee_label: defaults.fee_label,
+    savings_enabled: true,
+    loans_enabled: true,
+    routes_enabled: defaults.routes_enabled,
+    admin_email: '',
+    admin_phone: '',
+  }
+}
+
+function normalizePhoneInput(value: string) {
+  return String(value || '').replace(/\s+/g, '')
+}
+
+function isValidEmail(value: string) {
+  if (!value) return false
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+}
+
+function isValidKenyanPhone(value: string) {
+  if (!value) return false
+  const cleaned = normalizePhoneInput(value)
+  return /^(?:\+?254|0)(7\d{8}|1\d{8})$/.test(cleaned)
+}
+
+function formatOperatorTypeLabel(value?: string | null) {
+  const normalized = normalizeOperatorType(value)
+  const match = operatorTypeOptions.find((option) => option.value === normalized)
+  return match ? match.label : normalized
 }
 
 type CsvHeader = { key: string; label: string }
@@ -525,13 +595,7 @@ const SystemDashboard = () => {
   const mapInstance = useRef<any>(null)
   const mapLayers = useRef<{ polyline?: any; markers?: any[] }>({})
 
-  const [saccoForm, setSaccoForm] = useState({
-    name: '',
-    contact_name: '',
-    contact_phone: '',
-    contact_email: '',
-    default_till: '',
-  })
+  const [saccoForm, setSaccoForm] = useState(() => createOperatorForm(defaultOperatorType))
   const [saccoMsg, setSaccoMsg] = useState('')
   const [saccoEditId, setSaccoEditId] = useState('')
   const [saccoEditForm, setSaccoEditForm] = useState({
@@ -622,7 +686,7 @@ const SystemDashboard = () => {
     { id: 'c2b', label: 'C2B Payments' },
     { id: 'payouts', label: 'B2C Payouts' },
     { id: 'worker_monitor', label: 'Worker Monitor' },
-    { id: 'saccos', label: 'SACCOs' },
+    { id: 'saccos', label: 'Operators' },
     { id: 'matatu', label: 'Matatu' },
     { id: 'taxis', label: 'Taxis' },
     { id: 'bodabodas', label: 'BodaBodas' },
@@ -806,7 +870,8 @@ const SystemDashboard = () => {
       if (!row.id) return
       const ussdRow = ussdByMatatuId.get(row.id)
       const sacco = row.sacco_id ? saccoById.get(row.sacco_id) : null
-      const saccoName = row.sacco_name || sacco?.name || sacco?.sacco_name || row.sacco || ''
+      const saccoName =
+        row.sacco_name || sacco?.display_name || sacco?.name || sacco?.sacco_name || row.sacco || ''
       rows.push({
         type: 'MATATU',
         id: row.id,
@@ -825,7 +890,7 @@ const SystemDashboard = () => {
       rows.push({
         type: 'SACCO',
         id,
-        label: row.name || row.sacco_name || id,
+        label: row.display_name || row.name || row.sacco_name || id,
         paybill_account: row.default_till || '',
         ussd_code: ussdRow ? formatUssdCode(ussdRow) : '',
         ussd_assigned_at: ussdRow?.allocated_at || '',
@@ -878,7 +943,7 @@ const SystemDashboard = () => {
     setSaccoEditMsg('')
     setSaccoEditError(null)
     setSaccoEditForm({
-      name: row.name || row.sacco_name || '',
+      name: row.display_name || row.name || row.sacco_name || '',
       contact_name: row.contact_name || '',
       contact_phone: row.contact_phone || row.phone || '',
       contact_email: row.contact_email || row.email || '',
@@ -894,19 +959,20 @@ const SystemDashboard = () => {
       const payload = {
         id: saccoEditId,
         name: saccoEditForm.name.trim(),
+        display_name: saccoEditForm.name.trim(),
         contact_name: saccoEditForm.contact_name.trim() || null,
         contact_phone: saccoEditForm.contact_phone.trim() || null,
         contact_email: saccoEditForm.contact_email.trim() || null,
         default_till: saccoEditForm.default_till.trim() || null,
       }
       if (!payload.name) {
-        setSaccoEditMsg('Name is required')
+        setSaccoEditMsg('Display name is required')
         return
       }
       const data = await sendJson<SaccoRow>('/api/admin/update-sacco', 'POST', payload)
-      setSaccoEditMsg('SACCO updated')
+      setSaccoEditMsg('Operator updated')
       setSaccoEditForm({
-        name: data.name || payload.name,
+        name: data.display_name || data.name || payload.name,
         contact_name: data.contact_name || '',
         contact_phone: data.contact_phone || '',
         contact_email: data.contact_email || '',
@@ -1999,7 +2065,7 @@ const SystemDashboard = () => {
               <option value="">Select SACCO</option>
               {saccos.map((s) => (
                 <option key={s.id || s.sacco_id} value={s.id || s.sacco_id || ''}>
-                  {s.name || s.sacco_name || s.sacco_id}
+                  {s.display_name || s.name || s.sacco_name || s.sacco_id}
                 </option>
               ))}
             </select>
@@ -2135,7 +2201,7 @@ const SystemDashboard = () => {
                                       <option value="">Select SACCO</option>
                                       {saccos.map((s) => (
                                         <option key={s.id || s.sacco_id} value={s.id || s.sacco_id || ''}>
-                                          {s.name || s.sacco_name || s.sacco_id}
+                                          {s.display_name || s.name || s.sacco_name || s.sacco_id}
                                         </option>
                                       ))}
                                     </select>
@@ -2252,73 +2318,250 @@ const SystemDashboard = () => {
       {activeTab === 'saccos' ? (
         <>
           <section className="card">
-            <h3 style={{ marginTop: 0 }}>Register SACCO</h3>
-            <div className="row">
-              <input
-                className="input"
-                placeholder="Name"
-                value={saccoForm.name}
-                onChange={(e) => setSaccoForm((f) => ({ ...f, name: e.target.value }))}
-              />
-              <input
-                className="input"
-                placeholder="Contact name"
-                value={saccoForm.contact_name}
-                onChange={(e) => setSaccoForm((f) => ({ ...f, contact_name: e.target.value }))}
-              />
-              <input
-                className="input"
-                placeholder="Phone"
-                value={saccoForm.contact_phone}
-                onChange={(e) => setSaccoForm((f) => ({ ...f, contact_phone: e.target.value }))}
-              />
-              <input
-                className="input"
-                placeholder="Email"
-                value={saccoForm.contact_email}
-                onChange={(e) => setSaccoForm((f) => ({ ...f, contact_email: e.target.value }))}
-              />
-              <input
-                className="input"
-                placeholder="Default till (optional)"
-                value={saccoForm.default_till}
-                onChange={(e) => setSaccoForm((f) => ({ ...f, default_till: e.target.value }))}
-              />
+            <h3 style={{ marginTop: 0 }}>Register Operator</h3>
+
+            <h4 style={{ margin: '10px 0 6px' }}>Operator basic details</h4>
+            <div className="grid g2">
+              <label className="muted small">
+                Operator display name
+                <input
+                  className="input"
+                  value={saccoForm.display_name}
+                  onChange={(e) => setSaccoForm((f) => ({ ...f, display_name: e.target.value }))}
+                  placeholder="e.g., Metro Fleet"
+                />
+              </label>
+              <label className="muted small">
+                Operator type
+                <select
+                  value={saccoForm.operator_type}
+                  onChange={(e) => {
+                    const nextType = e.target.value as OperatorType
+                    const defaults = buildOperatorDefaults(nextType)
+                    setSaccoForm((f) => ({
+                      ...f,
+                      operator_type: defaults.operator_type,
+                      fee_label: defaults.fee_label,
+                      routes_enabled: defaults.routes_enabled,
+                    }))
+                  }}
+                >
+                  {operatorTypeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="muted small">
+                Legal name (optional)
+                <input
+                  className="input"
+                  value={saccoForm.legal_name}
+                  onChange={(e) => setSaccoForm((f) => ({ ...f, legal_name: e.target.value }))}
+                  placeholder="Registered legal name"
+                />
+              </label>
+              <label className="muted small">
+                Registration number (optional)
+                <input
+                  className="input"
+                  value={saccoForm.registration_no}
+                  onChange={(e) => setSaccoForm((f) => ({ ...f, registration_no: e.target.value }))}
+                  placeholder="Company/SACCO reg no"
+                />
+              </label>
+              <label className="muted small">
+                Status
+                <select
+                  value={saccoForm.status}
+                  onChange={(e) => setSaccoForm((f) => ({ ...f, status: e.target.value }))}
+                >
+                  <option value="ACTIVE">ACTIVE</option>
+                  <option value="SUSPENDED">SUSPENDED</option>
+                </select>
+              </label>
+            </div>
+
+            <h4 style={{ margin: '16px 0 6px' }}>Contact &amp; settlement</h4>
+            <div className="grid g2">
+              <label className="muted small">
+                Official phone number
+                <input
+                  className="input"
+                  value={saccoForm.contact_phone}
+                  onChange={(e) => setSaccoForm((f) => ({ ...f, contact_phone: e.target.value }))}
+                  placeholder="07xx..."
+                />
+              </label>
+              <label className="muted small">
+                Official email
+                <input
+                  className="input"
+                  value={saccoForm.contact_email}
+                  onChange={(e) => setSaccoForm((f) => ({ ...f, contact_email: e.target.value }))}
+                  placeholder="finance@operator.co.ke"
+                />
+              </label>
+              <label className="muted small">
+                Settlement till / paybill
+                <input
+                  className="input"
+                  value={saccoForm.default_till}
+                  onChange={(e) => setSaccoForm((f) => ({ ...f, default_till: e.target.value }))}
+                  placeholder="Paybill or till number"
+                />
+              </label>
+              <label className="muted small">
+                Settlement method
+                <select
+                  value={saccoForm.settlement_method}
+                  onChange={(e) => setSaccoForm((f) => ({ ...f, settlement_method: e.target.value }))}
+                >
+                  <option value="MPESA">M-PESA</option>
+                </select>
+              </label>
+            </div>
+
+            <h4 style={{ margin: '16px 0 6px' }}>Business rules / defaults</h4>
+            <div className="grid g2">
+              <label className="muted small">
+                Default fee label
+                <input
+                  className="input"
+                  value={saccoForm.fee_label}
+                  onChange={(e) => setSaccoForm((f) => ({ ...f, fee_label: e.target.value }))}
+                  placeholder="Daily Fee"
+                />
+              </label>
+              <div className="muted small" style={{ display: 'flex', alignItems: 'center' }}>
+                Auto-filled by operator type, override if needed.
+              </div>
+            </div>
+            <div className="row" style={{ gap: 16, flexWrap: 'wrap', marginTop: 8 }}>
+              <label className="muted small" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input
+                  type="checkbox"
+                  checked={saccoForm.savings_enabled}
+                  onChange={(e) => setSaccoForm((f) => ({ ...f, savings_enabled: e.target.checked }))}
+                />
+                Savings enabled
+              </label>
+              <label className="muted small" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input
+                  type="checkbox"
+                  checked={saccoForm.loans_enabled}
+                  onChange={(e) => setSaccoForm((f) => ({ ...f, loans_enabled: e.target.checked }))}
+                />
+                Loans enabled
+              </label>
+              <label className="muted small" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input
+                  type="checkbox"
+                  checked={saccoForm.routes_enabled}
+                  onChange={(e) => setSaccoForm((f) => ({ ...f, routes_enabled: e.target.checked }))}
+                />
+                Routes enabled
+              </label>
+            </div>
+
+            <h4 style={{ margin: '16px 0 6px' }}>System access</h4>
+            <div className="grid g2">
+              <label className="muted small">
+                Admin user email
+                <input
+                  className="input"
+                  value={saccoForm.admin_email}
+                  onChange={(e) => setSaccoForm((f) => ({ ...f, admin_email: e.target.value }))}
+                  placeholder="admin@operator.co.ke"
+                />
+              </label>
+              <label className="muted small">
+                Admin user phone
+                <input
+                  className="input"
+                  value={saccoForm.admin_phone}
+                  onChange={(e) => setSaccoForm((f) => ({ ...f, admin_phone: e.target.value }))}
+                  placeholder="07xx..."
+                />
+              </label>
+              <label className="muted small">
+                Role
+                <input className="input" value="OPERATOR_ADMIN" disabled />
+              </label>
+            </div>
+
+            <div className="row" style={{ marginTop: 12, flexWrap: 'wrap' }}>
               <button
                 className="btn"
                 type="button"
                 onClick={async () => {
+                  const displayName = saccoForm.display_name.trim()
+                  const operatorTypeRaw = saccoForm.operator_type
+                  const operatorType = normalizeOperatorType(operatorTypeRaw)
+                  const contactPhone = normalizePhoneInput(saccoForm.contact_phone)
+                  const contactEmail = saccoForm.contact_email.trim()
+                  const defaultTill = saccoForm.default_till.trim()
+                  const adminEmail = saccoForm.admin_email.trim()
+                  const adminPhone = normalizePhoneInput(saccoForm.admin_phone)
+                  const feeLabel = saccoForm.fee_label.trim() || buildOperatorDefaults(operatorType).fee_label
+                  const status = saccoForm.status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE'
+
+                  const errors: string[] = []
+                  if (!displayName) errors.push('Operator display name is required')
+                  if (!operatorTypeRaw) errors.push('Operator type is required')
+                  if (!defaultTill) errors.push('Settlement till/paybill is required')
+                  if (!adminEmail || !isValidEmail(adminEmail)) errors.push('Valid admin email is required')
+                  if (!adminPhone || !isValidKenyanPhone(adminPhone)) errors.push('Admin phone must be Kenyan format')
+                  if (contactPhone && !isValidKenyanPhone(contactPhone)) errors.push('Official phone must be Kenyan format')
+                  if (contactEmail && !isValidEmail(contactEmail)) errors.push('Official email must be valid')
+
+                  if (errors.length) {
+                    setSaccoMsg(errors[0])
+                    return
+                  }
+
                   setSaccoMsg('Saving...')
                   try {
-                    await sendJson('/api/admin/register-sacco', 'POST', {
-                      name: saccoForm.name.trim(),
-                      contact_name: saccoForm.contact_name.trim(),
-                      contact_phone: saccoForm.contact_phone.trim(),
-                      contact_email: saccoForm.contact_email.trim(),
-                      default_till: saccoForm.default_till.trim() || null,
+                    const data = await sendJson<any>('/api/admin/register-sacco', 'POST', {
+                      name: displayName,
+                      display_name: displayName,
+                      operator_type: operatorType,
+                      legal_name: saccoForm.legal_name.trim() || null,
+                      registration_no: saccoForm.registration_no.trim() || null,
+                      status,
+                      contact_phone: contactPhone || null,
+                      contact_email: contactEmail || null,
+                      default_till: defaultTill,
+                      fee_label: feeLabel,
+                      savings_enabled: saccoForm.savings_enabled,
+                      loans_enabled: saccoForm.loans_enabled,
+                      routes_enabled: saccoForm.routes_enabled,
+                      admin_email: adminEmail,
+                      admin_phone: adminPhone,
+                      settlement_method: saccoForm.settlement_method,
+                      // TODO: Persist settlement_method when backend adds support.
                     })
-                    setSaccoMsg('SACCO created')
-                    setSaccoForm({
-                      name: '',
-                      contact_name: '',
-                      contact_phone: '',
-                      contact_email: '',
-                      default_till: '',
-                    })
+                    const createdUser = data?.created_user || null
+                    let msg = 'Operator created'
+                    if (createdUser?.note) msg = `${msg}. ${createdUser.note}`
+                    if (data?.staff_profile_error) msg = `${msg}. ${data.staff_profile_error}`
+                    setSaccoMsg(msg)
+                    setSaccoForm(createOperatorForm(operatorType))
                     await fetchList<SaccoRow>('/api/admin/saccos')
                       .then((rows) => setSaccos(rows))
                       .catch((err) => setSaccosError(err instanceof Error ? err.message : String(err)))
+                    if (createdUser?.temp_password) {
+                      window.alert(
+                        `Operator created.\nAdmin login: ${createdUser.email || adminEmail}\nTemp password: ${createdUser.temp_password}`,
+                      )
+                    }
+                    navigate('/sacco')
                   } catch (err) {
                     const msg = err instanceof Error ? err.message : 'Create failed'
                     if (/created but wallet failed/i.test(msg)) {
                       setSaccoMsg(msg)
-                      setSaccoForm({
-                        name: '',
-                        contact_name: '',
-                        contact_phone: '',
-                        contact_email: '',
-                        default_till: '',
-                      })
+                      setSaccoForm(createOperatorForm(operatorType))
                       await fetchList<SaccoRow>('/api/admin/saccos')
                         .then((rows) => setSaccos(rows))
                         .catch((loadErr) => setSaccosError(loadErr instanceof Error ? loadErr.message : String(loadErr)))
@@ -2328,28 +2571,30 @@ const SystemDashboard = () => {
                   }
                 }}
               >
-                Register SACCO
+                Register Operator
               </button>
+              <span className="muted small">{saccoMsg}</span>
             </div>
-            <div className="muted small">{saccoMsg}</div>
           </section>
 
           <section className="card">
             <div className="topline">
-              <h3 style={{ margin: 0 }}>SACCOs</h3>
+              <h3 style={{ margin: 0 }}>Operators</h3>
               <span className="muted small">
                 Showing {saccos.length} record{saccos.length === 1 ? '' : 's'}
               </span>
             </div>
-            {saccosError ? <div className="err">SACCO load error: {saccosError}</div> : null}
+            {saccosError ? <div className="err">Operator load error: {saccosError}</div> : null}
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>Name</th>
-                    <th>Contact</th>
+                    <th>Operator</th>
+                    <th>Type</th>
                     <th>Phone</th>
                     <th>Email</th>
+                    <th>Settlement</th>
+                    <th>Status</th>
                     <th>ID</th>
                     <th>Actions</th>
                   </tr>
@@ -2357,8 +2602,8 @@ const SystemDashboard = () => {
                 <tbody>
                   {saccos.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="muted">
-                        No SACCOs yet.
+                      <td colSpan={8} className="muted">
+                        No operators yet.
                       </td>
                     </tr>
                   ) : (
@@ -2368,10 +2613,12 @@ const SystemDashboard = () => {
                       return (
                         <Fragment key={sacco.id || sacco.sacco_id || sacco.email}>
                           <tr>
-                            <td>{sacco.name || sacco.sacco_name || '-'}</td>
-                            <td>{sacco.contact_name || '-'}</td>
+                            <td>{sacco.display_name || sacco.name || sacco.sacco_name || '-'}</td>
+                            <td>{formatOperatorTypeLabel(sacco.operator_type || sacco.org_type || null)}</td>
                             <td>{sacco.phone || sacco.contact_phone || '-'}</td>
                             <td>{sacco.email || sacco.contact_email || '-'}</td>
+                            <td>{sacco.default_till || '-'}</td>
+                            <td>{sacco.status || 'ACTIVE'}</td>
                             <td>{saccoId || '-'}</td>
                             <td>
                               <button className="btn ghost" type="button" onClick={() => startSaccoEdit(sacco)}>
@@ -2381,16 +2628,16 @@ const SystemDashboard = () => {
                           </tr>
                           {isEditing ? (
                             <tr>
-                              <td colSpan={6}>
+                              <td colSpan={8}>
                                 <div className="card" style={{ margin: '6px 0' }}>
                                   <div className="topline">
-                                    <h3 style={{ margin: 0 }}>Edit SACCO</h3>
+                                    <h3 style={{ margin: 0 }}>Edit Operator</h3>
                                     <span className="muted small">ID: {saccoEditId}</span>
                                   </div>
                                   {saccoEditError ? <div className="err">Update error: {saccoEditError}</div> : null}
                                   <div className="grid g2">
                                     <label className="muted small">
-                                      Name
+                                      Display name
                                       <input
                                         className="input"
                                         value={saccoEditForm.name}
@@ -2422,7 +2669,7 @@ const SystemDashboard = () => {
                                       />
                                     </label>
                                     <label className="muted small">
-                                      Default till
+                                      Settlement till / paybill
                                       <input
                                         className="input"
                                         value={saccoEditForm.default_till}
@@ -3173,7 +3420,7 @@ const SystemDashboard = () => {
                 <option value="">Select SACCO</option>
                 {saccos.map((s) => (
                   <option key={s.id || s.sacco_id} value={s.id || s.sacco_id || ''}>
-                    {s.name || s.sacco_name || s.sacco_id}
+                    {s.display_name || s.name || s.sacco_name || s.sacco_id}
                   </option>
                 ))}
               </select>
@@ -3275,7 +3522,7 @@ const SystemDashboard = () => {
                 <option value="">Select SACCO</option>
                 {saccos.map((s) => (
                   <option key={s.id || s.sacco_id} value={s.id || s.sacco_id || ''}>
-                    {s.name || s.sacco_name || s.sacco_id}
+                    {s.display_name || s.name || s.sacco_name || s.sacco_id}
                   </option>
                 ))}
               </select>
@@ -3505,7 +3752,7 @@ const SystemDashboard = () => {
                 <option value="">Select SACCO</option>
                 {saccos.map((s) => (
                   <option key={s.id || s.sacco_id} value={s.id || s.sacco_id || ''}>
-                    {s.name || s.sacco_name || s.sacco_id}
+                    {s.display_name || s.name || s.sacco_name || s.sacco_id}
                   </option>
                 ))}
               </select>
@@ -3974,7 +4221,7 @@ const SystemDashboard = () => {
               <option value="">SACCO (optional)</option>
               {saccos.map((s) => (
                 <option key={s.id || s.sacco_id} value={s.id || s.sacco_id || ''}>
-                  {s.name || s.sacco_name || s.sacco_id}
+                  {s.display_name || s.name || s.sacco_name || s.sacco_id}
                 </option>
               ))}
             </select>

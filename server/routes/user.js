@@ -52,7 +52,9 @@ async function getSaccoDetails(saccoId) {
   if (!saccoId) return null;
   const { data, error } = await supabaseAdmin
     .from('saccos')
-    .select('id,name,contact_name,contact_phone,contact_email,default_till,org_type')
+    .select(
+      'id,name,display_name,legal_name,registration_no,contact_name,contact_phone,contact_email,default_till,org_type,operator_type,fee_label,savings_enabled,loans_enabled,routes_enabled,status',
+    )
     .eq('id', saccoId)
     .maybeSingle();
   if (error && error.code !== PG_ROW_NOT_FOUND) throw error;
@@ -157,16 +159,26 @@ router.get('/my-saccos', async (req, res) => {
     if (!ctx.saccoId) return res.json({ items: [] });
     const sacco = await getSaccoDetails(ctx.saccoId);
     if (!sacco) return res.json({ items: [] });
+    const displayName = sacco.display_name || sacco.name;
     res.json({
       items: [
         {
           sacco_id: sacco.id,
-          name: sacco.name,
+          name: displayName,
+          display_name: displayName,
+          legal_name: sacco.legal_name || null,
+          registration_no: sacco.registration_no || null,
           contact_name: sacco.contact_name,
           contact_phone: sacco.contact_phone,
           contact_email: sacco.contact_email,
           default_till: sacco.default_till,
-          org_type: sacco.org_type || null,
+          operator_type: sacco.operator_type || sacco.org_type || null,
+          org_type: sacco.org_type || sacco.operator_type || null,
+          fee_label: sacco.fee_label ?? null,
+          savings_enabled: sacco.savings_enabled ?? null,
+          loans_enabled: sacco.loans_enabled ?? null,
+          routes_enabled: sacco.routes_enabled ?? null,
+          status: sacco.status || null,
           role: ctx.role?.role || null,
           via: ctx.matatu ? 'matatu' : 'direct',
           matatu_id: ctx.matatu?.id || null,

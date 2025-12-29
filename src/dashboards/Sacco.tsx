@@ -233,7 +233,7 @@ export default function SaccoDashboard() {
 
   const operatorType = useMemo(() => {
     const selected = saccos.find((s) => s.sacco_id === currentSacco)
-    // TODO: backend should return org_type for /u/my-saccos to drive operator typing.
+    // TODO: backend should guarantee operator_type on /u/my-saccos for operator typing.
     const rawType = selected?.operator_type || selected?.org_type || selected?.operatorType
     return normalizeOperatorType(rawType)
   }, [saccos, currentSacco])

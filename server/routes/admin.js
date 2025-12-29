@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const { supabaseAdmin } = require('../supabase');
 const pool = require('../db/pool');
 const { creditFareWithFees, creditWallet, registerWalletForEntity } = require('../wallet/wallet.service');
@@ -514,19 +515,55 @@ async function ensureAuthUser(email, password){
       const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 200 });
       if (error) throw error;
       if (!data?.users?.length) break;
-      const found = data.users.find(u => (u.email || '').toLowerCase() === email.toLowerCase());
-      if (found) return found.id;
+      const found = data.users.find((u) => (u.email || '').toLowerCase() === email.toLowerCase());
+      if (found) return { userId: found.id, created: false };
       page += 1;
     }
     throw new Error('Supabase user ' + email + ' exists but could not be retrieved');
   }
   const userId = createRes.data?.user?.id;
   if (!userId) throw new Error('Failed to resolve created user id');
-  return userId;
+  return { userId, created: true };
+}
+
+function normalizeOperatorType(value){
+  const raw = String(value || '').trim().toUpperCase();
+  if (raw === 'MATATU_SACCO' || raw === 'MATATU_COMPANY' || raw === 'BODA_GROUP' || raw === 'TAXI_FLEET') {
+    return raw;
+  }
+  if (raw === 'SACCO' || raw === 'MATATU') return 'MATATU_SACCO';
+  if (raw === 'BODA' || raw === 'BODABODA') return 'BODA_GROUP';
+  if (raw === 'TAXI') return 'TAXI_FLEET';
+  return 'MATATU_SACCO';
+}
+
+function defaultFeeLabelForType(operatorType){
+  if (operatorType === 'BODA_GROUP') return 'Stage Fee';
+  if (operatorType === 'TAXI_FLEET') return 'Dispatch Fee';
+  return 'Daily Fee';
+}
+
+function parseBooleanFlag(value, fallback){
+  if (value === true || value === false) return value;
+  if (typeof value === 'string') {
+    const raw = value.trim().toLowerCase();
+    if (raw === 'true' || raw === '1' || raw === 'yes') return true;
+    if (raw === 'false' || raw === '0' || raw === 'no') return false;
+  }
+  return fallback;
+}
+
+function generateTempPassword(){
+  return `OP${crypto.randomBytes(6).toString('hex')}`;
 }
 
 async function upsertUserRole({ user_id, role, sacco_id = null, matatu_id = null }){
-  const normalizeRole = (r)=> (r==='DRIVER'||r==='MATATU_STAFF') ? 'STAFF' : r;
+  const normalizeRole = (r) => {
+    const upper = String(r || '').trim().toUpperCase();
+    if (upper === 'DRIVER' || upper === 'MATATU_STAFF') return 'STAFF';
+    if (upper === 'OPERATOR_ADMIN') return 'SACCO'; // TODO: adopt OPERATOR_ADMIN when backend roles expand.
+    return upper;
+  };
   role = normalizeRole(role);
   const { error } = await supabaseAdmin
     .from('user_roles')
@@ -535,23 +572,77 @@ async function upsertUserRole({ user_id, role, sacco_id = null, matatu_id = null
 }
 
 router.post('/register-sacco', async (req,res)=>{
-  const row = { name: req.body?.name, contact_name: req.body?.contact_name, contact_phone: req.body?.contact_phone, contact_email: req.body?.contact_email, default_till: req.body?.default_till };
-  if(!row.name) return res.status(400).json({error:'name required'});
-  const loginEmail = (req.body?.login_email || '').trim();
-  const loginPassword = req.body?.login_password || '';
-  if ((loginEmail && !loginPassword) || (!loginEmail && loginPassword)) {
-    return res.status(400).json({ error:'Provide both login_email and login_password or neither' });
+  const displayName = String(req.body?.display_name || req.body?.name || '').trim();
+  const operatorType = normalizeOperatorType(req.body?.operator_type || req.body?.org_type || req.body?.operatorType || req.body?.type);
+  const feeLabelDefault = defaultFeeLabelForType(operatorType);
+  const routesDefault = operatorType === 'MATATU_SACCO' || operatorType === 'MATATU_COMPANY';
+  const statusRaw = String(req.body?.status || 'ACTIVE').trim().toUpperCase();
+  const row = {
+    name: displayName || null,
+    display_name: displayName || null,
+    operator_type: operatorType,
+    org_type: operatorType,
+    legal_name: String(req.body?.legal_name || '').trim() || null,
+    registration_no: String(req.body?.registration_no || '').trim() || null,
+    status: statusRaw === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE',
+    contact_name: String(req.body?.contact_name || '').trim() || null,
+    contact_phone: String(req.body?.contact_phone || '').trim() || null,
+    contact_email: String(req.body?.contact_email || '').trim() || null,
+    default_till: String(req.body?.default_till || '').trim() || null,
+    fee_label: String(req.body?.fee_label || '').trim() || feeLabelDefault,
+    savings_enabled: parseBooleanFlag(req.body?.savings_enabled, true),
+    loans_enabled: parseBooleanFlag(req.body?.loans_enabled, true),
+    routes_enabled: parseBooleanFlag(req.body?.routes_enabled, routesDefault),
+  };
+  if (!row.name) return res.status(400).json({ error:'display_name required' });
+
+  const loginEmail = String(req.body?.admin_email || req.body?.login_email || '').trim();
+  const loginPhone = String(req.body?.admin_phone || '').trim();
+  let loginPassword = req.body?.admin_password || req.body?.login_password || '';
+  if (!loginEmail && loginPassword) {
+    return res.status(400).json({ error:'login_email required when password is provided' });
   }
+  let generatedPassword = '';
+  if (loginEmail && !loginPassword) {
+    generatedPassword = generateTempPassword();
+    loginPassword = generatedPassword;
+  }
+
   const { data, error } = await supabaseAdmin.from('saccos').insert(row).select().single();
   if (error) return res.status(500).json({ error: error.message });
   const result = { ...data };
   if (loginEmail && loginPassword){
     try{
-      const userId = await ensureAuthUser(loginEmail, loginPassword);
+      const { userId, created } = await ensureAuthUser(loginEmail, loginPassword);
       await upsertUserRole({ user_id: userId, role: 'SACCO', sacco_id: data.id });
       result.created_user = { email: loginEmail, role: 'SACCO' };
+      if (created && generatedPassword) {
+        result.created_user.temp_password = generatedPassword;
+      }
+      if (!created) {
+        result.created_user.note = 'User existed; password not reset';
+      }
+      if (loginPhone) {
+        try {
+          const { error: staffErr } = await supabaseAdmin
+            .from('staff_profiles')
+            .insert({
+              user_id: userId,
+              sacco_id: data.id,
+              role: 'SACCO_ADMIN',
+              name: displayName ? `${displayName} Admin` : 'Operator Admin',
+              phone: loginPhone,
+              email: loginEmail,
+            });
+          if (staffErr) {
+            result.staff_profile_error = staffErr.message;
+          }
+        } catch (staffErr) {
+          result.staff_profile_error = staffErr?.message || 'Failed to save admin profile';
+        }
+      }
     }catch(e){
-      result.login_error = e.message || 'Failed to create sacco login';
+      result.login_error = e.message || 'Failed to create operator login';
     }
   }
   try{
@@ -570,6 +661,14 @@ router.post('/register-sacco', async (req,res)=>{
 router.post('/update-sacco', async (req,res)=>{
   const { id, ...rest } = req.body||{};
   if(!id) return res.status(400).json({error:'id required'});
+  if (rest.operator_type) {
+    rest.operator_type = normalizeOperatorType(rest.operator_type);
+    if (!rest.org_type) rest.org_type = rest.operator_type;
+  }
+  if (rest.status) {
+    const nextStatus = String(rest.status).trim().toUpperCase();
+    rest.status = nextStatus === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE';
+  }
   const { data, error } = await supabaseAdmin.from('saccos').update(rest).eq('id',id).select().single();
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
@@ -652,7 +751,7 @@ router.post('/user-roles/create-user', async (req,res)=>{
   if (needsMatatu && !matatuId) return res.status(400).json({ error:'matatu_id required for role ' + role });
 
   try{
-    const userId = await ensureAuthUser(email, password);
+    const { userId } = await ensureAuthUser(email, password);
     await upsertUserRole({ user_id: userId, role, sacco_id: saccoId, matatu_id: matatuId });
     res.json({ user_id: userId, role, sacco_id: saccoId, matatu_id: matatuId });
   }catch(e){
