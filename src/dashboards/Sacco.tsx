@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import DashboardShell from '../components/DashboardShell'
 import { authFetch } from '../lib/auth'
 
@@ -72,6 +72,7 @@ type SaccoRoute = {
   code?: string
   start_stop?: string
   end_stop?: string
+  path_points?: unknown
 }
 
 type Loan = {
@@ -91,6 +92,14 @@ type Loan = {
 type LoanDue = Loan & {
   next_due_date?: string
   due_status?: string
+}
+
+type LivePosition = {
+  matatu_id?: string
+  route_id?: string
+  lat?: number
+  lng?: number
+  recorded_at?: string
 }
 
 type SaccoTabId =
@@ -151,16 +160,6 @@ export default function SaccoDashboard() {
 
   const [matatus, setMatatus] = useState<Matatu[]>([])
   const [matatuFilter, setMatatuFilter] = useState('')
-  const [matatuEditId, setMatatuEditId] = useState('')
-  const [matatuEditForm, setMatatuEditForm] = useState({
-    number_plate: '',
-    owner_name: '',
-    owner_phone: '',
-    tlb_number: '',
-    till_number: '',
-  })
-  const [matatuEditMsg, setMatatuEditMsg] = useState('')
-  const [matatuEditError, setMatatuEditError] = useState<string | null>(null)
   const [txs, setTxs] = useState<Tx[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
   const [staffMsg, setStaffMsg] = useState('')
@@ -218,11 +217,14 @@ export default function SaccoDashboard() {
     total: 0,
     msg: 'Select a loan',
   })
-  const [routeForm, setRouteForm] = useState({ name: '', code: '', start: '', end: '' })
-  const [routeEditId, setRouteEditId] = useState('')
-  const [routeEditForm, setRouteEditForm] = useState({ name: '', code: '', start: '', end: '' })
-  const [routeEditMsg, setRouteEditMsg] = useState('')
-  const [routeEditError, setRouteEditError] = useState<string | null>(null)
+  const [routeViewId, setRouteViewId] = useState('')
+  const [routeMapMsg, setRouteMapMsg] = useState('')
+  const [routeLive, setRouteLive] = useState<LivePosition[]>([])
+  const [routeLiveMsg, setRouteLiveMsg] = useState('')
+  const mapRef = useRef<HTMLDivElement | null>(null)
+  const mapInstance = useRef<any>(null)
+  const mapLayers = useRef<{ polyline?: any; routeMarkers?: any[]; liveMarkers?: any[] }>({})
+  const leafletLoader = useRef<Promise<any> | null>(null)
 
   const tabs: Array<{ id: SaccoTabId; label: string }> = [
     { id: 'matatus', label: 'Matatus' },
@@ -235,6 +237,7 @@ export default function SaccoDashboard() {
     { id: 'routes', label: 'Routes' },
     { id: 'loan_requests', label: 'Loan Requests' },
   ]
+  const showFilters = false
 
   const matatuMap = useMemo(() => {
     const map = new Map<string, string>()
@@ -243,6 +246,34 @@ export default function SaccoDashboard() {
     })
     return map
   }, [matatus])
+
+  const routeById = useMemo(() => {
+    const map = new Map<string, SaccoRoute>()
+    routes.forEach((r) => {
+      if (r.id) map.set(r.id, r)
+    })
+    return map
+  }, [routes])
+
+  const selectedRoute = routeViewId ? routeById.get(routeViewId) || null : null
+
+  const routePoints = useMemo(() => {
+    const raw = selectedRoute?.path_points
+    if (!raw || !Array.isArray(raw)) return []
+    const points: Array<[number, number]> = []
+    raw.forEach((p) => {
+      if (Array.isArray(p) && p.length >= 2) {
+        const lat = Number(p[0])
+        const lng = Number(p[1])
+        if (Number.isFinite(lat) && Number.isFinite(lng)) points.push([lat, lng])
+      } else if (p && typeof p === 'object') {
+        const lat = Number((p as { lat?: unknown }).lat)
+        const lng = Number((p as { lng?: unknown }).lng)
+        if (Number.isFinite(lat) && Number.isFinite(lng)) points.push([lat, lng])
+      }
+    })
+    return points
+  }, [selectedRoute])
 
   const filteredMatatus = useMemo(() => {
     const q = matatuFilter.trim().toUpperCase()
@@ -331,6 +362,46 @@ export default function SaccoDashboard() {
     if (!currentSacco) return
     void loadLoanDue()
   }, [currentSacco])
+
+  useEffect(() => {
+    if (activeTab !== 'routes' || !routeViewId) return
+    void loadRouteLive()
+  }, [activeTab, routeViewId])
+
+  useEffect(() => {
+    if (activeTab !== 'routes') return
+    let cancelled = false
+    ;(async () => {
+      try {
+        setRouteMapMsg('Loading map...')
+        const L = await ensureLeaflet()
+        if (cancelled || !mapRef.current) return
+        if (!mapInstance.current) {
+          const center = routePoints[0] || [-1.286389, 36.817223]
+          mapInstance.current = L.map(mapRef.current).setView(center, 12)
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 18,
+            attribution: '&copy; OpenStreetMap',
+          }).addTo(mapInstance.current)
+        }
+        syncRouteMap()
+        setRouteMapMsg('')
+      } catch (err) {
+        if (!cancelled) {
+          setRouteMapMsg(err instanceof Error ? err.message : 'Map failed to load')
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, routeViewId])
+
+  useEffect(() => {
+    if (activeTab === 'routes') syncRouteMap()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, routePoints, routeLive])
 
   const filteredTx = useMemo(() => {
     return txs.filter((tx) => {
@@ -471,73 +542,6 @@ export default function SaccoDashboard() {
     }
   }
 
-  async function reloadMatatus() {
-    if (!currentSacco) return
-    setMatatuEditError(null)
-    try {
-      const matatuRes = await fetchJson<{ items: Matatu[] }>(`/u/sacco/${currentSacco}/matatus`)
-      setMatatus(matatuRes.items || [])
-    } catch (err) {
-      setMatatuEditError(err instanceof Error ? err.message : 'Failed to refresh matatus')
-    }
-  }
-
-  function startMatatuEdit(row: Matatu) {
-    const id = row.id || ''
-    if (!id) return
-    if (matatuEditId === id) {
-      setMatatuEditId('')
-      setMatatuEditMsg('')
-      setMatatuEditError(null)
-      return
-    }
-    setMatatuEditId(id)
-    setMatatuEditMsg('')
-    setMatatuEditError(null)
-    setMatatuEditForm({
-      number_plate: row.number_plate || '',
-      owner_name: row.owner_name || '',
-      owner_phone: row.owner_phone || '',
-      tlb_number: row.tlb_number || '',
-      till_number: row.till_number || '',
-    })
-  }
-
-  async function saveMatatuEdit() {
-    if (!matatuEditId) return
-    if (!matatuEditForm.number_plate.trim()) {
-      setMatatuEditMsg('Plate is required')
-      return
-    }
-    setMatatuEditMsg('Saving...')
-    setMatatuEditError(null)
-    try {
-      const payload = {
-        number_plate: matatuEditForm.number_plate.trim().toUpperCase(),
-        owner_name: matatuEditForm.owner_name.trim() || null,
-        owner_phone: matatuEditForm.owner_phone.trim() || null,
-        tlb_number: matatuEditForm.tlb_number.trim() || null,
-        till_number: matatuEditForm.till_number.trim() || null,
-      }
-      await fetchJson<Matatu>(`/u/matatu/${encodeURIComponent(matatuEditId)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      setMatatuEditMsg('Matatu updated')
-      setMatatuEditForm({
-        number_plate: payload.number_plate,
-        owner_name: payload.owner_name || '',
-        owner_phone: payload.owner_phone || '',
-        tlb_number: payload.tlb_number || '',
-        till_number: payload.till_number || '',
-      })
-      await reloadMatatus()
-    } catch (err) {
-      setMatatuEditMsg('')
-      setMatatuEditError(err instanceof Error ? err.message : 'Update failed')
-    }
-  }
 
   async function reloadStaff() {
     if (!currentSacco) return
@@ -818,7 +822,14 @@ export default function SaccoDashboard() {
     setRoutesMsg('Loading...')
     try {
       const res = await fetchJson<{ items?: SaccoRoute[] }>(`/u/sacco/${currentSacco}/routes`)
-      setRoutes(res.items || [])
+      const items = res.items || []
+      setRoutes(items)
+      if (items.length) {
+        const firstId = items[0].id || ''
+        setRouteViewId((prev) => (prev && items.some((r) => r.id === prev) ? prev : firstId))
+      } else {
+        setRouteViewId('')
+      }
       setRoutesMsg('')
     } catch (err) {
       setRoutes([])
@@ -826,87 +837,93 @@ export default function SaccoDashboard() {
     }
   }
 
-  async function toggleRoute(id?: string, active?: boolean) {
-    if (!currentSacco || !id) return
-    setRoutesMsg('Saving...')
+  async function loadRouteLive() {
+    if (!currentSacco || !routeViewId) return
+    setRouteLiveMsg('Loading...')
     try {
-      await authFetch(`/u/sacco/${currentSacco}/routes/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ active: !active }),
-      })
-      await loadRoutes()
-      setRoutesMsg('Updated')
+      const res = await fetchJson<{ items?: LivePosition[] }>(
+        `/u/sacco/${currentSacco}/live-positions?route_id=${encodeURIComponent(routeViewId)}&window_min=60`,
+      )
+      setRouteLive(res.items || [])
+      setRouteLiveMsg('')
     } catch (err) {
-      setRoutesMsg(err instanceof Error ? err.message : 'Update failed')
+      setRouteLive([])
+      setRouteLiveMsg(err instanceof Error ? err.message : 'Failed to load live positions')
     }
   }
 
-  function startRouteEdit(row: SaccoRoute) {
-    const id = row.id || ''
-    if (!id) return
-    if (routeEditId === id) {
-      setRouteEditId('')
-      setRouteEditMsg('')
-      setRouteEditError(null)
-      return
+  async function ensureLeaflet() {
+    const w = window as typeof window & { L?: any }
+    if (w.L) return w.L
+    if (!leafletLoader.current) {
+      leafletLoader.current = new Promise((resolve, reject) => {
+        if (!document.querySelector('link[data-leaflet]')) {
+          const link = document.createElement('link')
+          link.setAttribute('data-leaflet', '1')
+          link.rel = 'stylesheet'
+          link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
+          document.head.appendChild(link)
+        }
+        const existing = document.querySelector('script[data-leaflet]')
+        if (existing) {
+          existing.addEventListener('load', () => resolve(w.L))
+          existing.addEventListener('error', () => reject(new Error('Leaflet failed to load')))
+          return
+        }
+        const script = document.createElement('script')
+        script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+        script.async = true
+        script.setAttribute('data-leaflet', '1')
+        script.onload = () => resolve(w.L)
+        script.onerror = () => reject(new Error('Leaflet failed to load'))
+        document.body.appendChild(script)
+      })
     }
-    setRouteEditId(id)
-    setRouteEditMsg('')
-    setRouteEditError(null)
-    setRouteEditForm({
-      name: row.name || '',
-      code: row.code || '',
-      start: row.start_stop || '',
-      end: row.end_stop || '',
+    return leafletLoader.current
+  }
+
+  function syncRouteMap() {
+    const w = window as typeof window & { L?: any }
+    const L = w.L
+    if (!L || !mapInstance.current) return
+    const map = mapInstance.current
+    if (mapLayers.current.polyline) {
+      map.removeLayer(mapLayers.current.polyline)
+    }
+    if (mapLayers.current.routeMarkers) {
+      mapLayers.current.routeMarkers.forEach((m: any) => map.removeLayer(m))
+    }
+    if (mapLayers.current.liveMarkers) {
+      mapLayers.current.liveMarkers.forEach((m: any) => map.removeLayer(m))
+    }
+    mapLayers.current.polyline = null
+    mapLayers.current.routeMarkers = []
+    mapLayers.current.liveMarkers = []
+
+    const livePoints: Array<[number, number]> = []
+    routeLive.forEach((row) => {
+      const lat = Number(row.lat)
+      const lng = Number(row.lng)
+      if (Number.isFinite(lat) && Number.isFinite(lng)) livePoints.push([lat, lng])
     })
-  }
 
-  async function saveRouteEdit() {
-    if (!currentSacco || !routeEditId) return
-    if (!routeEditForm.name.trim()) {
-      setRouteEditMsg('Name required')
-      return
+    if (routePoints.length) {
+      mapLayers.current.polyline = L.polyline(routePoints, { color: '#2563eb', weight: 4 }).addTo(map)
+      mapLayers.current.routeMarkers = routePoints.map((pt) =>
+        L.circleMarker(pt, { radius: 4, color: '#0ea5e9', fillColor: '#0ea5e9', fillOpacity: 0.9 }).addTo(map),
+      )
     }
-    setRouteEditMsg('Saving...')
-    setRouteEditError(null)
-    try {
-      await authFetch(`/u/sacco/${currentSacco}/routes/${routeEditId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({
-          name: routeEditForm.name.trim(),
-          code: routeEditForm.code.trim() || null,
-          start_stop: routeEditForm.start.trim() || null,
-          end_stop: routeEditForm.end.trim() || null,
-        }),
-      })
-      setRouteEditMsg('Route updated')
-      await loadRoutes()
-    } catch (err) {
-      setRouteEditMsg('')
-      setRouteEditError(err instanceof Error ? err.message : 'Update failed')
-    }
-  }
 
-  async function deleteRoute(id?: string) {
-    if (!currentSacco || !id) return
-    if (!confirm('Delete this route?')) return
-    setRoutesMsg('Deleting...')
-    try {
-      await authFetch(`/u/sacco/${currentSacco}/routes/${id}`, {
-        method: 'DELETE',
-        headers: { Accept: 'application/json' },
-      })
-      if (routeEditId === id) {
-        setRouteEditId('')
-        setRouteEditMsg('')
-        setRouteEditError(null)
-      }
-      await loadRoutes()
-      setRoutesMsg('Deleted')
-    } catch (err) {
-      setRoutesMsg(err instanceof Error ? err.message : 'Delete failed')
+    if (livePoints.length) {
+      mapLayers.current.liveMarkers = livePoints.map((pt) =>
+        L.circleMarker(pt, { radius: 6, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.9 }).addTo(map),
+      )
+    }
+
+    const boundsPoints = [...routePoints, ...livePoints]
+    if (boundsPoints.length) {
+      const bounds = L.latLngBounds(boundsPoints)
+      map.fitBounds(bounds, { padding: [20, 20] })
     }
   }
 
@@ -1010,31 +1027,6 @@ export default function SaccoDashboard() {
     }
   }
 
-  async function createRoute() {
-    if (!currentSacco) return
-    if (!routeForm.name.trim()) {
-      setRoutesMsg('Route name required')
-      return
-    }
-    setRoutesMsg('Saving...')
-    try {
-      await authFetch(`/u/sacco/${currentSacco}/routes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({
-          name: routeForm.name.trim(),
-          code: routeForm.code.trim() || null,
-          start_stop: routeForm.start.trim() || null,
-          end_stop: routeForm.end.trim() || null,
-        }),
-      })
-      setRouteForm({ name: '', code: '', start: '', end: '' })
-      await loadRoutes()
-      setRoutesMsg('Route saved')
-    } catch (err) {
-      setRoutesMsg(err instanceof Error ? err.message : 'Create failed')
-    }
-  }
 
   async function loadNotifications() {
     if (!currentSacco) return
@@ -1099,48 +1091,50 @@ export default function SaccoDashboard() {
 
   return (
     <DashboardShell title="SACCO Dashboard" subtitle="React port of SACCO console" hideNav>
-      <section className="card">
-        <div className="row" style={{ alignItems: 'flex-end', gap: 12 }}>
-          <label>
-            <div className="muted small">SACCO</div>
-            <select
-              value={currentSacco || ''}
-              onChange={(e) => setCurrentSacco(e.target.value || null)}
-              style={{ padding: 10, minWidth: 200 }}
-            >
-              <option value="">- choose -</option>
-              {saccos.map((s) => (
-                <option key={s.sacco_id} value={s.sacco_id}>
-                  {s.name || s.sacco_id}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <div className="muted small">From</div>
-            <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
-          </label>
-          <label>
-            <div className="muted small">To</div>
-            <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
-          </label>
-          <label>
-            <div className="muted small">Status</div>
-            <select value={txStatus} onChange={(e) => setTxStatus(e.target.value)} style={{ padding: 10 }}>
-              <option value="">Any</option>
-              <option value="SUCCESS">Success</option>
-              <option value="PENDING">Pending</option>
-              <option value="FAILED">Failed</option>
-            </select>
-          </label>
-          <button type="button" className="btn ghost" onClick={exportCsv} disabled={!filteredTx.length}>
-            Export CSV
-          </button>
-          <span className="muted small">{statusMsg}</span>
-          {loading ? <span className="muted small">Loading...</span> : null}
-          {error ? <span className="err">{error}</span> : null}
-        </div>
-      </section>
+      {showFilters ? (
+        <section className="card">
+          <div className="row" style={{ alignItems: 'flex-end', gap: 12 }}>
+            <label>
+              <div className="muted small">SACCO</div>
+              <select
+                value={currentSacco || ''}
+                onChange={(e) => setCurrentSacco(e.target.value || null)}
+                style={{ padding: 10, minWidth: 200 }}
+              >
+                <option value="">- choose -</option>
+                {saccos.map((s) => (
+                  <option key={s.sacco_id} value={s.sacco_id}>
+                    {s.name || s.sacco_id}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <div className="muted small">From</div>
+              <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+            </label>
+            <label>
+              <div className="muted small">To</div>
+              <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+            </label>
+            <label>
+              <div className="muted small">Status</div>
+              <select value={txStatus} onChange={(e) => setTxStatus(e.target.value)} style={{ padding: 10 }}>
+                <option value="">Any</option>
+                <option value="SUCCESS">Success</option>
+                <option value="PENDING">Pending</option>
+                <option value="FAILED">Failed</option>
+              </select>
+            </label>
+            <button type="button" className="btn ghost" onClick={exportCsv} disabled={!filteredTx.length}>
+              Export CSV
+            </button>
+            <span className="muted small">{statusMsg}</span>
+            {loading ? <span className="muted small">Loading...</span> : null}
+            {error ? <span className="err">{error}</span> : null}
+          </div>
+        </section>
+      ) : null}
 
       <nav className="sys-nav" aria-label="SACCO admin sections">
         {tabs.map((t) => (
@@ -1225,109 +1219,26 @@ export default function SaccoDashboard() {
                 <th>Type</th>
                 <th>TLB</th>
                 <th>Till</th>
-                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {filteredMatatus.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="muted">
+                  <td colSpan={6} className="muted">
                     No matatus.
                   </td>
                 </tr>
               ) : (
-                filteredMatatus.map((m) => {
-                  const isEditing = !!m.id && matatuEditId === m.id
-                  return (
-                    <Fragment key={m.id || m.number_plate}>
-                      <tr>
-                        <td>{m.number_plate || ''}</td>
-                        <td>{m.owner_name || ''}</td>
-                        <td>{m.owner_phone || ''}</td>
-                        <td>{m.vehicle_type || ''}</td>
-                        <td>{m.tlb_number || ''}</td>
-                        <td>{m.till_number || ''}</td>
-                        <td>
-                          <button className="btn ghost" type="button" onClick={() => startMatatuEdit(m)}>
-                            {isEditing ? 'Close' : 'Edit'}
-                          </button>
-                        </td>
-                      </tr>
-                      {isEditing ? (
-                        <tr>
-                          <td colSpan={7}>
-                            <div className="card" style={{ margin: '6px 0' }}>
-                              <div className="topline">
-                                <h4 style={{ margin: 0 }}>Edit matatu</h4>
-                                <span className="muted small">ID: {m.id}</span>
-                              </div>
-                              {matatuEditError ? <div className="err">Update error: {matatuEditError}</div> : null}
-                              <div className="grid g2">
-                                <label className="muted small">
-                                  Plate
-                                  <input
-                                    className="input"
-                                    value={matatuEditForm.number_plate}
-                                    onChange={(e) => setMatatuEditForm((f) => ({ ...f, number_plate: e.target.value }))}
-                                  />
-                                </label>
-                                <label className="muted small">
-                                  Owner name
-                                  <input
-                                    className="input"
-                                    value={matatuEditForm.owner_name}
-                                    onChange={(e) => setMatatuEditForm((f) => ({ ...f, owner_name: e.target.value }))}
-                                  />
-                                </label>
-                                <label className="muted small">
-                                  Owner phone
-                                  <input
-                                    className="input"
-                                    value={matatuEditForm.owner_phone}
-                                    onChange={(e) => setMatatuEditForm((f) => ({ ...f, owner_phone: e.target.value }))}
-                                  />
-                                </label>
-                                <label className="muted small">
-                                  TLB number
-                                  <input
-                                    className="input"
-                                    value={matatuEditForm.tlb_number}
-                                    onChange={(e) => setMatatuEditForm((f) => ({ ...f, tlb_number: e.target.value }))}
-                                  />
-                                </label>
-                                <label className="muted small">
-                                  Till number
-                                  <input
-                                    className="input"
-                                    value={matatuEditForm.till_number}
-                                    onChange={(e) => setMatatuEditForm((f) => ({ ...f, till_number: e.target.value }))}
-                                  />
-                                </label>
-                              </div>
-                              <div className="row" style={{ marginTop: 8 }}>
-                                <button className="btn" type="button" onClick={saveMatatuEdit}>
-                                  Save changes
-                                </button>
-                                <button
-                                  className="btn ghost"
-                                  type="button"
-                                  onClick={() => {
-                                    setMatatuEditId('')
-                                    setMatatuEditMsg('')
-                                    setMatatuEditError(null)
-                                  }}
-                                >
-                                  Close
-                                </button>
-                                <span className="muted small">{matatuEditMsg}</span>
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      ) : null}
-                    </Fragment>
-                  )
-                })
+                filteredMatatus.map((m) => (
+                  <tr key={m.id || m.number_plate}>
+                    <td>{m.number_plate || ''}</td>
+                    <td>{m.owner_name || ''}</td>
+                    <td>{m.owner_phone || ''}</td>
+                    <td>{m.vehicle_type || ''}</td>
+                    <td>{m.tlb_number || ''}</td>
+                    <td>{m.till_number || ''}</td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
@@ -1725,156 +1636,90 @@ export default function SaccoDashboard() {
       ) : null}
 
       {activeTab === 'routes' ? (
-        <section className="card">
-        <div className="topline">
-          <h3 style={{ margin: 0 }}>Routes</h3>
-          <div className="row" style={{ gap: 6 }}>
-            <button type="button" className="btn ghost" onClick={loadRoutes}>
-              Reload
-            </button>
-            <span className="muted small">{routesMsg}</span>
-          </div>
-        </div>
-        <div className="grid g2" style={{ gap: 12 }}>
-          <div className="card" style={{ boxShadow: 'none' }}>
-            <h4 style={{ margin: '0 0 6px' }}>Add route</h4>
-            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-              <input
-                placeholder="Name"
-                value={routeForm.name}
-                onChange={(e) => setRouteForm((f) => ({ ...f, name: e.target.value }))}
-                style={{ flex: '1 1 160px' }}
-              />
-              <input
-                placeholder="Code"
-                value={routeForm.code}
-                onChange={(e) => setRouteForm((f) => ({ ...f, code: e.target.value }))}
-                style={{ flex: '1 1 120px' }}
-              />
-              <input
-                placeholder="Start stop"
-                value={routeForm.start}
-                onChange={(e) => setRouteForm((f) => ({ ...f, start: e.target.value }))}
-                style={{ flex: '1 1 180px' }}
-              />
-              <input
-                placeholder="End stop"
-                value={routeForm.end}
-                onChange={(e) => setRouteForm((f) => ({ ...f, end: e.target.value }))}
-                style={{ flex: '1 1 180px' }}
-              />
-              <button type="button" onClick={createRoute}>
-                Save
-              </button>
+        <>
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Route Map & Live Matatus</h3>
+              <div className="row" style={{ gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                <label className="muted small">
+                  Route
+                  <select
+                    value={routeViewId}
+                    onChange={(e) => setRouteViewId(e.target.value)}
+                    style={{ padding: 10, minWidth: 180 }}
+                  >
+                    {routes.map((r) => (
+                      <option key={r.id || r.code} value={r.id || ''}>
+                        {r.code ? `${r.code} - ${r.name}` : r.name || r.id}
+                      </option>
+                    ))}
+                    {!routes.length ? <option value="">- no routes -</option> : null}
+                  </select>
+                </label>
+                <button type="button" className="btn ghost" onClick={loadRouteLive} disabled={!routeViewId}>
+                  Reload Live
+                </button>
+                <span className="muted small">{routeLiveMsg}</span>
+              </div>
             </div>
-          </div>
-          <div className="table-wrap" style={{ gridColumn: '1 / -1' }}>
-            <table>
-              <thead>
-                <tr>
-                  <th>Code</th>
-                  <th>Name</th>
-                  <th>Start</th>
-                  <th>End</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {routes.length === 0 ? (
+            <div className="muted small" style={{ marginBottom: 8 }}>
+              Select a route to view its path and live matatu positions (GPS required).
+            </div>
+            <div
+              ref={mapRef}
+              style={{ height: 320, borderRadius: 12, overflow: 'hidden', background: '#e2e8f0' }}
+            />
+            {routeMapMsg ? (
+              <div className="muted small" style={{ marginTop: 6 }}>
+                {routeMapMsg}
+              </div>
+            ) : null}
+          </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Routes</h3>
+              <div className="row" style={{ gap: 6 }}>
+                <button type="button" className="btn ghost" onClick={loadRoutes}>
+                  Reload
+                </button>
+                <span className="muted small">{routesMsg}</span>
+              </div>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
                   <tr>
-                    <td colSpan={6} className="muted">
-                      No routes.
-                    </td>
+                    <th>Code</th>
+                    <th>Name</th>
+                    <th>Start</th>
+                    <th>End</th>
+                    <th>Status</th>
                   </tr>
-                ) : (
-                  routes.map((r) => {
-                    const isEditing = !!r.id && routeEditId === r.id
-                    return (
-                      <Fragment key={r.id || r.name}>
-                        <tr>
-                          <td>{r.code || ''}</td>
-                          <td>{r.name || ''}</td>
-                          <td>{r.start_stop || ''}</td>
-                          <td>{r.end_stop || ''}</td>
-                          <td>{r.active ? 'Active' : 'Inactive'}</td>
-                          <td className="row" style={{ gap: 6 }}>
-                            <button type="button" className="btn ghost" onClick={() => startRouteEdit(r)}>
-                              {isEditing ? 'Close' : 'Edit'}
-                            </button>
-                            <button type="button" onClick={() => toggleRoute(r.id, r.active)}>
-                              {r.active ? 'Disable' : 'Enable'}
-                            </button>
-                            <button type="button" className="btn bad ghost" onClick={() => deleteRoute(r.id)}>
-                              Delete
-                            </button>
-                          </td>
-                        </tr>
-                        {isEditing ? (
-                          <tr>
-                            <td colSpan={6}>
-                              <div className="card" style={{ margin: '6px 0' }}>
-                                <div className="topline">
-                                  <h4 style={{ margin: 0 }}>Edit route</h4>
-                                  <span className="muted small">ID: {r.id}</span>
-                                </div>
-                                {routeEditError ? <div className="err">Update error: {routeEditError}</div> : null}
-                                <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-                                  <input
-                                    placeholder="Name"
-                                    value={routeEditForm.name}
-                                    onChange={(e) => setRouteEditForm((f) => ({ ...f, name: e.target.value }))}
-                                    style={{ flex: '1 1 160px' }}
-                                  />
-                                  <input
-                                    placeholder="Code"
-                                    value={routeEditForm.code}
-                                    onChange={(e) => setRouteEditForm((f) => ({ ...f, code: e.target.value }))}
-                                    style={{ flex: '1 1 120px' }}
-                                  />
-                                  <input
-                                    placeholder="Start stop"
-                                    value={routeEditForm.start}
-                                    onChange={(e) => setRouteEditForm((f) => ({ ...f, start: e.target.value }))}
-                                    style={{ flex: '1 1 180px' }}
-                                  />
-                                  <input
-                                    placeholder="End stop"
-                                    value={routeEditForm.end}
-                                    onChange={(e) => setRouteEditForm((f) => ({ ...f, end: e.target.value }))}
-                                    style={{ flex: '1 1 180px' }}
-                                  />
-                                </div>
-                                <div className="row" style={{ marginTop: 8 }}>
-                                  <button className="btn" type="button" onClick={saveRouteEdit}>
-                                    Save changes
-                                  </button>
-                                  <button
-                                    className="btn ghost"
-                                    type="button"
-                                    onClick={() => {
-                                      setRouteEditId('')
-                                      setRouteEditMsg('')
-                                      setRouteEditError(null)
-                                    }}
-                                  >
-                                    Close
-                                  </button>
-                                  <span className="muted small">{routeEditMsg}</span>
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                        ) : null}
-                      </Fragment>
-                    )
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
+                </thead>
+                <tbody>
+                  {routes.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="muted">
+                        No routes.
+                      </td>
+                    </tr>
+                  ) : (
+                    routes.map((r) => (
+                      <tr key={r.id || r.name}>
+                        <td>{r.code || ''}</td>
+                        <td>{r.name || ''}</td>
+                        <td>{r.start_stop || ''}</td>
+                        <td>{r.end_stop || ''}</td>
+                        <td>{r.active ? 'Active' : 'Inactive'}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
       ) : null}
 
       {activeTab === 'loans' ? (
