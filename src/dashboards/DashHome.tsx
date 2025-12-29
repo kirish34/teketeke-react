@@ -4,8 +4,8 @@ import DashboardShell from '../components/DashboardShell'
 const DashHome = () => {
   const links = [
     { to: '/system', label: 'System Admin' },
-    { to: '/sacco', label: 'SACCO' },
-    { to: '/sacco/staff', label: 'SACCO Staff' },
+    { to: '/sacco', label: 'Operator' },
+    { to: '/sacco/staff', label: 'Operator Staff' },
     { to: '/matatu/owner', label: 'Matatu Owner' },
     { to: '/matatu/staff', label: 'Matatu Staff' },
     { to: '/taxi', label: 'Taxi' },

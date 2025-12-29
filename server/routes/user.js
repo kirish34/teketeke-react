@@ -52,7 +52,7 @@ async function getSaccoDetails(saccoId) {
   if (!saccoId) return null;
   const { data, error } = await supabaseAdmin
     .from('saccos')
-    .select('id,name,contact_name,contact_phone,contact_email,default_till')
+    .select('id,name,contact_name,contact_phone,contact_email,default_till,org_type')
     .eq('id', saccoId)
     .maybeSingle();
   if (error && error.code !== PG_ROW_NOT_FOUND) throw error;
@@ -166,6 +166,7 @@ router.get('/my-saccos', async (req, res) => {
           contact_phone: sacco.contact_phone,
           contact_email: sacco.contact_email,
           default_till: sacco.default_till,
+          org_type: sacco.org_type || null,
           role: ctx.role?.role || null,
           via: ctx.matatu ? 'matatu' : 'direct',
           matatu_id: ctx.matatu?.id || null,

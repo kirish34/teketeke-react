@@ -1,8 +1,15 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import DashboardShell from '../components/DashboardShell'
 import { authFetch } from '../lib/auth'
+import { getOperatorConfig, normalizeOperatorType } from '../lib/operatorConfig'
 
-type SaccoOption = { sacco_id: string; name?: string }
+type SaccoOption = {
+  sacco_id: string
+  name?: string
+  operator_type?: string | null
+  org_type?: string | null
+  operatorType?: string | null
+}
 type Matatu = {
   id?: string
   number_plate?: string
@@ -103,23 +110,21 @@ type LivePosition = {
 }
 
 type SaccoTabId =
-  | 'matatus'
-  | 'collections'
-  | 'transactions'
-  | 'staff_collections'
-  | 'payments'
-  | 'staff'
+  | 'overview'
+  | 'members'
+  | 'daily_fee'
+  | 'savings'
   | 'loans'
+  | 'staff'
   | 'routes'
-  | 'loan_requests'
 
 function fmtKES(v: number | undefined | null) {
   return `KES ${(Number(v || 0)).toLocaleString('en-KE')}`
 }
 
-function formatKind(kind?: string) {
+function formatKind(kind?: string, feeLabel = 'Daily Fee') {
   const k = (kind || '').toUpperCase()
-  if (k === 'SACCO_FEE') return 'Daily Fee'
+  if (k === 'SACCO_FEE') return feeLabel
   if (k === 'SAVINGS') return 'Savings'
   if (k === 'LOAN_REPAY') return 'Loan Repay'
   return k || '-'
@@ -142,8 +147,8 @@ const todayIso = () => new Date().toISOString().slice(0, 10)
 export default function SaccoDashboard() {
   const [saccos, setSaccos] = useState<SaccoOption[]>([])
   const [currentSacco, setCurrentSacco] = useState<string | null>(null)
-  const [statusMsg, setStatusMsg] = useState('Loading SACCOs...')
-  const [activeTab, setActiveTab] = useState<SaccoTabId>('collections')
+  const [statusMsg, setStatusMsg] = useState('Loading organizations...')
+  const [activeTab, setActiveTab] = useState<SaccoTabId>('overview')
 
   const [fromDate, setFromDate] = useState(todayIso())
   const [toDate, setToDate] = useState(todayIso())
@@ -226,23 +231,45 @@ export default function SaccoDashboard() {
   const mapLayers = useRef<{ polyline?: any; routeMarkers?: any[]; liveMarkers?: any[] }>({})
   const leafletLoader = useRef<Promise<any> | null>(null)
 
-  const tabs: Array<{ id: SaccoTabId; label: string }> = [
-    { id: 'matatus', label: 'Matatus' },
-    { id: 'collections', label: 'Collections' },
-    { id: 'transactions', label: 'Transactions' },
-    { id: 'staff_collections', label: 'Staff Collections' },
-    { id: 'payments', label: 'Payments (STK)' },
-    { id: 'staff', label: 'Staff' },
-    { id: 'loans', label: 'Loans' },
-    { id: 'routes', label: 'Routes' },
-    { id: 'loan_requests', label: 'Loan Requests' },
-  ]
-  const showFilters = false
+  const operatorType = useMemo(() => {
+    const selected = saccos.find((s) => s.sacco_id === currentSacco)
+    // TODO: backend should return org_type for /u/my-saccos to drive operator typing.
+    const rawType = selected?.operator_type || selected?.org_type || selected?.operatorType
+    return normalizeOperatorType(rawType)
+  }, [saccos, currentSacco])
+
+  const operatorConfig = useMemo(() => getOperatorConfig(operatorType), [operatorType])
+  const memberLabel = operatorConfig.memberLabel
+  const memberIdLabel = operatorConfig.memberIdLabel
+  const memberOwnerLabel = operatorConfig.memberOwnerLabel
+  const memberLocationLabel = operatorConfig.memberLocationLabel
+  const feeLabel = operatorConfig.feeLabel
+  const routesLabel = operatorConfig.routesLabel
+  const showRouteMap = operatorConfig.showRouteMap
+  const isBoda = operatorType === 'BODA_GROUP'
+  const routeLabel = routesLabel.endsWith('s') ? routesLabel.slice(0, -1) : routesLabel
+
+  const tabs = useMemo<Array<{ id: SaccoTabId; label: string }>>(
+    () => [
+      { id: 'overview', label: 'Overview' },
+      { id: 'members', label: memberLabel },
+      { id: 'daily_fee', label: feeLabel },
+      { id: 'savings', label: 'Savings' },
+      { id: 'loans', label: 'Loans' },
+      { id: 'staff', label: 'Staff' },
+      { id: 'routes', label: routesLabel },
+    ],
+    [feeLabel, memberLabel, routesLabel],
+  )
+  const showFilters = true
+
+  const memberIdValue = (m: Matatu) => m.number_plate || m.id || ''
+  const memberLocationValue = (m: Matatu) => (memberLocationLabel ? m.vehicle_type || '' : '')
 
   const matatuMap = useMemo(() => {
     const map = new Map<string, string>()
     matatus.forEach((m) => {
-      if (m.id) map.set(m.id, m.number_plate || '')
+      if (m.id) map.set(m.id, memberIdValue(m))
     })
     return map
   }, [matatus])
@@ -278,8 +305,28 @@ export default function SaccoDashboard() {
   const filteredMatatus = useMemo(() => {
     const q = matatuFilter.trim().toUpperCase()
     if (!q) return matatus
-    return matatus.filter((m) => (m.number_plate || '').toUpperCase().includes(q))
+    return matatus.filter((m) => {
+      const id = memberIdValue(m).toUpperCase()
+      const owner = (m.owner_name || '').toUpperCase()
+      return id.includes(q) || owner.includes(q)
+    })
   }, [matatuFilter, matatus])
+
+  const showTLBColumn = useMemo(
+    () => operatorConfig.showTLB && matatus.some((m) => (m.tlb_number || '').trim()),
+    [operatorConfig.showTLB, matatus],
+  )
+  const showVehicleTypeColumn = useMemo(
+    () => operatorConfig.showVehicleType && matatus.some((m) => (m.vehicle_type || '').trim()),
+    [operatorConfig.showVehicleType, matatus],
+  )
+  const showMemberLocation = useMemo(
+    () => Boolean(memberLocationLabel) && matatus.some((m) => (memberLocationValue(m) || '').trim()),
+    [memberLocationLabel, matatus],
+  )
+  const memberTableColSpan =
+    4 + (showVehicleTypeColumn ? 1 : 0) + (showMemberLocation ? 1 : 0) + (showTLBColumn ? 1 : 0)
+  const bodaTableColSpan = 4 + (showMemberLocation ? 1 : 0)
 
   const txPageCount = Math.max(1, Math.ceil(txTotal / txLimit || 1))
   const txRangeStart = txTotal ? (txPage - 1) * txLimit + 1 : 0
@@ -297,14 +344,14 @@ export default function SaccoDashboard() {
         const data = await fetchJson<{ items: SaccoOption[] }>('/u/my-saccos')
         const items = data.items || []
         setSaccos(items)
-        setStatusMsg(`${items.length} SACCO(s)`)
+        setStatusMsg(`${items.length} organization(s)`)
         if (items.length) {
           setCurrentSacco(items[0].sacco_id)
         } else {
           setCurrentSacco(null)
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load SACCOs')
+        setError(err instanceof Error ? err.message : 'Failed to load organizations')
         setStatusMsg('Load error')
       }
     }
@@ -364,12 +411,12 @@ export default function SaccoDashboard() {
   }, [currentSacco])
 
   useEffect(() => {
-    if (activeTab !== 'routes' || !routeViewId) return
+    if (activeTab !== 'routes' || !showRouteMap || !routeViewId) return
     void loadRouteLive()
-  }, [activeTab, routeViewId])
+  }, [activeTab, routeViewId, showRouteMap])
 
   useEffect(() => {
-    if (activeTab !== 'routes') return
+    if (activeTab !== 'routes' || !showRouteMap) return
     let cancelled = false
     ;(async () => {
       try {
@@ -396,12 +443,12 @@ export default function SaccoDashboard() {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, routeViewId])
+  }, [activeTab, routeViewId, showRouteMap])
 
   useEffect(() => {
-    if (activeTab === 'routes') syncRouteMap()
+    if (activeTab === 'routes' && showRouteMap) syncRouteMap()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, routePoints, routeLive])
+  }, [activeTab, routePoints, routeLive, showRouteMap])
 
   const filteredTx = useMemo(() => {
     return txs.filter((tx) => {
@@ -444,6 +491,35 @@ export default function SaccoDashboard() {
       })
     return buckets
   }, [filteredTx])
+
+  const txByKind = useMemo(() => {
+    const norm = (k?: string) => (k || '').toUpperCase()
+    return {
+      daily: filteredTx.filter((tx) => norm(tx.kind) === 'SACCO_FEE'),
+      savings: filteredTx.filter((tx) => norm(tx.kind) === 'SAVINGS'),
+      loans: filteredTx.filter((tx) => norm(tx.kind) === 'LOAN_REPAY'),
+    }
+  }, [filteredTx])
+
+  const savingsBalances = useMemo(() => {
+    const totals = new Map<string, { id: string; member: string; amount: number; count: number }>()
+    txByKind.savings
+      .filter((tx) => (tx.status || '').toUpperCase() === 'SUCCESS')
+      .forEach((tx) => {
+        const id = String(tx.matatu_id || '')
+        if (!id) return
+        const row = totals.get(id) || {
+          id,
+          member: matatuMap.get(id) || '-',
+          amount: 0,
+          count: 0,
+        }
+        row.amount += Number(tx.fare_amount_kes || 0)
+        row.count += 1
+        totals.set(id, row)
+      })
+    return Array.from(totals.values()).sort((a, b) => b.amount - a.amount)
+  }, [matatuMap, txByKind.savings])
 
   const staffSummary = useMemo(() => {
     const staffMap = new Map<
@@ -659,14 +735,14 @@ export default function SaccoDashboard() {
       tx.created_by_name || '',
       tx.created_by_email || '',
     ])
-    const headers = ['created_at', 'kind', 'status', 'amount', 'matatu', 'staff_name', 'staff_email']
+    const headers = ['created_at', 'kind', 'status', 'amount', memberIdLabel, 'staff_name', 'staff_email']
     const csv = [headers, ...rows]
       .map((r) => r.map((cell) => `"${String(cell || '').replace(/"/g, '""')}"`).join(','))
       .join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
-    a.download = 'sacco-transactions.csv'
+    a.download = 'operator-transactions.csv'
     a.click()
   }
 
@@ -1031,6 +1107,7 @@ export default function SaccoDashboard() {
   async function loadNotifications() {
     if (!currentSacco) return
     const msgs: string[] = []
+    const memberLabelLower = memberLabel.toLowerCase()
     try {
       const res = await fetchJson<{ items?: LoanRequest[] }>(
         `/u/sacco/${currentSacco}/loan-requests?status=PENDING`,
@@ -1064,7 +1141,9 @@ export default function SaccoDashboard() {
             .map((t) => String(t.matatu_id || '')),
         )
         const unpaid = Array.from(matatuMap.keys()).map(String).filter((id) => id && !paid.has(id))
-        if (unpaid.length) msgs.push(`Daily fee missing yesterday for ${unpaid.length} matatu(s)`)
+        if (unpaid.length) {
+          msgs.push(`${feeLabel} missing yesterday for ${unpaid.length} ${memberLabelLower}`)
+        }
       }
     } catch {}
     setNotifications(msgs)
@@ -1089,13 +1168,55 @@ export default function SaccoDashboard() {
     }
   }
 
+  function renderStkSection(title: string, helperText?: string) {
+    return (
+      <section className="card">
+        <div className="topline">
+          <h3 style={{ margin: 0 }}>{title}</h3>
+          <button type="button" className="btn ghost" onClick={sendStk}>
+            Send
+          </button>
+        </div>
+        {helperText ? (
+          <div className="muted small" style={{ marginBottom: 8 }}>
+            {helperText}
+          </div>
+        ) : null}
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+          <input
+            placeholder="*001*USSD#"
+            value={stkForm.code}
+            onChange={(e) => setStkForm((f) => ({ ...f, code: e.target.value }))}
+            style={{ flex: '1 1 160px' }}
+          />
+          <input
+            type="number"
+            placeholder="Amount"
+            value={stkForm.amount}
+            onChange={(e) => setStkForm((f) => ({ ...f, amount: e.target.value }))}
+            style={{ width: 140 }}
+          />
+          <input
+            placeholder="07XXXXXXXX"
+            value={stkForm.phone}
+            onChange={(e) => setStkForm((f) => ({ ...f, phone: e.target.value }))}
+            style={{ width: 180 }}
+          />
+        </div>
+        <pre className="mono" style={{ background: '#f8fafc', padding: 12 }}>
+          {stkResp || '{}'}
+        </pre>
+      </section>
+    )
+  }
+
   return (
-    <DashboardShell title="SACCO Dashboard" subtitle="React port of SACCO console" hideNav>
+    <DashboardShell title="Operator Dashboard" subtitle="Unified operator console" hideNav>
       {showFilters ? (
         <section className="card">
           <div className="row" style={{ alignItems: 'flex-end', gap: 12 }}>
             <label>
-              <div className="muted small">SACCO</div>
+              <div className="muted small">Organization</div>
               <select
                 value={currentSacco || ''}
                 onChange={(e) => setCurrentSacco(e.target.value || null)}
@@ -1136,7 +1257,7 @@ export default function SaccoDashboard() {
         </section>
       ) : null}
 
-      <nav className="sys-nav" aria-label="SACCO admin sections">
+      <nav className="sys-nav" aria-label="Operator admin sections">
         {tabs.map((t) => (
           <button
             key={t.id}
@@ -1167,13 +1288,13 @@ export default function SaccoDashboard() {
         </section>
       ) : null}
 
-      {activeTab === 'collections' ? (
+      {activeTab === 'overview' ? (
         <>
           <section className="card">
-            <h3 style={{ marginTop: 0 }}>Collections summary</h3>
+            <h3 style={{ marginTop: 0 }}>Performance summary</h3>
             <div className="grid metrics">
               <div className="metric">
-                <div className="k">Daily Fee (today / week / month)</div>
+                <div className="k">{feeLabel} (today / week / month)</div>
                 <div className="v">
                   {fmtKES(summary.SACCO_FEE.today)} / {fmtKES(summary.SACCO_FEE.week)} /{' '}
                   {fmtKES(summary.SACCO_FEE.month)}
@@ -1194,491 +1315,640 @@ export default function SaccoDashboard() {
               </div>
             </div>
           </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Recent transactions</h3>
+              <span className="muted small">
+                {txTotal ? `Showing ${txRangeStart}-${txRangeEnd} of ${txTotal}` : '0 rows'}
+              </span>
+            </div>
+            <div className="row" style={{ marginTop: 8 }}>
+              <input
+                className="input"
+                placeholder={`Search ${memberIdLabel.toLowerCase()}, staff, phone, status, notes`}
+                value={txSearch}
+                onChange={(e) => setTxSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    applyTxSearch()
+                  }
+                }}
+                style={{ maxWidth: 260 }}
+              />
+              <label className="muted small">
+                Kind:{' '}
+                <select
+                  value={txKindFilter}
+                  onChange={(e) => setTxKindFilter(e.target.value)}
+                  style={{ padding: 10 }}
+                >
+                  <option value="">All</option>
+                  <option value="SACCO_FEE">{feeLabel}</option>
+                  <option value="SAVINGS">Savings</option>
+                  <option value="LOAN_REPAY">Loan Repay</option>
+                </select>
+              </label>
+              <button className="btn ghost" type="button" onClick={applyTxSearch}>
+                Apply
+              </button>
+              <button
+                className="btn ghost"
+                type="button"
+                onClick={clearTxSearch}
+                disabled={!txSearch && !txSearchApplied}
+              >
+                Clear
+              </button>
+            </div>
+            <div className="row" style={{ marginTop: 8 }}>
+              <button
+                className="btn ghost"
+                type="button"
+                onClick={() => loadPagedTransactions({ page: Math.max(1, txPage - 1) })}
+                disabled={txPage <= 1 || txLoading}
+              >
+                Prev
+              </button>
+              <span className="muted small">
+                Page {txPage} of {txPageCount}
+              </span>
+              <button
+                className="btn ghost"
+                type="button"
+                onClick={() => loadPagedTransactions({ page: Math.min(txPageCount, txPage + 1) })}
+                disabled={txPage >= txPageCount || txLoading}
+              >
+                Next
+              </button>
+              <label className="muted small">
+                Page size:{' '}
+                <select
+                  value={txLimit}
+                  onChange={(e) => setTxLimit(Number(e.target.value))}
+                  style={{ padding: 10 }}
+                >
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                  <option value={200}>200</option>
+                </select>
+              </label>
+            </div>
+            {txError ? <div className="err">Transactions error: {txError}</div> : null}
+            <div className="table-wrap" style={{ marginTop: 8 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>When</th>
+                    <th>Kind</th>
+                    <th>{memberIdLabel}</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th>Staff</th>
+                    <th>Phone</th>
+                    <th>Note</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {txLoading && txRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="muted">
+                        Loading...
+                      </td>
+                    </tr>
+                  ) : txRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="muted">
+                        No transactions found.
+                      </td>
+                    </tr>
+                  ) : (
+                    txRows.map((tx) => (
+                      <tr key={tx.id || tx.created_at}>
+                        <td>{tx.created_at ? new Date(tx.created_at).toLocaleString() : ''}</td>
+                        <td>{formatKind(tx.kind, feeLabel)}</td>
+                        <td>{matatuMap.get(tx.matatu_id || '') || '-'}</td>
+                        <td>{fmtKES(tx.fare_amount_kes)}</td>
+                        <td>{tx.status || ''}</td>
+                        <td>{tx.created_by_name || tx.created_by_email || '-'}</td>
+                        <td>{tx.passenger_msisdn || '-'}</td>
+                        <td>{tx.notes || '-'}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Pending loan requests</h3>
+              <div className="row" style={{ gap: 8 }}>
+                <button type="button" className="btn ghost" onClick={loadLoanRequests}>
+                  Reload
+                </button>
+                <span className="muted small">{loanReqMsg || `${loanRequests.length} request(s)`}</span>
+              </div>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>{memberOwnerLabel}</th>
+                    <th>{memberIdLabel}</th>
+                    <th>Amount</th>
+                    <th>Model</th>
+                    <th>Term</th>
+                    <th>Payout</th>
+                    <th>Note</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loanRequests.length === 0 ? (
+                    <tr>
+                      <td colSpan={10} className="muted">
+                        {loanReqMsg || 'No pending requests'}
+                      </td>
+                    </tr>
+                  ) : (
+                    loanRequests.map((r) => (
+                      <tr key={r.id}>
+                        <td>{r.created_at ? new Date(r.created_at).toLocaleString() : ''}</td>
+                        <td>{r.owner_name || ''}</td>
+                        <td>{matatuMap.get(r.matatu_id || '') || ''}</td>
+                        <td>{fmtKES(r.amount_kes)}</td>
+                        <td>{r.model || ''}</td>
+                        <td>{r.term_months || ''} mo</td>
+                        <td>
+                          {r.payout_method || ''}
+                          {r.payout_phone ? ` (${r.payout_phone})` : ''}
+                          {r.payout_account ? ` (${r.payout_account})` : ''}
+                        </td>
+                        <td>{r.note || ''}</td>
+                        <td>{r.status || ''}</td>
+                        <td className="row" style={{ gap: 6 }}>
+                          <button type="button" onClick={() => handleLoanRequest(r.id || '', 'APPROVE')}>
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            className="btn bad ghost"
+                            onClick={() => handleLoanRequest(r.id || '', 'REJECT')}
+                          >
+                            Reject
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
         </>
       ) : null}
 
-      {activeTab === 'matatus' ? (
+      {activeTab === 'members' ? (
         <section className="card">
-        <div className="topline">
-          <h3 style={{ margin: 0 }}>Matatus</h3>
-          <input
-            placeholder="Search plate"
-            value={matatuFilter}
-            onChange={(e) => setMatatuFilter(e.target.value)}
-            className="input"
-            style={{ maxWidth: 200 }}
-          />
-        </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Plate</th>
-                <th>Owner</th>
-                <th>Phone</th>
-                <th>Type</th>
-                <th>TLB</th>
-                <th>Till</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredMatatus.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="muted">
-                    No matatus.
-                  </td>
-                </tr>
-              ) : (
-                filteredMatatus.map((m) => (
-                  <tr key={m.id || m.number_plate}>
-                    <td>{m.number_plate || ''}</td>
-                    <td>{m.owner_name || ''}</td>
-                    <td>{m.owner_phone || ''}</td>
-                    <td>{m.vehicle_type || ''}</td>
-                    <td>{m.tlb_number || ''}</td>
-                    <td>{m.till_number || ''}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-        <div className="card" style={{ marginTop: 12 }}>
           <div className="topline">
-            <h4 style={{ margin: 0 }}>Daily fee rates</h4>
-            <span className="muted small">{feeMsg}</span>
-          </div>
-          <div className="row" style={{ gap: 8, marginBottom: 8 }}>
-            <label>
-              <div className="muted small">Vehicle type</div>
-              <select
-                value={feeForm.vehicle_type}
-                onChange={(e) => setFeeForm((f) => ({ ...f, vehicle_type: e.target.value }))}
-                style={{ padding: 10, minWidth: 200 }}
-              >
-                <option value="">- choose -</option>
-                {vehicleTypes.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <div className="muted small">Daily fee (KES)</div>
-              <input
-                type="number"
-                value={feeForm.amount}
-                onChange={(e) => setFeeForm((f) => ({ ...f, amount: e.target.value }))}
-                placeholder="Amount"
-              />
-            </label>
-            <button type="button" onClick={saveDailyFeeRate}>
-              Save
-            </button>
-            <button type="button" className="btn ghost" onClick={loadDailyFeeRates}>
-              Reload
-            </button>
+            <h3 style={{ margin: 0 }}>{memberLabel}</h3>
+            <input
+              placeholder={`Search ${memberIdLabel}`}
+              value={matatuFilter}
+              onChange={(e) => setMatatuFilter(e.target.value)}
+              className="input"
+              style={{ maxWidth: 220 }}
+            />
           </div>
           <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Vehicle type</th>
-                  <th>Daily fee</th>
-                </tr>
-              </thead>
-              <tbody>
-                {feeRates.length === 0 ? (
+            {isBoda ? (
+              <table>
+                <thead>
                   <tr>
-                    <td colSpan={2} className="muted">
-                      No rates configured.
-                    </td>
+                    <th>{memberOwnerLabel}</th>
+                    <th>Phone</th>
+                    <th>{memberIdLabel}</th>
+                    {showMemberLocation ? <th>{memberLocationLabel}</th> : null}
+                    <th>Till</th>
                   </tr>
-                ) : (
-                  feeRates.map((r) => (
-                    <tr key={r.vehicle_type}>
-                      <td>{r.vehicle_type}</td>
-                      <td>{fmtKES(r.daily_fee_kes)}</td>
+                </thead>
+                <tbody>
+                  {filteredMatatus.length === 0 ? (
+                    <tr>
+                      <td colSpan={bodaTableColSpan} className="muted">
+                        No {memberLabel.toLowerCase()}.
+                      </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-      ) : null}
-
-      {activeTab === 'transactions' ? (
-        <section className="card">
-        <div className="topline">
-          <h3 style={{ margin: 0 }}>Transactions in range</h3>
-          <span className="muted small">
-            {txTotal ? `Showing ${txRangeStart}-${txRangeEnd} of ${txTotal}` : '0 rows'}
-          </span>
-        </div>
-        <div className="row" style={{ marginTop: 8 }}>
-          <input
-            className="input"
-            placeholder="Search plate, staff, phone, status, notes"
-            value={txSearch}
-            onChange={(e) => setTxSearch(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                applyTxSearch()
-              }
-            }}
-            style={{ maxWidth: 260 }}
-          />
-          <label className="muted small">
-            Kind:{' '}
-            <select
-              value={txKindFilter}
-              onChange={(e) => setTxKindFilter(e.target.value)}
-              style={{ padding: 10 }}
-            >
-              <option value="">All</option>
-              <option value="SACCO_FEE">Daily Fee</option>
-              <option value="SAVINGS">Savings</option>
-              <option value="LOAN_REPAY">Loan Repay</option>
-            </select>
-          </label>
-          <button className="btn ghost" type="button" onClick={applyTxSearch}>
-            Apply
-          </button>
-          <button
-            className="btn ghost"
-            type="button"
-            onClick={clearTxSearch}
-            disabled={!txSearch && !txSearchApplied}
-          >
-            Clear
-          </button>
-        </div>
-        <div className="row" style={{ marginTop: 8 }}>
-          <button
-            className="btn ghost"
-            type="button"
-            onClick={() => loadPagedTransactions({ page: Math.max(1, txPage - 1) })}
-            disabled={txPage <= 1 || txLoading}
-          >
-            Prev
-          </button>
-          <span className="muted small">
-            Page {txPage} of {txPageCount}
-          </span>
-          <button
-            className="btn ghost"
-            type="button"
-            onClick={() => loadPagedTransactions({ page: Math.min(txPageCount, txPage + 1) })}
-            disabled={txPage >= txPageCount || txLoading}
-          >
-            Next
-          </button>
-          <label className="muted small">
-            Page size:{' '}
-            <select
-              value={txLimit}
-              onChange={(e) => setTxLimit(Number(e.target.value))}
-              style={{ padding: 10 }}
-            >
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-              <option value={200}>200</option>
-            </select>
-          </label>
-        </div>
-        {txError ? <div className="err">Transactions error: {txError}</div> : null}
-        <div className="table-wrap" style={{ marginTop: 8 }}>
-          <table>
-            <thead>
-              <tr>
-                <th>When</th>
-                <th>Kind</th>
-                <th>Matatu</th>
-                <th>Amount</th>
-                <th>Status</th>
-                <th>Staff</th>
-                <th>Phone</th>
-                <th>Note</th>
-              </tr>
-            </thead>
-            <tbody>
-              {txLoading && txRows.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="muted">
-                    Loading...
-                  </td>
-                </tr>
-              ) : txRows.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="muted">
-                    No transactions found.
-                  </td>
-                </tr>
-              ) : (
-                txRows.map((tx) => (
-                  <tr key={tx.id || tx.created_at}>
-                    <td>{tx.created_at ? new Date(tx.created_at).toLocaleString() : ''}</td>
-                    <td>{formatKind(tx.kind)}</td>
-                    <td>{matatuMap.get(tx.matatu_id || '') || '-'}</td>
-                    <td>{fmtKES(tx.fare_amount_kes)}</td>
-                    <td>{tx.status || ''}</td>
-                    <td>{tx.created_by_name || tx.created_by_email || '-'}</td>
-                    <td>{tx.passenger_msisdn || '-'}</td>
-                    <td>{tx.notes || '-'}</td>
+                  ) : (
+                    filteredMatatus.map((m) => (
+                      <tr key={m.id || m.number_plate}>
+                        <td>{m.owner_name || ''}</td>
+                        <td>{m.owner_phone || ''}</td>
+                        <td>{memberIdValue(m)}</td>
+                        {showMemberLocation ? <td>{memberLocationValue(m)}</td> : null}
+                        <td>{m.till_number || ''}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>{memberIdLabel}</th>
+                    <th>{memberOwnerLabel}</th>
+                    <th>Phone</th>
+                    {showVehicleTypeColumn ? <th>Type</th> : null}
+                    {showMemberLocation ? <th>{memberLocationLabel}</th> : null}
+                    {showTLBColumn ? <th>TLB</th> : null}
+                    <th>Till</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+                </thead>
+                <tbody>
+                  {filteredMatatus.length === 0 ? (
+                    <tr>
+                      <td colSpan={memberTableColSpan} className="muted">
+                        No {memberLabel.toLowerCase()}.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredMatatus.map((m) => (
+                      <tr key={m.id || m.number_plate}>
+                        <td>{memberIdValue(m)}</td>
+                        <td>{m.owner_name || ''}</td>
+                        <td>{m.owner_phone || ''}</td>
+                        {showVehicleTypeColumn ? <td>{m.vehicle_type || ''}</td> : null}
+                        {showMemberLocation ? <td>{memberLocationValue(m)}</td> : null}
+                        {showTLBColumn ? <td>{m.tlb_number || ''}</td> : null}
+                        <td>{m.till_number || ''}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </section>
       ) : null}
 
-      {activeTab === 'loan_requests' ? (
+
+
+      {activeTab === 'daily_fee' ? (
         <>
-        <section className="card">
-        <div className="topline">
-          <h3 style={{ margin: 0 }}>Loan requests</h3>
-          <button type="button" className="btn ghost" onClick={loadLoanRequests}>
-            Reload
-          </button>
-        </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Owner</th>
-                <th>Plate</th>
-                <th>Amount</th>
-                <th>Model</th>
-                <th>Term</th>
-                <th>Payout</th>
-                <th>Note</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loanRequests.length === 0 ? (
-                <tr>
-                  <td colSpan={10} className="muted">
-                    {loanReqMsg || 'No pending requests'}
-                  </td>
-                </tr>
-              ) : (
-                loanRequests.map((r) => (
-                  <tr key={r.id}>
-                    <td>{r.created_at ? new Date(r.created_at).toLocaleString() : ''}</td>
-                    <td>{r.owner_name || ''}</td>
-                    <td>{matatuMap.get(r.matatu_id || '') || ''}</td>
-                    <td>{fmtKES(r.amount_kes)}</td>
-                    <td>{r.model || ''}</td>
-                    <td>{r.term_months || ''} mo</td>
-                    <td>
-                      {r.payout_method || ''}
-                      {r.payout_phone ? ` (${r.payout_phone})` : ''}
-                      {r.payout_account ? ` (${r.payout_account})` : ''}
-                    </td>
-                    <td>{r.note || ''}</td>
-                    <td>{r.status || ''}</td>
-                    <td className="row" style={{ gap: 6 }}>
-                      <button type="button" onClick={() => handleLoanRequest(r.id || '', 'APPROVE')}>
-                        Approve
-                      </button>
-                      <button type="button" className="btn bad ghost" onClick={() => handleLoanRequest(r.id || '', 'REJECT')}>
-                        Reject
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>{feeLabel} overview</h3>
+              <span className="muted small">{txByKind.daily.length} records in range</span>
+            </div>
+            <div className="grid metrics">
+              <div className="metric">
+                <div className="k">Collected (today / week / month)</div>
+                <div className="v">
+                  {fmtKES(summary.SACCO_FEE.today)} / {fmtKES(summary.SACCO_FEE.week)} /{' '}
+                  {fmtKES(summary.SACCO_FEE.month)}
+                </div>
+              </div>
+            </div>
+          </section>
 
-      <section className="card">
-        <div className="topline">
-          <h3 style={{ margin: 0 }}>Approved - pending disbursement</h3>
-          <button type="button" className="btn ghost" onClick={loadLoanDisbursements}>
-            Reload
-          </button>
-        </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Owner</th>
-                <th>Plate</th>
-                <th>Amount</th>
-                <th>Model</th>
-                <th>Term</th>
-                <th>Payout</th>
-                <th>Disbursement</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loanDisb.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="muted">
-                    {loanDisbMsg || 'No loans awaiting disbursement'}
-                  </td>
-                </tr>
-              ) : (
-                loanDisb.map((r) => (
-                  <tr key={r.id}>
-                    <td>{r.created_at ? new Date(r.created_at).toLocaleString() : ''}</td>
-                    <td>{r.owner_name || ''}</td>
-                    <td>{matatuMap.get(r.matatu_id || '') || ''}</td>
-                    <td>{fmtKES(r.amount_kes)}</td>
-                    <td>{r.model || ''}</td>
-                    <td>{r.term_months || ''} mo</td>
-                    <td>
-                      {r.payout_method || ''}
-                      {r.payout_phone ? ` (${r.payout_phone})` : ''}
-                      {r.payout_account ? ` (${r.payout_account})` : ''}
-                    </td>
-                    <td>{r.status || ''}</td>
-                    <td>
-                      <button type="button" onClick={() => handleDisburse(r)}>Mark disbursed</button>
-                    </td>
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>{feeLabel} rates</h3>
+              <span className="muted small">{feeMsg}</span>
+            </div>
+            <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+              <label>
+                <div className="muted small">Vehicle type</div>
+                <select
+                  value={feeForm.vehicle_type}
+                  onChange={(e) => setFeeForm((f) => ({ ...f, vehicle_type: e.target.value }))}
+                  style={{ padding: 10, minWidth: 200 }}
+                >
+                  <option value="">- choose -</option>
+                  {vehicleTypes.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <div className="muted small">{feeLabel} (KES)</div>
+                <input
+                  type="number"
+                  value={feeForm.amount}
+                  onChange={(e) => setFeeForm((f) => ({ ...f, amount: e.target.value }))}
+                  placeholder="Amount"
+                />
+              </label>
+              <button type="button" onClick={saveDailyFeeRate}>
+                Save
+              </button>
+              <button type="button" className="btn ghost" onClick={loadDailyFeeRates}>
+                Reload
+              </button>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Vehicle type</th>
+                    <th>{feeLabel}</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section className="card">
-        <div className="topline">
-          <h3 style={{ margin: 0 }}>Loan approvals history</h3>
-          <div className="row" style={{ gap: 8 }}>
-            <label className="muted small">
-              Status
-              <select
-                value={loanApprovalsStatus}
-                onChange={(e) => setLoanApprovalsStatus(e.target.value)}
-                style={{ padding: 10 }}
-              >
-                <option value="APPROVED,REJECTED,CANCELLED">All decisions</option>
-                <option value="APPROVED">Approved</option>
-                <option value="REJECTED">Rejected</option>
-                <option value="CANCELLED">Cancelled</option>
-              </select>
-            </label>
-            <button type="button" className="btn ghost" onClick={loadLoanApprovalsHistory}>
-              Reload
-            </button>
-            <span className="muted small">{loanApprovalsMsg}</span>
-          </div>
-        </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Decision time</th>
-                <th>Owner</th>
-                <th>Plate</th>
-                <th>Amount</th>
-                <th>Status</th>
-                <th>Payout</th>
-                <th>Disbursement</th>
-                <th>Reason / Note</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loanApprovals.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="muted">
-                    {loanApprovalsMsg || 'No approvals yet.'}
-                  </td>
-                </tr>
-              ) : (
-                loanApprovals.map((r) => {
-                  const decisionAt = r.decided_at || r.created_at
-                  const payoutDetail = r.payout_phone || r.payout_account || ''
-                  const payoutLabel = r.payout_method
-                    ? `${r.payout_method}${payoutDetail ? ` (${payoutDetail})` : ''}`
-                    : '-'
-                  const disbursedAt = r.disbursed_at ? new Date(r.disbursed_at).toLocaleString() : ''
-                  const disbursedMethod = r.disbursed_method || r.payout_method || ''
-                  const disbursedLabel = r.disbursed_at
-                    ? `${disbursedMethod || 'Disbursed'}${disbursedAt ? ` (${disbursedAt})` : ''}`
-                    : '-'
-                  const reason = r.rejection_reason || r.note || ''
-                  return (
-                    <tr key={r.id || r.created_at}>
-                      <td>{decisionAt ? new Date(decisionAt).toLocaleString() : ''}</td>
-                      <td>{r.owner_name || ''}</td>
-                      <td>{matatuMap.get(r.matatu_id || '') || ''}</td>
-                      <td>{fmtKES(r.amount_kes)}</td>
-                      <td>{r.status || ''}</td>
-                      <td>{payoutLabel}</td>
-                      <td>{disbursedLabel}</td>
-                      <td>{reason || '-'}</td>
+                </thead>
+                <tbody>
+                  {feeRates.length === 0 ? (
+                    <tr>
+                      <td colSpan={2} className="muted">
+                        No rates configured.
+                      </td>
                     </tr>
-                  )
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+                  ) : (
+                    feeRates.map((r) => (
+                      <tr key={r.vehicle_type}>
+                        <td>{r.vehicle_type}</td>
+                        <td>{fmtKES(r.daily_fee_kes)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>{feeLabel} history</h3>
+              <span className="muted small">{txByKind.daily.length} records</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>{memberIdLabel}</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th>Staff</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {txByKind.daily.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="muted">
+                        No {feeLabel.toLowerCase()} records.
+                      </td>
+                    </tr>
+                  ) : (
+                    txByKind.daily.map((tx) => (
+                      <tr key={tx.id || tx.created_at}>
+                        <td>{tx.created_at ? new Date(tx.created_at).toLocaleString() : ''}</td>
+                        <td>{matatuMap.get(tx.matatu_id || '') || '-'}</td>
+                        <td>{fmtKES(tx.fare_amount_kes)}</td>
+                        <td>{tx.status || ''}</td>
+                        <td>{tx.created_by_name || tx.created_by_email || '-'}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="card">
+            <h3 style={{ marginTop: 0 }}>Staff collections (SUCCESS only in range)</h3>
+            <div className="grid g2">
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Staff</th>
+                      <th>Email</th>
+                      <th>{feeLabel}</th>
+                      <th>Savings</th>
+                      <th>Loan</th>
+                      <th>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {staffSummary.summaryRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="muted">
+                          No data.
+                        </td>
+                      </tr>
+                    ) : (
+                      staffSummary.summaryRows.map((row) => (
+                        <tr key={row.email || row.name}>
+                          <td>{row.name}</td>
+                          <td className="mono">{row.email}</td>
+                          <td>{fmtKES(row.df)}</td>
+                          <td>{fmtKES(row.sav)}</td>
+                          <td>{fmtKES(row.loan)}</td>
+                          <td>
+                            <strong>{fmtKES(row.total)}</strong>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Staff</th>
+                      <th>{memberIdLabel}</th>
+                      <th>Kind</th>
+                      <th>Amount</th>
+                      <th>Count</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {staffSummary.breakdownRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="muted">
+                          No data.
+                        </td>
+                      </tr>
+                    ) : (
+                      staffSummary.breakdownRows.map((row) => (
+                        <tr key={`${row.staff}-${row.plate}-${row.kind}`}>
+                          <td>{row.staff}</td>
+                          <td className="mono">{row.plate}</td>
+                          <td>{formatKind(row.kind, feeLabel)}</td>
+                          <td>{fmtKES(row.amount)}</td>
+                          <td>{row.count}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          {renderStkSection(`${feeLabel} STK payment`, `Record ${feeLabel.toLowerCase()} collections via STK.`)}
+        </>
+      ) : null}
+
+      {activeTab === 'savings' ? (
+        <>
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Savings overview</h3>
+              <span className="muted small">{txByKind.savings.length} records in range</span>
+            </div>
+            <div className="grid metrics">
+              <div className="metric">
+                <div className="k">Savings (today / week / month)</div>
+                <div className="v">
+                  {fmtKES(summary.SAVINGS.today)} / {fmtKES(summary.SAVINGS.week)} / {fmtKES(summary.SAVINGS.month)}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Savings balances</h3>
+              <span className="muted small">Computed from SUCCESS transactions in range</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>{memberIdLabel}</th>
+                    <th>Deposits</th>
+                    <th>Count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {savingsBalances.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="muted">
+                        No savings balance data.
+                      </td>
+                    </tr>
+                  ) : (
+                    savingsBalances.map((row) => (
+                      <tr key={row.id}>
+                        <td className="mono">{row.member}</td>
+                        <td>{fmtKES(row.amount)}</td>
+                        <td>{row.count}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Savings deposits</h3>
+              <span className="muted small">{txByKind.savings.length} records</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>{memberIdLabel}</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th>Staff</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {txByKind.savings.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="muted">
+                        No savings deposits in range.
+                      </td>
+                    </tr>
+                  ) : (
+                    txByKind.savings.map((tx) => (
+                      <tr key={tx.id || tx.created_at}>
+                        <td>{tx.created_at ? new Date(tx.created_at).toLocaleString() : ''}</td>
+                        <td>{matatuMap.get(tx.matatu_id || '') || '-'}</td>
+                        <td>{fmtKES(tx.fare_amount_kes)}</td>
+                        <td>{tx.status || ''}</td>
+                        <td>{tx.created_by_name || tx.created_by_email || '-'}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {renderStkSection('Savings STK payment', 'Record savings deposits via STK.')}
         </>
       ) : null}
 
       {activeTab === 'routes' ? (
         <>
-          <section className="card">
-            <div className="topline">
-              <h3 style={{ margin: 0 }}>Route Map & Live Matatus</h3>
-              <div className="row" style={{ gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                <label className="muted small">
-                  Route
-                  <select
-                    value={routeViewId}
-                    onChange={(e) => setRouteViewId(e.target.value)}
-                    style={{ padding: 10, minWidth: 180 }}
-                  >
-                    {routes.map((r) => (
-                      <option key={r.id || r.code} value={r.id || ''}>
-                        {r.code ? `${r.code} - ${r.name}` : r.name || r.id}
-                      </option>
-                    ))}
-                    {!routes.length ? <option value="">- no routes -</option> : null}
-                  </select>
-                </label>
-                <button type="button" className="btn ghost" onClick={loadRouteLive} disabled={!routeViewId}>
-                  Reload Live
-                </button>
-                <span className="muted small">{routeLiveMsg}</span>
+          {showRouteMap ? (
+            <section className="card">
+              <div className="topline">
+                <h3 style={{ margin: 0 }}>{routesLabel} map & live {memberLabel}</h3>
+                <div className="row" style={{ gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                  <label className="muted small">
+                    {routeLabel}
+                    <select
+                      value={routeViewId}
+                      onChange={(e) => setRouteViewId(e.target.value)}
+                      style={{ padding: 10, minWidth: 180 }}
+                    >
+                      {routes.map((r) => (
+                        <option key={r.id || r.code} value={r.id || ''}>
+                          {r.code ? `${r.code} - ${r.name}` : r.name || r.id}
+                        </option>
+                      ))}
+                      {!routes.length ? <option value="">- no {routesLabel.toLowerCase()} -</option> : null}
+                    </select>
+                  </label>
+                  <button type="button" className="btn ghost" onClick={loadRouteLive} disabled={!routeViewId}>
+                    Reload Live
+                  </button>
+                  <span className="muted small">{routeLiveMsg}</span>
+                </div>
               </div>
-            </div>
-            <div className="muted small" style={{ marginBottom: 8 }}>
-              Select a route to view its path and live matatu positions (GPS required).
-            </div>
-            <div
-              ref={mapRef}
-              style={{ height: 320, borderRadius: 12, overflow: 'hidden', background: '#e2e8f0' }}
-            />
-            {routeMapMsg ? (
-              <div className="muted small" style={{ marginTop: 6 }}>
-                {routeMapMsg}
+              <div className="muted small" style={{ marginBottom: 8 }}>
+                Select a {routeLabel.toLowerCase()} to view its path and live {memberLabel.toLowerCase()} positions (GPS
+                required).
               </div>
-            ) : null}
-          </section>
+              <div
+                ref={mapRef}
+                style={{ height: 320, borderRadius: 12, overflow: 'hidden', background: '#e2e8f0' }}
+              />
+              {routeMapMsg ? (
+                <div className="muted small" style={{ marginTop: 6 }}>
+                  {routeMapMsg}
+                </div>
+              ) : null}
+            </section>
+          ) : (
+            <section className="card">
+              <div className="topline">
+                <h3 style={{ margin: 0 }}>{routesLabel} overview</h3>
+              </div>
+              <div className="muted small">Live route mapping is available for matatu operators only.</div>
+            </section>
+          )}
 
           <section className="card">
             <div className="topline">
-              <h3 style={{ margin: 0 }}>Routes</h3>
+              <h3 style={{ margin: 0 }}>{routesLabel}</h3>
               <div className="row" style={{ gap: 6 }}>
                 <button type="button" className="btn ghost" onClick={loadRoutes}>
                   Reload
@@ -1691,7 +1961,7 @@ export default function SaccoDashboard() {
                 <thead>
                   <tr>
                     <th>Code</th>
-                    <th>Name</th>
+                    <th>{routeLabel}</th>
                     <th>Start</th>
                     <th>End</th>
                     <th>Status</th>
@@ -1701,7 +1971,7 @@ export default function SaccoDashboard() {
                   {routes.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="muted">
-                        No routes.
+                        No {routesLabel.toLowerCase()}.
                       </td>
                     </tr>
                   ) : (
@@ -1746,10 +2016,10 @@ export default function SaccoDashboard() {
               }}
               style={{ padding: 10, minWidth: 160 }}
             >
-              <option value="">- Matatu (optional) -</option>
+              <option value="">{`- ${memberIdLabel} (optional) -`}</option>
               {matatus.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.number_plate} - {m.owner_name}
+                  {memberIdValue(m)} - {m.owner_name}
                 </option>
               ))}
             </select>
@@ -1800,7 +2070,7 @@ export default function SaccoDashboard() {
               <thead>
                 <tr>
                   <th>Borrower</th>
-                  <th>Matatu</th>
+                  <th>{memberIdLabel}</th>
                   <th>Principal</th>
                   <th>Rate %</th>
                   <th>Term</th>
@@ -1887,6 +2157,240 @@ export default function SaccoDashboard() {
 
       <section className="card">
         <div className="topline">
+          <h3 style={{ margin: 0 }}>Loan repayments (in range)</h3>
+          <span className="muted small">{txByKind.loans.length} records</span>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>{memberIdLabel}</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Staff</th>
+              </tr>
+            </thead>
+            <tbody>
+              {txByKind.loans.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="muted">
+                    No loan repayments in range.
+                  </td>
+                </tr>
+              ) : (
+                txByKind.loans.map((tx) => (
+                  <tr key={tx.id || tx.created_at}>
+                    <td>{tx.created_at ? new Date(tx.created_at).toLocaleString() : ''}</td>
+                    <td>{matatuMap.get(tx.matatu_id || '') || '-'}</td>
+                    <td>{fmtKES(tx.fare_amount_kes)}</td>
+                    <td>{tx.status || ''}</td>
+                    <td>{tx.created_by_name || tx.created_by_email || '-'}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="topline">
+          <h3 style={{ margin: 0 }}>Loan requests</h3>
+          <button type="button" className="btn ghost" onClick={loadLoanRequests}>
+            Reload
+          </button>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>{memberOwnerLabel}</th>
+                <th>{memberIdLabel}</th>
+                <th>Amount</th>
+                <th>Model</th>
+                <th>Term</th>
+                <th>Payout</th>
+                <th>Note</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loanRequests.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="muted">
+                    {loanReqMsg || 'No pending requests'}
+                  </td>
+                </tr>
+              ) : (
+                loanRequests.map((r) => (
+                  <tr key={r.id}>
+                    <td>{r.created_at ? new Date(r.created_at).toLocaleString() : ''}</td>
+                    <td>{r.owner_name || ''}</td>
+                    <td>{matatuMap.get(r.matatu_id || '') || ''}</td>
+                    <td>{fmtKES(r.amount_kes)}</td>
+                    <td>{r.model || ''}</td>
+                    <td>{r.term_months || ''} mo</td>
+                    <td>
+                      {r.payout_method || ''}
+                      {r.payout_phone ? ` (${r.payout_phone})` : ''}
+                      {r.payout_account ? ` (${r.payout_account})` : ''}
+                    </td>
+                    <td>{r.note || ''}</td>
+                    <td>{r.status || ''}</td>
+                    <td className="row" style={{ gap: 6 }}>
+                      <button type="button" onClick={() => handleLoanRequest(r.id || '', 'APPROVE')}>
+                        Approve
+                      </button>
+                      <button type="button" className="btn bad ghost" onClick={() => handleLoanRequest(r.id || '', 'REJECT')}>
+                        Reject
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="topline">
+          <h3 style={{ margin: 0 }}>Approved - pending disbursement</h3>
+          <button type="button" className="btn ghost" onClick={loadLoanDisbursements}>
+            Reload
+          </button>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>{memberOwnerLabel}</th>
+                <th>{memberIdLabel}</th>
+                <th>Amount</th>
+                <th>Model</th>
+                <th>Term</th>
+                <th>Payout</th>
+                <th>Disbursement</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loanDisb.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="muted">
+                    {loanDisbMsg || 'No loans awaiting disbursement'}
+                  </td>
+                </tr>
+              ) : (
+                loanDisb.map((r) => (
+                  <tr key={r.id}>
+                    <td>{r.created_at ? new Date(r.created_at).toLocaleString() : ''}</td>
+                    <td>{r.owner_name || ''}</td>
+                    <td>{matatuMap.get(r.matatu_id || '') || ''}</td>
+                    <td>{fmtKES(r.amount_kes)}</td>
+                    <td>{r.model || ''}</td>
+                    <td>{r.term_months || ''} mo</td>
+                    <td>
+                      {r.payout_method || ''}
+                      {r.payout_phone ? ` (${r.payout_phone})` : ''}
+                      {r.payout_account ? ` (${r.payout_account})` : ''}
+                    </td>
+                    <td>{r.status || ''}</td>
+                    <td>
+                      <button type="button" onClick={() => handleDisburse(r)}>
+                        Mark disbursed
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="topline">
+          <h3 style={{ margin: 0 }}>Loan approvals history</h3>
+          <div className="row" style={{ gap: 8 }}>
+            <label className="muted small">
+              Status
+              <select
+                value={loanApprovalsStatus}
+                onChange={(e) => setLoanApprovalsStatus(e.target.value)}
+                style={{ padding: 10 }}
+              >
+                <option value="APPROVED,REJECTED,CANCELLED">All decisions</option>
+                <option value="APPROVED">Approved</option>
+                <option value="REJECTED">Rejected</option>
+                <option value="CANCELLED">Cancelled</option>
+              </select>
+            </label>
+            <button type="button" className="btn ghost" onClick={loadLoanApprovalsHistory}>
+              Reload
+            </button>
+            <span className="muted small">{loanApprovalsMsg}</span>
+          </div>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Decision time</th>
+                <th>{memberOwnerLabel}</th>
+                <th>{memberIdLabel}</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Payout</th>
+                <th>Disbursement</th>
+                <th>Reason / Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loanApprovals.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="muted">
+                    {loanApprovalsMsg || 'No approvals yet.'}
+                  </td>
+                </tr>
+              ) : (
+                loanApprovals.map((r) => {
+                  const decisionAt = r.decided_at || r.created_at
+                  const payoutDetail = r.payout_phone || r.payout_account || ''
+                  const payoutLabel = r.payout_method
+                    ? `${r.payout_method}${payoutDetail ? ` (${payoutDetail})` : ''}`
+                    : '-'
+                  const disbursedAt = r.disbursed_at ? new Date(r.disbursed_at).toLocaleString() : ''
+                  const disbursedMethod = r.disbursed_method || r.payout_method || ''
+                  const disbursedLabel = r.disbursed_at
+                    ? `${disbursedMethod || 'Disbursed'}${disbursedAt ? ` (${disbursedAt})` : ''}`
+                    : '-'
+                  const reason = r.rejection_reason || r.note || ''
+                  return (
+                    <tr key={r.id || r.created_at}>
+                      <td>{decisionAt ? new Date(decisionAt).toLocaleString() : ''}</td>
+                      <td>{r.owner_name || ''}</td>
+                      <td>{matatuMap.get(r.matatu_id || '') || ''}</td>
+                      <td>{fmtKES(r.amount_kes)}</td>
+                      <td>{r.status || ''}</td>
+                      <td>{payoutLabel}</td>
+                      <td>{disbursedLabel}</td>
+                      <td>{reason || '-'}</td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="topline">
           <h3 style={{ margin: 0 }}>Loans due today / overdue</h3>
           <div className="row" style={{ gap: 8 }}>
             <button type="button" className="btn ghost" onClick={loadLoanDue}>
@@ -1902,7 +2406,7 @@ export default function SaccoDashboard() {
                 <th>Due status</th>
                 <th>Due date</th>
                 <th>Borrower</th>
-                <th>Matatu</th>
+                <th>{memberIdLabel}</th>
                 <th>Principal</th>
                 <th>Rate %</th>
                 <th>Term</th>
@@ -1940,46 +2444,16 @@ export default function SaccoDashboard() {
           </table>
         </div>
       </section>
+
+      {renderStkSection('Loan repayment STK payment', 'Record loan repayments via STK.')}
         </>
       ) : null}
 
-      {activeTab === 'payments' ? (
-        <section className="card">
-        <div className="topline">
-          <h3 style={{ margin: 0 }}>Payments (STK)</h3>
-          <button type="button" className="btn ghost" onClick={sendStk}>
-            Send
-          </button>
-        </div>
-        <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-          <input
-            placeholder="*001*USSD#"
-            value={stkForm.code}
-            onChange={(e) => setStkForm((f) => ({ ...f, code: e.target.value }))}
-            style={{ flex: '1 1 160px' }}
-          />
-          <input
-            type="number"
-            placeholder="Amount"
-            value={stkForm.amount}
-            onChange={(e) => setStkForm((f) => ({ ...f, amount: e.target.value }))}
-            style={{ width: 140 }}
-          />
-          <input
-            placeholder="07XXXXXXXX"
-            value={stkForm.phone}
-            onChange={(e) => setStkForm((f) => ({ ...f, phone: e.target.value }))}
-            style={{ width: 180 }}
-          />
-        </div>
-        <pre className="mono" style={{ background: '#f8fafc', padding: 12 }}>{stkResp || '{}'}</pre>
-      </section>
-      ) : null}
 
       {activeTab === 'staff' ? (
       <section className="card">
         <div className="topline">
-          <h3 style={{ margin: 0 }}>SACCO staff</h3>
+          <h3 style={{ margin: 0 }}>Organization staff</h3>
           <span className="muted small">{staff.length} staff</span>
         </div>
         {staffError ? <div className="err">Staff error: {staffError}</div> : null}
@@ -2149,82 +2623,6 @@ export default function SaccoDashboard() {
       </section>
       ) : null}
 
-      {activeTab === 'staff_collections' ? (
-      <section className="card">
-        <h3 style={{ marginTop: 0 }}>Staff collections (SUCCESS only in range)</h3>
-        <div className="grid g2">
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Staff</th>
-                  <th>Email</th>
-                  <th>Daily Fee</th>
-                  <th>Savings</th>
-                  <th>Loan</th>
-                  <th>Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {staffSummary.summaryRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="muted">
-                      No data.
-                    </td>
-                  </tr>
-                ) : (
-                  staffSummary.summaryRows.map((row) => (
-                    <tr key={row.email || row.name}>
-                      <td>{row.name}</td>
-                      <td className="mono">{row.email}</td>
-                      <td>{fmtKES(row.df)}</td>
-                      <td>{fmtKES(row.sav)}</td>
-                      <td>{fmtKES(row.loan)}</td>
-                      <td>
-                        <strong>{fmtKES(row.total)}</strong>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Staff</th>
-                  <th>Matatu</th>
-                  <th>Kind</th>
-                  <th>Amount</th>
-                  <th>Count</th>
-                </tr>
-              </thead>
-              <tbody>
-                {staffSummary.breakdownRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="muted">
-                      No data.
-                    </td>
-                  </tr>
-                ) : (
-                  staffSummary.breakdownRows.map((row) => (
-                    <tr key={`${row.staff}-${row.plate}-${row.kind}`}>
-                      <td>{row.staff}</td>
-                      <td className="mono">{row.plate}</td>
-                      <td>{row.kind}</td>
-                      <td>{fmtKES(row.amount)}</td>
-                      <td>{row.count}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-      ) : null}
 
     </DashboardShell>
   )
