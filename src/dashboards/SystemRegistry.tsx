@@ -48,6 +48,7 @@ type SaccoRow = {
   sacco_id?: string
   name?: string
   sacco_name?: string
+  display_name?: string
 }
 
 type VehicleRow = {
@@ -141,7 +142,7 @@ export default function SystemRegistry() {
     { id: 'overview', label: 'Overview' },
     { id: 'registry', label: 'System Registry' },
     { id: 'finance', label: 'Finance' },
-    { id: 'saccos', label: 'SACCOs' },
+    { id: 'saccos', label: 'Operators' },
     { id: 'matatu', label: 'Matatu' },
     { id: 'taxis', label: 'Taxis' },
     { id: 'bodabodas', label: 'BodaBodas' },
@@ -267,6 +268,7 @@ export default function SystemRegistry() {
         matatuLabel(matatu),
         a.matatu_id,
         a.sacco_id,
+        sacco?.display_name,
         sacco?.name,
         sacco?.sacco_name,
         a.route_id,
@@ -380,7 +382,7 @@ export default function SystemRegistry() {
         route_id: assignForm.route_id || null,
       }
       if (!payload.device_id || !payload.sacco_id || !payload.matatu_id) {
-        setAssignMsg('Select device, SACCO, and matatu')
+        setAssignMsg('Select device, operator, and matatu')
         return
       }
       const res = await fetchJson<{ ok: boolean; assignment?: RegistryAssignment; error?: string }>(
@@ -513,8 +515,8 @@ export default function SystemRegistry() {
       { key: 'device_id', label: 'Device ID' },
       { key: 'matatu', label: 'Matatu' },
       { key: 'matatu_id', label: 'Matatu ID' },
-      { key: 'sacco', label: 'SACCO' },
-      { key: 'sacco_id', label: 'SACCO ID' },
+      { key: 'sacco', label: 'Operator' },
+      { key: 'sacco_id', label: 'Operator ID' },
       { key: 'route', label: 'Route' },
       { key: 'route_id', label: 'Route ID' },
       { key: 'status', label: 'Status' },
@@ -530,7 +532,7 @@ export default function SystemRegistry() {
         device_id: a.device_id || '',
         matatu: matatuLabel(matatu),
         matatu_id: a.matatu_id || '',
-        sacco: sacco?.name || sacco?.sacco_name || '',
+        sacco: sacco?.display_name || sacco?.name || sacco?.sacco_name || '',
         sacco_id: a.sacco_id || '',
         route: route?.name || '',
         route_id: a.route_id || '',
@@ -555,7 +557,7 @@ export default function SystemRegistry() {
         matatu_id: a.matatu_id || null,
         matatu: matatuLabel(matatu),
         sacco_id: a.sacco_id || null,
-        sacco: sacco?.name || sacco?.sacco_name || null,
+        sacco: sacco?.display_name || sacco?.name || sacco?.sacco_name || null,
         route_id: a.route_id || null,
         route: route?.name || null,
         active: a.active ?? null,
@@ -607,7 +609,7 @@ export default function SystemRegistry() {
             <div className="v">{activeAssignments}</div>
           </div>
           <div className="metric">
-            <div className="k">SACCOs</div>
+            <div className="k">Operators</div>
             <div className="v">{saccos.length}</div>
           </div>
           <div className="metric">
@@ -734,10 +736,10 @@ export default function SystemRegistry() {
             }
             style={{ padding: 10, minWidth: 200 }}
           >
-            <option value="">Select SACCO</option>
+            <option value="">Select operator</option>
             {saccos.map((s) => (
               <option key={s.id || s.sacco_id} value={s.id || s.sacco_id || ''}>
-                {s.name || s.sacco_name || s.sacco_id}
+                {s.display_name || s.name || s.sacco_name || s.sacco_id}
               </option>
             ))}
           </select>
@@ -976,7 +978,7 @@ export default function SystemRegistry() {
               <tr>
                 <th>Device</th>
                 <th>Matatu</th>
-                <th>SACCO</th>
+                <th>Operator</th>
                 <th>Route</th>
                 <th>Status</th>
                 <th>Assigned</th>
@@ -999,7 +1001,7 @@ export default function SystemRegistry() {
                     <tr key={a.id || `${a.device_id}-${a.matatu_id}-${a.assigned_at}`}>
                       <td>{device?.label || a.device_id || '-'}</td>
                       <td>{matatuLabel(matatu)}</td>
-                      <td>{sacco?.name || sacco?.sacco_name || a.sacco_id || '-'}</td>
+                      <td>{sacco?.display_name || sacco?.name || sacco?.sacco_name || a.sacco_id || '-'}</td>
                       <td>{route?.name || a.route_id || '-'}</td>
                       <td>{a.active ? 'Active' : 'Inactive'}</td>
                       <td>{fmtDate(a.assigned_at)}</td>

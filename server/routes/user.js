@@ -53,7 +53,7 @@ async function getSaccoDetails(saccoId) {
   const { data, error } = await supabaseAdmin
     .from('saccos')
     .select(
-      'id,name,display_name,legal_name,registration_no,contact_name,contact_phone,contact_email,default_till,org_type,operator_type,fee_label,savings_enabled,loans_enabled,routes_enabled,status',
+      'id,name,display_name,legal_name,registration_no,contact_name,contact_phone,contact_email,contact_account_number,default_till,settlement_bank_name,settlement_bank_account_number,org_type,operator_type,fee_label,savings_enabled,loans_enabled,routes_enabled,status',
     )
     .eq('id', saccoId)
     .maybeSingle();
@@ -171,7 +171,10 @@ router.get('/my-saccos', async (req, res) => {
           contact_name: sacco.contact_name,
           contact_phone: sacco.contact_phone,
           contact_email: sacco.contact_email,
+          contact_account_number: sacco.contact_account_number || null,
           default_till: sacco.default_till,
+          settlement_bank_name: sacco.settlement_bank_name || null,
+          settlement_bank_account_number: sacco.settlement_bank_account_number || null,
           operator_type: sacco.operator_type || sacco.org_type || null,
           org_type: sacco.org_type || sacco.operator_type || null,
           fee_label: sacco.fee_label ?? null,

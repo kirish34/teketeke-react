@@ -218,6 +218,9 @@ type SaccoRow = {
   loans_enabled?: boolean | null
   routes_enabled?: boolean | null
   status?: string | null
+  contact_account_number?: string | null
+  settlement_bank_name?: string | null
+  settlement_bank_account_number?: string | null
   contact_name?: string
   phone?: string
   contact_phone?: string
@@ -339,10 +342,14 @@ function createOperatorForm(operatorType?: string | null) {
     legal_name: '',
     registration_no: '',
     status: 'ACTIVE',
+    contact_name: '',
     contact_phone: '',
     contact_email: '',
+    contact_account_number: '',
     default_till: '',
     settlement_method: 'MPESA',
+    settlement_bank_name: '',
+    settlement_bank_account_number: '',
     fee_label: defaults.fee_label,
     savings_enabled: true,
     loans_enabled: true,
@@ -2386,6 +2393,15 @@ const SystemDashboard = () => {
             <h4 style={{ margin: '16px 0 6px' }}>Contact &amp; settlement</h4>
             <div className="grid g2">
               <label className="muted small">
+                Contact person name
+                <input
+                  className="input"
+                  value={saccoForm.contact_name}
+                  onChange={(e) => setSaccoForm((f) => ({ ...f, contact_name: e.target.value }))}
+                  placeholder="Contact person"
+                />
+              </label>
+              <label className="muted small">
                 Official phone number
                 <input
                   className="input"
@@ -2404,6 +2420,15 @@ const SystemDashboard = () => {
                 />
               </label>
               <label className="muted small">
+                Contact account number (optional)
+                <input
+                  className="input"
+                  value={saccoForm.contact_account_number}
+                  onChange={(e) => setSaccoForm((f) => ({ ...f, contact_account_number: e.target.value }))}
+                  placeholder="Account number"
+                />
+              </label>
+              <label className="muted small">
                 Settlement till / paybill
                 <input
                   className="input"
@@ -2419,7 +2444,26 @@ const SystemDashboard = () => {
                   onChange={(e) => setSaccoForm((f) => ({ ...f, settlement_method: e.target.value }))}
                 >
                   <option value="MPESA">M-PESA</option>
+                  <option value="BANK">Bank</option>
                 </select>
+              </label>
+              <label className="muted small">
+                Settlement bank name (optional)
+                <input
+                  className="input"
+                  value={saccoForm.settlement_bank_name}
+                  onChange={(e) => setSaccoForm((f) => ({ ...f, settlement_bank_name: e.target.value }))}
+                  placeholder="Bank name"
+                />
+              </label>
+              <label className="muted small">
+                Settlement bank account number (optional)
+                <input
+                  className="input"
+                  value={saccoForm.settlement_bank_account_number}
+                  onChange={(e) => setSaccoForm((f) => ({ ...f, settlement_bank_account_number: e.target.value }))}
+                  placeholder="Account number"
+                />
               </label>
             </div>
 
@@ -2499,9 +2543,14 @@ const SystemDashboard = () => {
                   const displayName = saccoForm.display_name.trim()
                   const operatorTypeRaw = saccoForm.operator_type
                   const operatorType = normalizeOperatorType(operatorTypeRaw)
+                  const contactName = saccoForm.contact_name.trim()
                   const contactPhone = normalizePhoneInput(saccoForm.contact_phone)
                   const contactEmail = saccoForm.contact_email.trim()
+                  const contactAccountNumber = saccoForm.contact_account_number.trim()
                   const defaultTill = saccoForm.default_till.trim()
+                  const settlementMethod = saccoForm.settlement_method
+                  const settlementBankName = saccoForm.settlement_bank_name.trim()
+                  const settlementBankAccountNumber = saccoForm.settlement_bank_account_number.trim()
                   const adminEmail = saccoForm.admin_email.trim()
                   const adminPhone = normalizePhoneInput(saccoForm.admin_phone)
                   const feeLabel = saccoForm.fee_label.trim() || buildOperatorDefaults(operatorType).fee_label
@@ -2515,6 +2564,12 @@ const SystemDashboard = () => {
                   if (!adminPhone || !isValidKenyanPhone(adminPhone)) errors.push('Admin phone must be Kenyan format')
                   if (contactPhone && !isValidKenyanPhone(contactPhone)) errors.push('Official phone must be Kenyan format')
                   if (contactEmail && !isValidEmail(contactEmail)) errors.push('Official email must be valid')
+                  if (settlementMethod === 'BANK') {
+                    if (!settlementBankName) errors.push('Settlement bank name is required for bank settlement')
+                    if (!settlementBankAccountNumber) {
+                      errors.push('Settlement bank account number is required for bank settlement')
+                    }
+                  }
 
                   if (errors.length) {
                     setSaccoMsg(errors[0])
@@ -2530,16 +2585,20 @@ const SystemDashboard = () => {
                       legal_name: saccoForm.legal_name.trim() || null,
                       registration_no: saccoForm.registration_no.trim() || null,
                       status,
+                      contact_name: contactName || null,
                       contact_phone: contactPhone || null,
                       contact_email: contactEmail || null,
+                      contact_account_number: contactAccountNumber || null,
                       default_till: defaultTill,
                       fee_label: feeLabel,
                       savings_enabled: saccoForm.savings_enabled,
                       loans_enabled: saccoForm.loans_enabled,
                       routes_enabled: saccoForm.routes_enabled,
+                      settlement_bank_name: settlementBankName || null,
+                      settlement_bank_account_number: settlementBankAccountNumber || null,
                       admin_email: adminEmail,
                       admin_phone: adminPhone,
-                      settlement_method: saccoForm.settlement_method,
+                      settlement_method: settlementMethod,
                       // TODO: Persist settlement_method when backend adds support.
                     })
                     const createdUser = data?.created_user || null
