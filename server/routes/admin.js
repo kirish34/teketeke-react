@@ -742,7 +742,7 @@ router.get('/shuttles', async (req,res)=>{
   // TODO: Switch operator join to an operators table if/when it replaces saccos.
   let q = supabaseAdmin
     .from('shuttles')
-    .select('*, owner:owner_id(*), operator:operator_id(id, display_name, name, sacco_name)')
+    .select('*, owner:owner_id(*), operator:operator_id(id, display_name, name)')
     .order('created_at',{ascending:false});
   if (req.query.operator_id) q = q.eq('operator_id', req.query.operator_id);
   const { data, error } = await q;
