@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import DashboardShell from '../components/DashboardShell'
 import { api } from '../services/api'
 import { useAuth } from '../state/auth'
+import VehicleCarePage from '../modules/vehicleCare/VehicleCarePage'
+import { fetchAccessGrants, type AccessGrant } from '../modules/vehicleCare/vehicleCare.api'
 
 type Sacco = { sacco_id?: string; name?: string }
 type Matatu = { id?: string; number_plate?: string; sacco_id?: string }
@@ -35,7 +37,8 @@ const SaccoStaffDashboard = () => {
   const [manualMsg, setManualMsg] = useState('')
   const [manualEntries, setManualEntries] = useState<{ id: string; amount: number; note?: string; created_at: string }[]>([])
 
-  const [activeTab, setActiveTab] = useState<'daily' | 'loans' | 'savings'>('daily')
+  const [accessGrants, setAccessGrants] = useState<AccessGrant[]>([])
+  const [activeTab, setActiveTab] = useState<'daily' | 'loans' | 'savings' | 'vehicle_care'>('daily')
 
   const fetchJson = useCallback(<T,>(path: string) => api<T>(path, { token }), [token])
 
@@ -52,6 +55,17 @@ const SaccoStaffDashboard = () => {
     }
     void loadSaccos()
   }, [fetchJson])
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const items = await fetchAccessGrants()
+        setAccessGrants(items)
+      } catch {
+        setAccessGrants([])
+      }
+    })()
+  }, [])
 
   useEffect(() => {
     if (!saccoId) return
@@ -98,6 +112,18 @@ const SaccoStaffDashboard = () => {
       savings: txs.filter((t) => norm(t.kind) === 'SAVINGS'),
     }
   }, [txs])
+
+  const vehicleCareGrant = useMemo(
+    () =>
+      accessGrants.find(
+        (grant) => grant.scope_type === 'OPERATOR' && String(grant.scope_id || '') === String(saccoId || ''),
+      ) || null,
+    [accessGrants, saccoId],
+  )
+  const hasVehicleCareAccess = Boolean(vehicleCareGrant)
+  const canManageVehicleCare = Boolean(vehicleCareGrant?.can_manage_vehicle_care)
+  const canManageCompliance = Boolean(vehicleCareGrant?.can_manage_compliance)
+  const canViewVehicleCareAnalytics = vehicleCareGrant?.can_view_analytics !== false
 
   async function recordManualCash() {
     if (!saccoId || !matatuId) {
@@ -189,6 +215,7 @@ const SaccoStaffDashboard = () => {
           { id: 'daily', label: 'Daily Fee' },
           { id: 'loans', label: 'Loans' },
           { id: 'savings', label: 'Savings' },
+          { id: 'vehicle_care', label: 'Vehicle Care' },
         ].map((t) => (
           <button
             key={t.id}
@@ -363,6 +390,24 @@ const SaccoStaffDashboard = () => {
             </table>
           </div>
         </section>
+      ) : null}
+
+      {activeTab === 'vehicle_care' ? (
+        hasVehicleCareAccess && saccoId ? (
+          <VehicleCarePage
+            context={{
+              scope_type: 'OPERATOR',
+              scope_id: saccoId,
+              can_manage_vehicle_care: canManageVehicleCare,
+              can_manage_compliance: canManageCompliance,
+              can_view_analytics: canViewVehicleCareAnalytics,
+            }}
+          />
+        ) : (
+          <section className="card">
+            <div className="muted">Vehicle Care access is not enabled. Contact your SACCO admin.</div>
+          </section>
+        )
       ) : null}
     </DashboardShell>
   )

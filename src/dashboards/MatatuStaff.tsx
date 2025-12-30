@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import DashboardShell from "../components/DashboardShell"
 import { api } from "../services/api"
 import { useAuth } from "../state/auth"
+import VehicleCarePage from "../modules/vehicleCare/VehicleCarePage"
+import { fetchAccessGrants, type AccessGrant } from "../modules/vehicleCare/vehicleCare.api"
 
 type Sacco = { sacco_id?: string; name?: string }
 type Matatu = { id?: string; number_plate?: string; sacco_id?: string }
@@ -39,7 +41,8 @@ const MatatuStaffDashboard = () => {
   const [manualMsg, setManualMsg] = useState("")
   const [manualEntries, setManualEntries] = useState<{ id: string; amount: number; note?: string; created_at: string }[]>([])
 
-  const [activeTab, setActiveTab] = useState<"trips" | "tx" | "manual" | "totals">("trips")
+  const [accessGrants, setAccessGrants] = useState<AccessGrant[]>([])
+  const [activeTab, setActiveTab] = useState<"trips" | "tx" | "manual" | "totals" | "vehicle_care">("trips")
 
   const fetchJson = useCallback(<T,>(path: string) => api<T>(path, { token }), [token])
 
@@ -84,6 +87,17 @@ const MatatuStaffDashboard = () => {
   }, [fetchJson, saccoId, routeId])
 
   useEffect(() => {
+    void (async () => {
+      try {
+        const items = await fetchAccessGrants()
+        setAccessGrants(items)
+      } catch {
+        setAccessGrants([])
+      }
+    })()
+  }, [])
+
+  useEffect(() => {
     try {
       const raw = localStorage.getItem(manualKey(matatuId))
       if (raw) {
@@ -114,6 +128,19 @@ const MatatuStaffDashboard = () => {
       total: auto + manual + manualLocal,
     }
   }, [filteredTx, manualEntries])
+  const ownerScopeId = user?.matatu_id || ""
+  const vehicleCareGrant = useMemo(
+    () =>
+      accessGrants.find(
+        (grant) => grant.scope_type === "OWNER" && String(grant.scope_id || "") === String(ownerScopeId || "")
+      ) || null,
+    [accessGrants, ownerScopeId],
+  )
+  const hasVehicleCareAccess = Boolean(vehicleCareGrant)
+  const canManageVehicleCare = Boolean(vehicleCareGrant?.can_manage_vehicle_care)
+  const canManageCompliance = Boolean(vehicleCareGrant?.can_manage_compliance)
+  const canViewVehicleCareAnalytics = vehicleCareGrant?.can_view_analytics !== false
+
 
   async function recordManualCash() {
     if (!saccoId || !matatuId) {
@@ -225,6 +252,7 @@ const MatatuStaffDashboard = () => {
           { id: "tx", label: "Transactions" },
           { id: "manual", label: "Manual Cash" },
           { id: "totals", label: "Totals" },
+          { id: "vehicle_care", label: "Vehicle Care" },
         ].map((t) => (
           <button
             key={t.id}
@@ -397,6 +425,24 @@ const MatatuStaffDashboard = () => {
           </div>
         </section>
       ) : null}
+      {activeTab === "vehicle_care" ? (
+        hasVehicleCareAccess && ownerScopeId ? (
+          <VehicleCarePage
+            context={{
+              scope_type: "OWNER",
+              scope_id: ownerScopeId,
+              can_manage_vehicle_care: canManageVehicleCare,
+              can_manage_compliance: canManageCompliance,
+              can_view_analytics: canViewVehicleCareAnalytics,
+            }}
+          />
+        ) : (
+          <section className="card">
+            <div className="muted">Vehicle Care access is not enabled. Contact your owner.</div>
+          </section>
+        )
+      ) : null}
+
     </DashboardShell>
   )
 }

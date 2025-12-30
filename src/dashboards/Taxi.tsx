@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react"
 import DashboardShell from "../components/DashboardShell"
 import { authFetch } from "../lib/auth"
 import { useAuth } from "../state/auth"
+import VehicleCarePage from "../modules/vehicleCare/VehicleCarePage"
+import { fetchAccessGrants, type AccessGrant } from "../modules/vehicleCare/vehicleCare.api"
 
 type Summary = {
   till_today?: number
@@ -58,7 +60,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 const formatKes = (val?: number | null) => `KES ${(Number(val || 0)).toLocaleString("en-KE")}`
 
 const TaxiDashboard = () => {
-  const { logout } = useAuth()
+  const { user, logout } = useAuth()
 
   const [summary, setSummary] = useState<Summary | null>(null)
   const [weekTotals, setWeekTotals] = useState<InsightTotals | null>(null)
@@ -85,7 +87,8 @@ const TaxiDashboard = () => {
   const [targetMsg, setTargetMsg] = useState("")
   const [targetSummary, setTargetSummary] = useState("Enter a monthly savings target to track progress.")
   const [error, setError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<"today" | "cash" | "expenses" | "insights" | "goals" | "automation">("today")
+  const [accessGrants, setAccessGrants] = useState<AccessGrant[]>([])
+  const [activeTab, setActiveTab] = useState<"today" | "cash" | "expenses" | "insights" | "goals" | "automation" | "vehicle_care">("today")
 
   const todayISO = useMemo(() => new Date().toISOString().slice(0, 10), [])
   const weekStartISO = useMemo(() => {
@@ -146,9 +149,32 @@ const TaxiDashboard = () => {
   }, [todayISO, weekStartISO, monthStartISO])
 
   useEffect(() => {
+    void (async () => {
+      try {
+        const items = await fetchAccessGrants()
+        setAccessGrants(items)
+      } catch {
+        setAccessGrants([])
+      }
+    })()
+  }, [])
+
+  useEffect(() => {
     updateTargetSummary(target ? Number(target) : 0, monthTotals?.net)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [monthTotals?.net])
+
+  const ownerScopeId = user?.matatu_id || ""
+  const operatorGrant = useMemo(
+    () => accessGrants.find((grant) => grant.scope_type === "OPERATOR" && grant.is_active !== false) || null,
+    [accessGrants],
+  )
+  const vehicleCareScopeType = operatorGrant?.scope_id ? "OPERATOR" : "OWNER"
+  const vehicleCareScopeId = (operatorGrant?.scope_id as string) || ownerScopeId
+  const canManageVehicleCare = operatorGrant ? Boolean(operatorGrant.can_manage_vehicle_care) : true
+  const canManageCompliance = operatorGrant ? Boolean(operatorGrant.can_manage_compliance) : true
+  const canViewVehicleCareAnalytics = operatorGrant ? operatorGrant.can_view_analytics !== false : true
+  const hasVehicleCareAccess = Boolean(vehicleCareScopeId)
 
   async function saveCash() {
     if (!cashForm.amount) {
@@ -307,6 +333,7 @@ const TaxiDashboard = () => {
           { id: "insights", label: "Insights" },
           { id: "goals", label: "Goals" },
           { id: "automation", label: "Automation" },
+          { id: "vehicle_care", label: "Vehicle Care" },
         ].map((t) => (
           <button
             key={t.id}
@@ -709,6 +736,26 @@ const TaxiDashboard = () => {
           <p className="muted">Mobile app automation has been retired. Use this web dashboard to record cash and expenses.</p>
         </section>
       ) : null}
+      {activeTab === "vehicle_care" ? (
+        hasVehicleCareAccess && vehicleCareScopeId ? (
+          <VehicleCarePage
+            context={{
+              scope_type: vehicleCareScopeType,
+              scope_id: vehicleCareScopeId,
+              can_manage_vehicle_care: canManageVehicleCare,
+              can_manage_compliance: canManageCompliance,
+              can_view_analytics: canViewVehicleCareAnalytics,
+              default_asset_type: "TAXI",
+              asset_type_options: ["TAXI"],
+            }}
+          />
+        ) : (
+          <section className="card">
+            <div className="muted">Vehicle Care access is not enabled.</div>
+          </section>
+        )
+      ) : null}
+
     </DashboardShell>
   )
 }

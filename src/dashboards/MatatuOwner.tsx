@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import DashboardShell from '../components/DashboardShell'
 import { useAuth } from '../state/auth'
 import { authFetch } from '../lib/auth'
+import VehicleCarePage from '../modules/vehicleCare/VehicleCarePage'
+import { fetchAccessGrants, saveAccessGrant, type AccessGrant } from '../modules/vehicleCare/vehicleCare.api'
 
 type Vehicle = {
   id?: string
@@ -86,8 +88,22 @@ const MatatuOwnerDashboard = () => {
   const [alerts, setAlerts] = useState<string[]>([])
   const [vehicleMsg, setVehicleMsg] = useState('')
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'staff' | 'tx' | 'tools'>('overview')
-  const { logout } = useAuth()
+  const [accessGrants, setAccessGrants] = useState<AccessGrant[]>([])
+  const [grantTarget, setGrantTarget] = useState('')
+  const [grantForm, setGrantForm] = useState({
+    role: 'STAFF',
+    can_manage_staff: false,
+    can_manage_vehicles: false,
+    can_manage_vehicle_care: false,
+    can_manage_compliance: false,
+    can_view_analytics: true,
+    is_active: true,
+  })
+  const [grantMsg, setGrantMsg] = useState('')
+  const [grantError, setGrantError] = useState<string | null>(null)
+
+  const [activeTab, setActiveTab] = useState<'overview' | 'staff' | 'tx' | 'tools' | 'vehicle_care'>('overview')
+  const { user, logout } = useAuth()
 
   // staff form
   const [stName, setStName] = useState('')
@@ -110,6 +126,7 @@ const MatatuOwnerDashboard = () => {
     () => vehicles.find((v) => v.id === currentId) || null,
     [vehicles, currentId],
   )
+  const ownerScopeId = user?.matatu_id || currentId || null
 
   useEffect(() => {
     setLoanHist({ loanId: null, items: [], total: 0, msg: 'Select a loan' })
@@ -151,6 +168,55 @@ const MatatuOwnerDashboard = () => {
     }
     void load()
   }, [currentId])
+
+  useEffect(() => {
+    if (!ownerScopeId) return
+    void (async () => {
+      try {
+        const items = await fetchAccessGrants({ scope_type: 'OWNER', scope_id: ownerScopeId, all: true })
+        setAccessGrants(items)
+      } catch (err) {
+        setGrantError(err instanceof Error ? err.message : 'Failed to load access grants')
+        setAccessGrants([])
+      }
+    })()
+  }, [ownerScopeId])
+
+  useEffect(() => {
+    if (!staff.length) {
+      setGrantTarget('')
+      return
+    }
+    if (!grantTarget) {
+      const first = staff.find((s) => s.user_id) || staff[0]
+      setGrantTarget(first?.user_id || '')
+    }
+  }, [staff, grantTarget])
+
+  useEffect(() => {
+    if (!grantTarget) {
+      setGrantForm({
+        role: 'STAFF',
+        can_manage_staff: false,
+        can_manage_vehicles: false,
+        can_manage_vehicle_care: false,
+        can_manage_compliance: false,
+        can_view_analytics: true,
+        is_active: true,
+      })
+      return
+    }
+    const grant = accessGrants.find((g) => g.user_id === grantTarget)
+    setGrantForm({
+      role: grant?.role || 'STAFF',
+      can_manage_staff: !!grant?.can_manage_staff,
+      can_manage_vehicles: !!grant?.can_manage_vehicles,
+      can_manage_vehicle_care: !!grant?.can_manage_vehicle_care,
+      can_manage_compliance: !!grant?.can_manage_compliance,
+      can_view_analytics: grant?.can_view_analytics !== false,
+      is_active: grant?.is_active !== false,
+    })
+  }, [accessGrants, grantTarget])
 
   useEffect(() => {
     const saccoId = currentVehicle?.sacco_id
@@ -222,6 +288,39 @@ const MatatuOwnerDashboard = () => {
       setStaff(stRes.items || [])
     } catch (error) {
       setStMsg(error instanceof Error ? error.message : 'Failed to delete staff')
+    }
+  }
+
+  async function saveOwnerGrant() {
+    if (!ownerScopeId) {
+      setGrantMsg('Owner scope missing')
+      return
+    }
+    if (!grantTarget) {
+      setGrantMsg('Select a staff member')
+      return
+    }
+    setGrantMsg('Saving access...')
+    setGrantError(null)
+    try {
+      await saveAccessGrant({
+        scope_type: 'OWNER',
+        scope_id: ownerScopeId,
+        user_id: grantTarget,
+        role: grantForm.role,
+        can_manage_staff: grantForm.can_manage_staff,
+        can_manage_vehicles: grantForm.can_manage_vehicles,
+        can_manage_vehicle_care: grantForm.can_manage_vehicle_care,
+        can_manage_compliance: grantForm.can_manage_compliance,
+        can_view_analytics: grantForm.can_view_analytics,
+        is_active: grantForm.is_active,
+      })
+      setGrantMsg('Access updated')
+      const items = await fetchAccessGrants({ scope_type: 'OWNER', scope_id: ownerScopeId, all: true })
+      setAccessGrants(items)
+    } catch (error) {
+      setGrantMsg('')
+      setGrantError(error instanceof Error ? error.message : 'Failed to save access')
     }
   }
 
@@ -322,6 +421,7 @@ const MatatuOwnerDashboard = () => {
     { id: 'staff' as const, label: 'Staff' },
     { id: 'tx' as const, label: 'Transactions' },
     { id: 'tools' as const, label: 'Tools' },
+    { id: 'vehicle_care' as const, label: 'Vehicle Care' },
   ]
 
   return (
@@ -483,6 +583,108 @@ const MatatuOwnerDashboard = () => {
                 )}
               </tbody>
             </table>
+          </div>
+          <div className="card" style={{ marginTop: 12, boxShadow: 'none' }}>
+            <div className="topline">
+              <h4 style={{ margin: 0 }}>Vehicle Care access</h4>
+              <span className="muted small">Grant staff permissions for Vehicle Care</span>
+            </div>
+            {grantError ? <div className="err">Access error: {grantError}</div> : null}
+            {!staff.length ? (
+              <div className="muted small">Create a staff member to grant access.</div>
+            ) : (
+              <>
+                <div className="grid g2" style={{ marginTop: 8 }}>
+                  <label className="muted small">
+                    Staff member
+                    <select
+                      value={grantTarget}
+                      onChange={(e) => setGrantTarget(e.target.value)}
+                      style={{ padding: 10, minWidth: 200 }}
+                    >
+                      <option value="">Select staff</option>
+                      {staff.map((s) => (
+                        <option key={s.user_id || s.id} value={s.user_id || ''}>
+                          {s.name || s.email || s.id}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="muted small">
+                    Access role
+                    <select
+                      value={grantForm.role}
+                      onChange={(e) => setGrantForm((f) => ({ ...f, role: e.target.value }))}
+                      style={{ padding: 10 }}
+                    >
+                      <option value="STAFF">STAFF</option>
+                      <option value="MANAGER">MANAGER</option>
+                      <option value="ADMIN">ADMIN</option>
+                    </select>
+                  </label>
+                  <label className="muted small">
+                    <input
+                      type="checkbox"
+                      checked={grantForm.is_active}
+                      onChange={(e) => setGrantForm((f) => ({ ...f, is_active: e.target.checked }))}
+                      style={{ marginRight: 6 }}
+                    />
+                    Access active
+                  </label>
+                  <label className="muted small">
+                    <input
+                      type="checkbox"
+                      checked={grantForm.can_manage_vehicle_care}
+                      onChange={(e) => setGrantForm((f) => ({ ...f, can_manage_vehicle_care: e.target.checked }))}
+                      style={{ marginRight: 6 }}
+                    />
+                    Manage Vehicle Care
+                  </label>
+                  <label className="muted small">
+                    <input
+                      type="checkbox"
+                      checked={grantForm.can_manage_compliance}
+                      onChange={(e) => setGrantForm((f) => ({ ...f, can_manage_compliance: e.target.checked }))}
+                      style={{ marginRight: 6 }}
+                    />
+                    Manage compliance dates
+                  </label>
+                  <label className="muted small">
+                    <input
+                      type="checkbox"
+                      checked={grantForm.can_manage_vehicles}
+                      onChange={(e) => setGrantForm((f) => ({ ...f, can_manage_vehicles: e.target.checked }))}
+                      style={{ marginRight: 6 }}
+                    />
+                    Manage vehicles
+                  </label>
+                  <label className="muted small">
+                    <input
+                      type="checkbox"
+                      checked={grantForm.can_manage_staff}
+                      onChange={(e) => setGrantForm((f) => ({ ...f, can_manage_staff: e.target.checked }))}
+                      style={{ marginRight: 6 }}
+                    />
+                    Manage staff access
+                  </label>
+                  <label className="muted small">
+                    <input
+                      type="checkbox"
+                      checked={grantForm.can_view_analytics}
+                      onChange={(e) => setGrantForm((f) => ({ ...f, can_view_analytics: e.target.checked }))}
+                      style={{ marginRight: 6 }}
+                    />
+                    View analytics
+                  </label>
+                </div>
+                <div className="row" style={{ marginTop: 8, gap: 8 }}>
+                  <button className="btn" type="button" onClick={saveOwnerGrant}>
+                    Save access
+                  </button>
+                  <span className="muted small">{grantMsg}</span>
+                </div>
+              </>
+            )}
           </div>
         </section>
       ) : null}
@@ -764,6 +966,24 @@ const MatatuOwnerDashboard = () => {
             </p>
           </section>
         </>
+      ) : null}
+
+      {activeTab === 'vehicle_care' ? (
+        ownerScopeId ? (
+          <VehicleCarePage
+            context={{
+              scope_type: 'OWNER',
+              scope_id: ownerScopeId,
+              can_manage_vehicle_care: true,
+              can_manage_compliance: true,
+              can_view_analytics: true,
+            }}
+          />
+        ) : (
+          <section className="card">
+            <div className="muted">Select a vehicle to view Vehicle Care.</div>
+          </section>
+        )
       ) : null}
     </DashboardShell>
   )

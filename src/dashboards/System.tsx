@@ -185,7 +185,6 @@ type AdminLogin = {
 type SystemTabId =
   | 'overview'
   | 'analytics'
-  | 'shuttle_care'
   | 'finance'
   | 'c2b'
   | 'payouts'
@@ -309,6 +308,8 @@ type TaxiRow = {
   operator_id?: string | null
   till_number?: string | null
   seat_capacity?: number | null
+  insurance_expiry_date?: string | null
+  psv_badge_expiry_date?: string | null
   category?: string | null
   category_other?: string | null
   owner_id?: string | null
@@ -326,6 +327,7 @@ type BodaRiderRow = {
   address?: string | null
   stage?: string | null
   town?: string | null
+  license_expiry_date?: string | null
   date_of_birth?: string | null
   created_at?: string
 }
@@ -341,6 +343,7 @@ type BodaBikeRow = {
   license_no?: string | null
   has_helmet?: boolean | null
   has_reflector?: boolean | null
+  insurance_expiry_date?: string | null
   rider_id?: string | null
   created_at?: string
   rider?: BodaRiderRow | null
@@ -349,6 +352,7 @@ type BodaBikeRow = {
 
 type StaffProfileRow = {
   id?: string
+  user_id?: string | null
   name?: string
   email?: string | null
   phone?: string | null
@@ -358,20 +362,35 @@ type StaffProfileRow = {
 
 type MaintenanceLogRow = {
   id?: string
+  asset_type?: string | null
+  asset_id?: string | null
   shuttle_id?: string | null
   operator_id?: string | null
+  created_by_user_id?: string | null
+  handled_by_user_id?: string | null
   reported_by_staff_id?: string | null
   handled_by_staff_id?: string | null
   issue_category?: string | null
+  issue_tags?: string[] | null
   issue_description?: string | null
-  parts_used?: Array<{ name?: string; qty?: number | null; cost?: number | null }> | null
+  parts_used?: Array<{
+    part_name?: string | null
+    part_category?: string | null
+    qty?: number | null
+    unit_cost?: number | null
+    name?: string | null
+    cost?: number | null
+  }> | null
   total_cost_kes?: number | null
   downtime_days?: number | null
+  priority?: string | null
   status?: string | null
   occurred_at?: string | null
   resolved_at?: string | null
   next_service_due?: string | null
   notes?: string | null
+  created_at?: string | null
+  updated_at?: string | null
   shuttle?: { id?: string; plate?: string | null; operator_id?: string | null } | null
   operator?: ShuttleOperatorRow | null
   reported_by?: StaffProfileRow | null
@@ -614,39 +633,6 @@ function createBodaBikeForm() {
   }
 }
 
-const MAINTENANCE_CATEGORIES = [
-  'ENGINE',
-  'TYRES',
-  'BRAKES',
-  'ELECTRICAL',
-  'BODY',
-  'SUSPENSION',
-  'SERVICE',
-  'OTHER',
-]
-
-const MAINTENANCE_STATUS_OPTIONS = ['OPEN', 'IN_PROGRESS', 'RESOLVED']
-
-type MaintenancePartForm = { name: string; qty: string; cost: string }
-
-function createMaintenanceForm() {
-  return {
-    shuttle_id: '',
-    operator_id: '',
-    reported_by_staff_id: '',
-    handled_by_staff_id: '',
-    issue_category: '',
-    issue_description: '',
-    parts_used: [{ name: '', qty: '', cost: '' }] as MaintenancePartForm[],
-    total_cost_kes: '',
-    downtime_days: '',
-    status: 'OPEN',
-    occurred_at: formatDateInput(new Date().toISOString()),
-    resolved_at: '',
-    next_service_due: '',
-    notes: '',
-  }
-}
 
 function normalizePhoneInput(value: string) {
   return String(value || '').replace(/\s+/g, '')
@@ -762,11 +748,6 @@ function formatOperatorTypeLabel(value?: string | null) {
   const normalized = normalizeOperatorType(value)
   const match = operatorTypeOptions.find((option) => option.value === normalized)
   return match ? match.label : normalized
-}
-
-function formatStaffLabel(row?: StaffProfileRow | null) {
-  if (!row) return '-'
-  return row.name || row.email || row.id || '-'
 }
 
 type CsvHeader = { key: string; label: string }
@@ -1022,22 +1003,7 @@ const SystemDashboard = () => {
   const [analyticsTypeFilter, setAnalyticsTypeFilter] = useState('')
   const [maintenanceLogs, setMaintenanceLogs] = useState<MaintenanceLogRow[]>([])
   const [maintenanceError, setMaintenanceError] = useState<string | null>(null)
-  const [maintenanceForm, setMaintenanceForm] = useState(() => createMaintenanceForm())
-  const [maintenanceMsg, setMaintenanceMsg] = useState('')
-  const [maintenanceFilters, setMaintenanceFilters] = useState({
-    operator_id: '',
-    shuttle_id: '',
-    status: '',
-    category: '',
-    from: '',
-    to: '',
-  })
-  const [maintenanceEditId, setMaintenanceEditId] = useState('')
-  const [maintenanceEditForm, setMaintenanceEditForm] = useState(() => createMaintenanceForm())
-  const [maintenanceEditMsg, setMaintenanceEditMsg] = useState('')
-  const [maintenanceEditError, setMaintenanceEditError] = useState<string | null>(null)
   const [systemStaff, setSystemStaff] = useState<StaffProfileRow[]>([])
-  const [systemStaffError, setSystemStaffError] = useState<string | null>(null)
 
   const [taxis, setTaxis] = useState<TaxiRow[]>([])
   const [taxisError, setTaxisError] = useState<string | null>(null)
@@ -1124,7 +1090,6 @@ const SystemDashboard = () => {
     { id: 'worker_monitor', label: 'Worker Monitor' },
     { id: 'saccos', label: 'Operators' },
     { id: 'matatu', label: 'Shuttles' },
-    { id: 'shuttle_care', label: 'Shuttle Care' },
     { id: 'taxis', label: 'Taxis' },
     { id: 'bodabodas', label: 'BodaBodas' },
     { id: 'ussd', label: 'USSD' },
@@ -1202,6 +1167,22 @@ const SystemDashboard = () => {
     return map
   }, [shuttles])
 
+  const taxisById = useMemo(() => {
+    const map = new Map<string, TaxiRow>()
+    taxis.forEach((row) => {
+      if (row.id) map.set(row.id, row)
+    })
+    return map
+  }, [taxis])
+
+  const bodaById = useMemo(() => {
+    const map = new Map<string, BodaBikeRow>()
+    bodaBikes.forEach((row) => {
+      if (row.id) map.set(row.id, row)
+    })
+    return map
+  }, [bodaBikes])
+
   const shuttleOperatorSummary = useMemo(() => {
     const map = new Map<string, { id: string; label: string; count: number }>()
     shuttles.forEach((row) => {
@@ -1253,40 +1234,55 @@ const SystemDashboard = () => {
       daysRemaining: number
       status: ExpiryStatus
     }> = []
+
+    const pushAlert = (
+      key: string,
+      plate: string,
+      operatorLabel: string,
+      expiryType: string,
+      expiryDate?: string | null,
+    ) => {
+      const info = getExpiryStatus(expiryDate)
+      if (info.status === 'expired' || info.status === 'due_soon') {
+        alerts.push({
+          id: `${key}-${expiryType}`,
+          plate,
+          operatorLabel,
+          expiryType,
+          expiryDate: expiryDate || '',
+          daysRemaining: info.daysRemaining ?? 0,
+          status: info.status,
+        })
+      }
+    }
+
     shuttles.forEach((row) => {
       const operatorId = row.operator_id || row.operator?.id || ''
-      const operatorRow = operatorId ? saccoById.get(operatorId) : null
-      const operatorLabel =
-        row.operator?.display_name ||
-        row.operator?.name ||
-        row.operator?.sacco_name ||
-        operatorRow?.display_name ||
-        operatorRow?.name ||
-        operatorId ||
-        '-'
+      const operatorLabel = operatorLabelFromParts(operatorId, row.operator || null)
       const plate = row.plate || row.id || '-'
-      const entries = [
-        { type: 'TLB', date: row.tlb_expiry_date },
-        { type: 'Insurance', date: row.insurance_expiry_date },
-        { type: 'Inspection', date: row.inspection_expiry_date },
-      ]
-      entries.forEach((entry) => {
-        const info = getExpiryStatus(entry.date)
-        if (info.status === 'expired' || info.status === 'due_soon') {
-          alerts.push({
-            id: `${row.id || row.plate || operatorId}-${entry.type}`,
-            plate,
-            operatorLabel,
-            expiryType: entry.type,
-            expiryDate: entry.date || '',
-            daysRemaining: info.daysRemaining ?? 0,
-            status: info.status,
-          })
-        }
-      })
+      pushAlert(row.id || row.plate || operatorId || plate, plate, operatorLabel, 'TLB', row.tlb_expiry_date)
+      pushAlert(row.id || row.plate || operatorId || plate, plate, operatorLabel, 'Insurance', row.insurance_expiry_date)
+      pushAlert(row.id || row.plate || operatorId || plate, plate, operatorLabel, 'Inspection', row.inspection_expiry_date)
     })
+
+    taxis.forEach((row) => {
+      const operatorId = row.operator_id || row.operator?.id || ''
+      const operatorLabel = operatorLabelFromParts(operatorId, row.operator || null)
+      const plate = row.plate || row.id || '-'
+      pushAlert(row.id || row.plate || operatorId || plate, plate, operatorLabel, 'Insurance', row.insurance_expiry_date)
+      pushAlert(row.id || row.plate || operatorId || plate, plate, operatorLabel, 'PSV Badge', row.psv_badge_expiry_date)
+    })
+
+    bodaBikes.forEach((row) => {
+      const operatorId = row.operator_id || row.operator?.id || ''
+      const operatorLabel = operatorLabelFromParts(operatorId, row.operator || null)
+      const plate = row.identifier || row.id || '-'
+      pushAlert(row.id || row.identifier || operatorId || plate, plate, operatorLabel, 'Insurance', row.insurance_expiry_date)
+      pushAlert(row.id || row.identifier || operatorId || plate, plate, operatorLabel, 'License', row.rider?.license_expiry_date)
+    })
+
     return alerts.sort((a, b) => a.daysRemaining - b.daysRemaining)
-  }, [shuttles, saccoById])
+  }, [shuttles, taxis, bodaBikes, saccoById])
 
   const analyticsShuttles = useMemo(() => {
     return shuttles.filter((row) => {
@@ -1433,40 +1429,39 @@ const SystemDashboard = () => {
     return rows.sort((a, b) => b.avgRisk - a.avgRisk)
   }, [analyticsShuttles])
 
-  const filteredMaintenanceLogs = useMemo(() => {
-    return maintenanceLogs.filter((row) => {
-      if (maintenanceFilters.operator_id && (row.operator_id || row.operator?.id || '') !== maintenanceFilters.operator_id) {
-        return false
-      }
-      if (maintenanceFilters.shuttle_id && (row.shuttle_id || row.shuttle?.id || '') !== maintenanceFilters.shuttle_id) {
-        return false
-      }
-      if (maintenanceFilters.status && (row.status || '').toUpperCase() !== maintenanceFilters.status) {
-        return false
-      }
-      if (maintenanceFilters.category && (row.issue_category || '').toUpperCase() !== maintenanceFilters.category) {
-        return false
-      }
-      const occurredAt = row.occurred_at ? new Date(row.occurred_at) : null
-      if (maintenanceFilters.from) {
-        const fromDate = new Date(maintenanceFilters.from)
-        fromDate.setHours(0, 0, 0, 0)
-        if (occurredAt && occurredAt < fromDate) return false
-      }
-      if (maintenanceFilters.to) {
-        const toDate = new Date(maintenanceFilters.to)
-        toDate.setHours(23, 59, 59, 999)
-        if (occurredAt && occurredAt > toDate) return false
-      }
-      return true
-    })
-  }, [maintenanceLogs, maintenanceFilters])
+
+
+  const resolveMaintenanceAsset = (row: MaintenanceLogRow) => {
+    const rawType = (row.asset_type || (row.shuttle_id ? 'SHUTTLE' : '')).toString().toUpperCase()
+    const assetType = rawType || 'SHUTTLE'
+    const assetId = row.asset_id || row.shuttle_id || row.shuttle?.id || ''
+    let label = assetId || '-'
+    let operatorId = row.operator_id || row.operator?.id || ''
+
+    if (assetType === 'SHUTTLE') {
+      const shuttle = assetId ? shuttlesById.get(assetId) || null : null
+      label = row.shuttle?.plate || shuttle?.plate || label
+      operatorId = operatorId || shuttle?.operator_id || row.shuttle?.operator_id || ''
+    } else if (assetType === 'TAXI') {
+      const taxi = assetId ? taxisById.get(assetId) || null : null
+      label = taxi?.plate || label
+      operatorId = operatorId || taxi?.operator_id || taxi?.operator?.id || ''
+    } else if (assetType === 'BODA') {
+      const bike = assetId ? bodaById.get(assetId) || null : null
+      label = bike?.identifier || label
+      operatorId = operatorId || bike?.operator_id || bike?.operator?.id || ''
+    }
+
+    const operatorLabel = operatorId ? operatorLabelFromParts(operatorId, row.operator || null) : '-'
+    const assetKey = assetId ? `${assetType}:${assetId}` : ''
+    return { assetType, assetId, label, operatorId, operatorLabel, assetKey }
+  }
 
   const maintenanceIssuesThisMonth = useMemo(() => {
     const now = new Date()
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
     const map = new Map<string, number>()
-    filteredMaintenanceLogs.forEach((row) => {
+    maintenanceLogs.forEach((row) => {
       const occurredAt = row.occurred_at ? new Date(row.occurred_at) : null
       if (!occurredAt || Number.isNaN(occurredAt.getTime())) return
       if (occurredAt < monthStart) return
@@ -1474,16 +1469,17 @@ const SystemDashboard = () => {
       map.set(category, (map.get(category) || 0) + 1)
     })
     return [...map.entries()].map(([category, count]) => ({ category, count })).sort((a, b) => b.count - a.count)
-  }, [filteredMaintenanceLogs])
+  }, [maintenanceLogs])
 
   const maintenancePartsSummary = useMemo(() => {
     const map = new Map<string, { part: string; count: number; cost: number }>()
-    filteredMaintenanceLogs.forEach((row) => {
+    maintenanceLogs.forEach((row) => {
       const parts = Array.isArray(row.parts_used) ? row.parts_used : []
       parts.forEach((part) => {
-        const label = (part?.name || '').trim() || 'Unknown'
+        const label = (part?.part_name || part?.name || '').trim() || 'Unknown'
         const qty = Number(part?.qty || 0) || 0
-        const cost = Number(part?.cost || 0) || 0
+        const unitCost = Number(part?.unit_cost || part?.cost || 0) || 0
+        const cost = qty ? unitCost * qty : unitCost
         const existing = map.get(label) || { part: label, count: 0, cost: 0 }
         existing.count += qty || 1
         existing.cost += cost
@@ -1491,35 +1487,83 @@ const SystemDashboard = () => {
       })
     })
     return [...map.values()].sort((a, b) => b.cost - a.cost || b.count - a.count)
-  }, [filteredMaintenanceLogs])
+  }, [maintenanceLogs])
 
-  const maintenanceCostByShuttle = useMemo(() => {
-    const map = new Map<string, { shuttleId: string; plate: string; operatorLabel: string; cost: number; count: number }>()
-    filteredMaintenanceLogs.forEach((row) => {
-      const shuttleId = row.shuttle_id || row.shuttle?.id || ''
-      if (!shuttleId) return
-      const shuttle = shuttlesById.get(shuttleId) || null
-      const plate = row.shuttle?.plate || shuttle?.plate || shuttleId
-      const operatorId = row.operator_id || row.operator?.id || shuttle?.operator_id || ''
-      const operatorLabel = operatorId ? operatorLabelFromParts(operatorId, row.operator || null) : '-'
+  const maintenanceCostByAsset = useMemo(() => {
+    const map = new Map<
+      string,
+      { assetKey: string; assetType: string; assetId: string; label: string; operatorLabel: string; cost: number; count: number }
+    >()
+    maintenanceLogs.forEach((row) => {
+      const info = resolveMaintenanceAsset(row)
+      if (!info.assetKey) return
       const cost = Number(row.total_cost_kes || 0) || 0
-      const existing = map.get(shuttleId) || { shuttleId, plate, operatorLabel, cost: 0, count: 0 }
+      const existing = map.get(info.assetKey) || {
+        assetKey: info.assetKey,
+        assetType: info.assetType,
+        assetId: info.assetId,
+        label: info.label,
+        operatorLabel: info.operatorLabel,
+        cost: 0,
+        count: 0,
+      }
       existing.cost += cost
       existing.count += 1
-      map.set(shuttleId, existing)
+      map.set(info.assetKey, existing)
     })
     return [...map.values()].sort((a, b) => b.cost - a.cost)
-  }, [filteredMaintenanceLogs, shuttlesById])
+  }, [maintenanceLogs, shuttlesById, taxisById, bodaById, saccoById])
+
+  const maintenanceCostByOperator = useMemo(() => {
+    const map = new Map<string, { operatorId: string; label: string; cost: number; count: number }>()
+    maintenanceLogs.forEach((row) => {
+      const info = resolveMaintenanceAsset(row)
+      const operatorId = info.operatorId || ''
+      if (!operatorId) return
+      const existing = map.get(operatorId) || { operatorId, label: info.operatorLabel, cost: 0, count: 0 }
+      existing.cost += Number(row.total_cost_kes || 0) || 0
+      existing.count += 1
+      map.set(operatorId, existing)
+    })
+    return [...map.values()].sort((a, b) => b.cost - a.cost)
+  }, [maintenanceLogs, shuttlesById, taxisById, bodaById, saccoById])
+
+  const maintenanceDowntimeByAsset = useMemo(() => {
+    const map = new Map<
+      string,
+      { assetKey: string; assetType: string; assetId: string; label: string; downtime: number; count: number }
+    >()
+    maintenanceLogs.forEach((row) => {
+      const info = resolveMaintenanceAsset(row)
+      if (!info.assetKey) return
+      const downtime = Number(row.downtime_days || 0) || 0
+      const existing = map.get(info.assetKey) || {
+        assetKey: info.assetKey,
+        assetType: info.assetType,
+        assetId: info.assetId,
+        label: info.label,
+        downtime: 0,
+        count: 0,
+      }
+      existing.downtime += downtime
+      existing.count += 1
+      map.set(info.assetKey, existing)
+    })
+    return [...map.values()].sort((a, b) => b.downtime - a.downtime)
+  }, [maintenanceLogs, shuttlesById, taxisById, bodaById, saccoById])
 
   const maintenanceStaffPerformance = useMemo(() => {
     const map = new Map<
       string,
       { staffId: string; label: string; count: number; totalDays: number; resolvedCount: number }
     >()
-    filteredMaintenanceLogs.forEach((row) => {
-      const staffId = row.handled_by_staff_id || row.handled_by?.id || ''
+    maintenanceLogs.forEach((row) => {
+      const staffId = row.handled_by_user_id || row.handled_by_staff_id || row.handled_by?.id || ''
       if (!staffId) return
-      const staffLabel = row.handled_by?.name || systemStaff.find((s) => s.id === staffId)?.name || staffId
+      const staffLabel =
+        row.handled_by?.name ||
+        systemStaff.find((s) => s.user_id === staffId || s.id === staffId)?.name ||
+        staffId
       const existing = map.get(staffId) || {
         staffId,
         label: staffLabel,
@@ -1546,21 +1590,26 @@ const SystemDashboard = () => {
       count: row.count,
       avgResolutionDays: row.resolvedCount ? row.totalDays / row.resolvedCount : null,
     }))
-  }, [filteredMaintenanceLogs, systemStaff])
+  }, [maintenanceLogs, systemStaff])
 
-  const maintenanceRepeatShuttles = useMemo(() => {
-    const map = new Map<string, { shuttleId: string; plate: string; count: number }>()
-    filteredMaintenanceLogs.forEach((row) => {
-      const shuttleId = row.shuttle_id || row.shuttle?.id || ''
-      if (!shuttleId) return
-      const shuttle = shuttlesById.get(shuttleId) || null
-      const plate = row.shuttle?.plate || shuttle?.plate || shuttleId
-      const existing = map.get(shuttleId) || { shuttleId, plate, count: 0 }
+  const maintenanceRepeatAssets = useMemo(() => {
+    const map = new Map<string, { assetKey: string; assetType: string; assetId: string; label: string; count: number }>()
+    maintenanceLogs.forEach((row) => {
+      const info = resolveMaintenanceAsset(row)
+      if (!info.assetKey) return
+      const existing = map.get(info.assetKey) || {
+        assetKey: info.assetKey,
+        assetType: info.assetType,
+        assetId: info.assetId,
+        label: info.label,
+        count: 0,
+      }
       existing.count += 1
-      map.set(shuttleId, existing)
+      map.set(info.assetKey, existing)
     })
     return [...map.values()].filter((row) => row.count >= 2).sort((a, b) => b.count - a.count)
-  }, [filteredMaintenanceLogs, shuttlesById])
+  }, [maintenanceLogs, shuttlesById, taxisById, bodaById, saccoById])
+
 
   const taxiOperatorSummary = useMemo(() => {
     const map = new Map<string, { id: string; label: string; count: number }>()
@@ -3401,172 +3450,11 @@ const SystemDashboard = () => {
     }
   }
 
-  function resetMaintenanceFormState() {
-    setMaintenanceForm(createMaintenanceForm())
-    setMaintenanceMsg('')
-  }
 
-  function resetMaintenanceEditState() {
-    setMaintenanceEditId('')
-    setMaintenanceEditForm(createMaintenanceForm())
-    setMaintenanceEditMsg('')
-    setMaintenanceEditError(null)
-  }
 
-  function normalizePartsUsed(parts: MaintenancePartForm[]) {
-    return parts
-      .map((part) => {
-        const name = part.name.trim()
-        const qtyVal = parsePositiveIntInput(part.qty || '')
-        const costVal = parseAmountInput(part.cost || '')
-        if (!name && !qtyVal && !costVal) return null
-        return {
-          name: name || 'Unknown',
-          qty: qtyVal || null,
-          cost: costVal || null,
-        }
-      })
-      .filter(Boolean) as Array<{ name: string; qty: number | null; cost: number | null }>
-  }
 
-  function startMaintenanceEdit(row: MaintenanceLogRow) {
-    if (!row.id) return
-    if (maintenanceEditId === row.id) {
-      resetMaintenanceEditState()
-      return
-    }
-    const parts = Array.isArray(row.parts_used) && row.parts_used.length ? row.parts_used : []
-    setMaintenanceEditId(row.id)
-    setMaintenanceEditForm({
-      shuttle_id: row.shuttle_id || row.shuttle?.id || '',
-      operator_id: row.operator_id || row.operator?.id || '',
-      reported_by_staff_id: row.reported_by_staff_id || row.reported_by?.id || '',
-      handled_by_staff_id: row.handled_by_staff_id || row.handled_by?.id || '',
-      issue_category: row.issue_category || '',
-      issue_description: row.issue_description || '',
-      parts_used:
-        parts.length > 0
-          ? parts.map((part) => ({
-              name: part?.name ? String(part.name) : '',
-              qty: part?.qty !== null && part?.qty !== undefined ? String(part.qty) : '',
-              cost: part?.cost !== null && part?.cost !== undefined ? String(part.cost) : '',
-            }))
-          : [{ name: '', qty: '', cost: '' }],
-      total_cost_kes: row.total_cost_kes !== null && row.total_cost_kes !== undefined ? String(row.total_cost_kes) : '',
-      downtime_days: row.downtime_days !== null && row.downtime_days !== undefined ? String(row.downtime_days) : '',
-      status: row.status || 'OPEN',
-      occurred_at: formatDateInput(row.occurred_at),
-      resolved_at: formatDateInput(row.resolved_at),
-      next_service_due: formatDateInput(row.next_service_due),
-      notes: row.notes || '',
-    })
-    setMaintenanceEditMsg('')
-    setMaintenanceEditError(null)
-  }
 
-  async function submitMaintenanceLog() {
-    const shuttleId = maintenanceForm.shuttle_id
-    const operatorId =
-      maintenanceForm.operator_id ||
-      shuttlesById.get(shuttleId)?.operator_id ||
-      shuttlesById.get(shuttleId)?.operator?.id ||
-      ''
-    const payload = {
-      shuttle_id: shuttleId || null,
-      operator_id: operatorId || null,
-      reported_by_staff_id: maintenanceForm.reported_by_staff_id || null,
-      handled_by_staff_id: maintenanceForm.handled_by_staff_id || null,
-      issue_category: maintenanceForm.issue_category.trim().toUpperCase(),
-      issue_description: maintenanceForm.issue_description.trim(),
-      parts_used: normalizePartsUsed(maintenanceForm.parts_used),
-      total_cost_kes: parseAmountInput(maintenanceForm.total_cost_kes) || null,
-      downtime_days: parsePositiveIntInput(maintenanceForm.downtime_days) || null,
-      status: maintenanceForm.status || 'OPEN',
-      occurred_at: maintenanceForm.occurred_at || null,
-      resolved_at: maintenanceForm.resolved_at || null,
-      next_service_due: maintenanceForm.next_service_due || null,
-      notes: maintenanceForm.notes.trim() || null,
-    }
-    if (!payload.shuttle_id) {
-      setMaintenanceMsg('Select a shuttle')
-      return
-    }
-    if (!payload.issue_category) {
-      setMaintenanceMsg('Issue category is required')
-      return
-    }
-    if (!payload.issue_description) {
-      setMaintenanceMsg('Issue description is required')
-      return
-    }
-    if (!payload.status) {
-      setMaintenanceMsg('Status is required')
-      return
-    }
-    setMaintenanceMsg('Saving...')
-    try {
-      await sendJson('/api/admin/maintenance-logs', 'POST', payload)
-      setMaintenanceMsg('Maintenance log saved')
-      resetMaintenanceFormState()
-      await loadMaintenanceLogs()
-    } catch (err) {
-      setMaintenanceMsg(err instanceof Error ? err.message : 'Save failed')
-    }
-  }
 
-  async function saveMaintenanceEdit() {
-    if (!maintenanceEditId) return
-    const shuttleId = maintenanceEditForm.shuttle_id
-    const operatorId =
-      maintenanceEditForm.operator_id ||
-      shuttlesById.get(shuttleId)?.operator_id ||
-      shuttlesById.get(shuttleId)?.operator?.id ||
-      ''
-    const payload = {
-      id: maintenanceEditId,
-      shuttle_id: shuttleId || null,
-      operator_id: operatorId || null,
-      reported_by_staff_id: maintenanceEditForm.reported_by_staff_id || null,
-      handled_by_staff_id: maintenanceEditForm.handled_by_staff_id || null,
-      issue_category: maintenanceEditForm.issue_category.trim().toUpperCase(),
-      issue_description: maintenanceEditForm.issue_description.trim(),
-      parts_used: normalizePartsUsed(maintenanceEditForm.parts_used),
-      total_cost_kes: parseAmountInput(maintenanceEditForm.total_cost_kes) || null,
-      downtime_days: parsePositiveIntInput(maintenanceEditForm.downtime_days) || null,
-      status: maintenanceEditForm.status || 'OPEN',
-      occurred_at: maintenanceEditForm.occurred_at || null,
-      resolved_at: maintenanceEditForm.resolved_at || null,
-      next_service_due: maintenanceEditForm.next_service_due || null,
-      notes: maintenanceEditForm.notes.trim() || null,
-    }
-    if (!payload.shuttle_id) {
-      setMaintenanceEditMsg('Select a shuttle')
-      return
-    }
-    if (!payload.issue_category) {
-      setMaintenanceEditMsg('Issue category is required')
-      return
-    }
-    if (!payload.issue_description) {
-      setMaintenanceEditMsg('Issue description is required')
-      return
-    }
-    if (!payload.status) {
-      setMaintenanceEditMsg('Status is required')
-      return
-    }
-    setMaintenanceEditMsg('Saving...')
-    setMaintenanceEditError(null)
-    try {
-      await sendJson('/api/admin/maintenance-logs/update', 'POST', payload)
-      setMaintenanceEditMsg('Maintenance log updated')
-      resetMaintenanceEditState()
-      await loadMaintenanceLogs()
-    } catch (err) {
-      setMaintenanceEditMsg('')
-      setMaintenanceEditError(err instanceof Error ? err.message : 'Update failed')
-    }
-  }
 
   async function loadMaintenanceLogs() {
     try {
@@ -3583,10 +3471,8 @@ const SystemDashboard = () => {
     try {
       const rows = await fetchList<StaffProfileRow>('/api/admin/staff')
       setSystemStaff(rows)
-      setSystemStaffError(null)
     } catch (err) {
       setSystemStaff([])
-      setSystemStaffError(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -3689,6 +3575,13 @@ const SystemDashboard = () => {
     const topMakes = analyticsTopMakes.slice(0, 10)
     const topModels = analyticsTopModels.slice(0, 10)
     const makeModelRows = analyticsMakeModelStats.slice(0, 15)
+    const topIssueRows = maintenanceIssuesThisMonth.slice(0, 10)
+    const topPartRows = maintenancePartsSummary.slice(0, 10)
+    const topCostAssets = maintenanceCostByAsset.slice(0, 10)
+    const topCostOperators = maintenanceCostByOperator.slice(0, 10)
+    const topDowntimeAssets = maintenanceDowntimeByAsset.slice(0, 10)
+    const topStaffRows = maintenanceStaffPerformance.slice(0, 10)
+    const repeatAssetRows = maintenanceRepeatAssets.slice(0, 10)
     return (
       <>
         <section className="card">
@@ -3974,314 +3867,40 @@ const SystemDashboard = () => {
             </div>
           </div>
         </section>
-      </>
-    )
-  }
 
-  const renderShuttleCareTab = () => {
-    const shuttleOptions = shuttles
-      .map((row) => {
-        const id = row.id || ''
-        if (!id) return null
-        const plate = row.plate || id
-        const operatorId = row.operator_id || row.operator?.id || ''
-        const operatorLabel = operatorId ? operatorLabelFromParts(operatorId, row.operator || null) : ''
-        const label = operatorLabel ? `${plate} • ${operatorLabel}` : plate
-        return { id, label }
-      })
-      .filter((row): row is { id: string; label: string } => Boolean(row))
-      .sort((a, b) => a.label.localeCompare(b.label))
-
-    const staffOptions = systemStaff
-      .map((row) => {
-        const id = row.id || ''
-        if (!id) return null
-        return { id, label: formatStaffLabel(row) }
-      })
-      .filter((row): row is { id: string; label: string } => Boolean(row))
-      .sort((a, b) => a.label.localeCompare(b.label))
-
-    const listRows = filteredMaintenanceLogs
-    const topIssues = maintenanceIssuesThisMonth.slice(0, 6)
-    const topParts = maintenancePartsSummary.slice(0, 6)
-    const topCosts = maintenanceCostByShuttle.slice(0, 6)
-    const topStaff = maintenanceStaffPerformance
-      .slice()
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 8)
-    const repeatShuttles = maintenanceRepeatShuttles.slice(0, 8)
-
-    const operatorLabel = maintenanceForm.operator_id
-      ? operatorLabelFromParts(maintenanceForm.operator_id, null)
-      : ''
-
-    return (
-      <>
         <section className="card">
-          <h3 style={{ marginTop: 0 }}>Shuttle Care</h3>
-          {maintenanceError ? <div className="err">Maintenance error: {maintenanceError}</div> : null}
-          {systemStaffError ? <div className="err">Staff load error: {systemStaffError}</div> : null}
-          <div className="grid g2">
-            <div className="card" style={{ margin: 0, boxShadow: 'none' }}>
-              <h4 style={{ margin: '0 0 8px' }}>Maintenance entry</h4>
-              <div className="grid g2">
-                <label className="muted small">
-                  Shuttle *
-                  <select
-                    value={maintenanceForm.shuttle_id}
-                    onChange={(e) => {
-                      const nextId = e.target.value
-                      const shuttle = shuttlesById.get(nextId)
-                      const operatorId = shuttle?.operator_id || shuttle?.operator?.id || ''
-                      setMaintenanceForm((f) => ({ ...f, shuttle_id: nextId, operator_id: operatorId }))
-                    }}
-                    style={{ padding: 10 }}
-                  >
-                    <option value="">Select shuttle</option>
-                    {shuttleOptions.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="muted small">
-                  Issue category *
-                  <select
-                    value={maintenanceForm.issue_category}
-                    onChange={(e) => setMaintenanceForm((f) => ({ ...f, issue_category: e.target.value }))}
-                    style={{ padding: 10 }}
-                  >
-                    <option value="">Select category</option>
-                    {MAINTENANCE_CATEGORIES.map((category) => (
-                      <option key={category} value={category}>
-                        {category}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="muted small">
-                  Status *
-                  <select
-                    value={maintenanceForm.status}
-                    onChange={(e) => setMaintenanceForm((f) => ({ ...f, status: e.target.value }))}
-                    style={{ padding: 10 }}
-                  >
-                    {MAINTENANCE_STATUS_OPTIONS.map((status) => (
-                      <option key={status} value={status}>
-                        {status}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="muted small">
-                  Reported by staff
-                  <select
-                    value={maintenanceForm.reported_by_staff_id}
-                    onChange={(e) => setMaintenanceForm((f) => ({ ...f, reported_by_staff_id: e.target.value }))}
-                    style={{ padding: 10 }}
-                  >
-                    <option value="">Optional</option>
-                    {staffOptions.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="muted small">
-                  Handled by staff
-                  <select
-                    value={maintenanceForm.handled_by_staff_id}
-                    onChange={(e) => setMaintenanceForm((f) => ({ ...f, handled_by_staff_id: e.target.value }))}
-                    style={{ padding: 10 }}
-                  >
-                    <option value="">Optional</option>
-                    {staffOptions.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="muted small">
-                  Occurred at
-                  <input
-                    className="input"
-                    type="date"
-                    value={maintenanceForm.occurred_at}
-                    onChange={(e) => setMaintenanceForm((f) => ({ ...f, occurred_at: e.target.value }))}
-                  />
-                </label>
-                <label className="muted small">
-                  Resolved at
-                  <input
-                    className="input"
-                    type="date"
-                    value={maintenanceForm.resolved_at}
-                    onChange={(e) => setMaintenanceForm((f) => ({ ...f, resolved_at: e.target.value }))}
-                  />
-                </label>
-                <label className="muted small">
-                  Next service due
-                  <input
-                    className="input"
-                    type="date"
-                    value={maintenanceForm.next_service_due}
-                    onChange={(e) => setMaintenanceForm((f) => ({ ...f, next_service_due: e.target.value }))}
-                  />
-                </label>
-                <label className="muted small">
-                  Downtime days
-                  <input
-                    className="input"
-                    type="number"
-                    min={0}
-                    value={maintenanceForm.downtime_days}
-                    onChange={(e) => setMaintenanceForm((f) => ({ ...f, downtime_days: e.target.value }))}
-                  />
-                </label>
-                <label className="muted small">
-                  Total cost (KES)
-                  <input
-                    className="input"
-                    type="number"
-                    min={0}
-                    value={maintenanceForm.total_cost_kes}
-                    onChange={(e) => setMaintenanceForm((f) => ({ ...f, total_cost_kes: e.target.value }))}
-                  />
-                </label>
-              </div>
-              {operatorLabel ? (
-                <div className="muted small" style={{ marginTop: 8 }}>
-                  Operator: {operatorLabel}
-                </div>
-              ) : null}
-              <label className="muted small" style={{ display: 'block', marginTop: 10 }}>
-                Issue description *
-                <textarea
-                  className="input"
-                  value={maintenanceForm.issue_description}
-                  onChange={(e) => setMaintenanceForm((f) => ({ ...f, issue_description: e.target.value }))}
-                  style={{ minHeight: 90 }}
-                />
-              </label>
-              <label className="muted small" style={{ display: 'block', marginTop: 10 }}>
-                Notes
-                <textarea
-                  className="input"
-                  value={maintenanceForm.notes}
-                  onChange={(e) => setMaintenanceForm((f) => ({ ...f, notes: e.target.value }))}
-                  style={{ minHeight: 70 }}
-                />
-              </label>
-            </div>
-
-            <div className="card" style={{ margin: 0, boxShadow: 'none' }}>
-              <h4 style={{ margin: '0 0 8px' }}>Parts used</h4>
-              {maintenanceForm.parts_used.map((part, idx) => (
-                <div key={`part-${idx}`} className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-                  <input
-                    className="input"
-                    placeholder="Part name"
-                    value={part.name}
-                    onChange={(e) =>
-                      setMaintenanceForm((f) => {
-                        const next = [...f.parts_used]
-                        next[idx] = { ...next[idx], name: e.target.value }
-                        return { ...f, parts_used: next }
-                      })
-                    }
-                    style={{ minWidth: 160 }}
-                  />
-                  <input
-                    className="input"
-                    type="number"
-                    min={0}
-                    placeholder="Qty"
-                    value={part.qty}
-                    onChange={(e) =>
-                      setMaintenanceForm((f) => {
-                        const next = [...f.parts_used]
-                        next[idx] = { ...next[idx], qty: e.target.value }
-                        return { ...f, parts_used: next }
-                      })
-                    }
-                    style={{ width: 100 }}
-                  />
-                  <input
-                    className="input"
-                    type="number"
-                    min={0}
-                    placeholder="Cost"
-                    value={part.cost}
-                    onChange={(e) =>
-                      setMaintenanceForm((f) => {
-                        const next = [...f.parts_used]
-                        next[idx] = { ...next[idx], cost: e.target.value }
-                        return { ...f, parts_used: next }
-                      })
-                    }
-                    style={{ width: 120 }}
-                  />
-                  {maintenanceForm.parts_used.length > 1 ? (
-                    <button
-                      className="btn ghost"
-                      type="button"
-                      onClick={() =>
-                        setMaintenanceForm((f) => ({
-                          ...f,
-                          parts_used: f.parts_used.filter((_, partIdx) => partIdx !== idx),
-                        }))
-                      }
-                    >
-                      Remove
-                    </button>
-                  ) : null}
-                </div>
-              ))}
-              <button
-                className="btn ghost"
-                type="button"
-                onClick={() =>
-                  setMaintenanceForm((f) => ({ ...f, parts_used: [...f.parts_used, { name: '', qty: '', cost: '' }] }))
-                }
-              >
-                Add part
-              </button>
-            </div>
+          <div className="topline">
+            <h3 style={{ margin: 0 }}>Maintenance analytics</h3>
+            <span className="muted small">
+              {maintenanceLogs.length} log{maintenanceLogs.length === 1 ? '' : 's'}
+            </span>
           </div>
-          <div className="row" style={{ marginTop: 12 }}>
-            <button className="btn" type="button" onClick={submitMaintenanceLog}>
-              Save maintenance log
-            </button>
-            <span className="muted small">{maintenanceMsg}</span>
-          </div>
+          {maintenanceError ? <div className="err">Maintenance log error: {maintenanceError}</div> : null}
         </section>
 
         <section className="grid g2">
           <div className="card">
             <div className="topline">
-              <h3 style={{ margin: 0 }}>Most common issues (this month)</h3>
-              <span className="muted small">Top {topIssues.length}</span>
+              <h3 style={{ margin: 0 }}>Top issue categories (this month)</h3>
+              <span className="muted small">Top {topIssueRows.length}</span>
             </div>
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>Issue</th>
+                    <th>Category</th>
                     <th>Count</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {topIssues.length === 0 ? (
+                  {topIssueRows.length === 0 ? (
                     <tr>
                       <td colSpan={2} className="muted">
-                        No issues logged this month.
+                        No maintenance activity yet.
                       </td>
                     </tr>
                   ) : (
-                    topIssues.map((row) => (
+                    topIssueRows.map((row) => (
                       <tr key={row.category}>
                         <td>{row.category}</td>
                         <td>{row.count}</td>
@@ -4295,31 +3914,31 @@ const SystemDashboard = () => {
 
           <div className="card">
             <div className="topline">
-              <h3 style={{ margin: 0 }}>Top parts used</h3>
-              <span className="muted small">Top {topParts.length}</span>
+              <h3 style={{ margin: 0 }}>Top parts by cost</h3>
+              <span className="muted small">Top {topPartRows.length}</span>
             </div>
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
                     <th>Part</th>
-                    <th>Qty</th>
+                    <th>Count</th>
                     <th>Cost (KES)</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {topParts.length === 0 ? (
+                  {topPartRows.length === 0 ? (
                     <tr>
                       <td colSpan={3} className="muted">
-                        No parts logged.
+                        No parts logged yet.
                       </td>
                     </tr>
                   ) : (
-                    topParts.map((row) => (
+                    topPartRows.map((row) => (
                       <tr key={row.part}>
                         <td>{row.part}</td>
                         <td>{row.count}</td>
-                        <td>{row.cost.toLocaleString()}</td>
+                        <td>{row.cost.toLocaleString('en-KE')}</td>
                       </tr>
                     ))
                   )}
@@ -4333,32 +3952,108 @@ const SystemDashboard = () => {
           <div className="card">
             <div className="topline">
               <h3 style={{ margin: 0 }}>Highest maintenance cost vehicles</h3>
-              <span className="muted small">Top {topCosts.length}</span>
+              <span className="muted small">Top {topCostAssets.length}</span>
             </div>
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>Plate</th>
+                    <th>Vehicle</th>
+                    <th>Asset type</th>
                     <th>Operator</th>
-                    <th>Total cost (KES)</th>
                     <th>Logs</th>
+                    <th>Cost (KES)</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {topCosts.length === 0 ? (
+                  {topCostAssets.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="muted">
-                        No maintenance costs captured.
+                      <td colSpan={5} className="muted">
+                        No maintenance cost data.
                       </td>
                     </tr>
                   ) : (
-                    topCosts.map((row) => (
-                      <tr key={row.shuttleId}>
-                        <td>{row.plate}</td>
-                        <td>{row.operatorLabel}</td>
-                        <td>{row.cost.toLocaleString()}</td>
+                    topCostAssets.map((row) => (
+                      <tr key={row.assetKey}>
+                        <td>{row.label}</td>
+                        <td>{row.assetType}</td>
+                        <td>{row.operatorLabel || '-'}</td>
                         <td>{row.count}</td>
+                        <td>{row.cost.toLocaleString('en-KE')}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Operators with highest maintenance costs</h3>
+              <span className="muted small">Top {topCostOperators.length}</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Operator</th>
+                    <th>Logs</th>
+                    <th>Cost (KES)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topCostOperators.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="muted">
+                        No operator cost data.
+                      </td>
+                    </tr>
+                  ) : (
+                    topCostOperators.map((row) => (
+                      <tr key={row.operatorId}>
+                        <td>{row.label}</td>
+                        <td>{row.count}</td>
+                        <td>{row.cost.toLocaleString('en-KE')}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section className="grid g2">
+          <div className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Highest downtime vehicles</h3>
+              <span className="muted small">Top {topDowntimeAssets.length}</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Vehicle</th>
+                    <th>Asset type</th>
+                    <th>Logs</th>
+                    <th>Downtime (days)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topDowntimeAssets.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="muted">
+                        No downtime data.
+                      </td>
+                    </tr>
+                  ) : (
+                    topDowntimeAssets.map((row) => (
+                      <tr key={row.assetKey}>
+                        <td>{row.label}</td>
+                        <td>{row.assetType}</td>
+                        <td>{row.count}</td>
+                        <td>{row.downtime}</td>
                       </tr>
                     ))
                   )}
@@ -4370,30 +4065,30 @@ const SystemDashboard = () => {
           <div className="card">
             <div className="topline">
               <h3 style={{ margin: 0 }}>Staff performance</h3>
-              <span className="muted small">Top {topStaff.length}</span>
+              <span className="muted small">Top {topStaffRows.length}</span>
             </div>
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
                     <th>Staff</th>
-                    <th>Issues handled</th>
+                    <th>Issues</th>
                     <th>Avg resolution (days)</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {topStaff.length === 0 ? (
+                  {topStaffRows.length === 0 ? (
                     <tr>
                       <td colSpan={3} className="muted">
                         No staff performance data.
                       </td>
                     </tr>
                   ) : (
-                    topStaff.map((row) => (
+                    topStaffRows.map((row) => (
                       <tr key={row.staffId}>
                         <td>{row.label}</td>
                         <td>{row.count}</td>
-                        <td>{row.avgResolutionDays === null ? '-' : row.avgResolutionDays.toFixed(1)}</td>
+                        <td>{row.avgResolutionDays ? row.avgResolutionDays.toFixed(1) : '-'}</td>
                       </tr>
                     ))
                   )}
@@ -4405,44 +4100,31 @@ const SystemDashboard = () => {
 
         <section className="card">
           <div className="topline">
-            <h3 style={{ margin: 0 }}>Repeat issues per shuttle</h3>
-            <span className="muted small">Shuttles with 2+ logs</span>
+            <h3 style={{ margin: 0 }}>Repeat issues (2+ logs)</h3>
+            <span className="muted small">Top {repeatAssetRows.length}</span>
           </div>
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Plate</th>
-                  <th>Issues logged</th>
-                  <th>Action</th>
+                  <th>Vehicle</th>
+                  <th>Asset type</th>
+                  <th>Logs</th>
                 </tr>
               </thead>
               <tbody>
-                {repeatShuttles.length === 0 ? (
+                {repeatAssetRows.length === 0 ? (
                   <tr>
                     <td colSpan={3} className="muted">
                       No repeat issues yet.
                     </td>
                   </tr>
                 ) : (
-                  repeatShuttles.map((row) => (
-                    <tr key={row.shuttleId}>
-                      <td>{row.plate}</td>
+                  repeatAssetRows.map((row) => (
+                    <tr key={row.assetKey}>
+                      <td>{row.label}</td>
+                      <td>{row.assetType}</td>
                       <td>{row.count}</td>
-                      <td>
-                        <button
-                          className="btn ghost"
-                          type="button"
-                          onClick={() =>
-                            setMaintenanceFilters((f) => ({
-                              ...f,
-                              shuttle_id: row.shuttleId,
-                            }))
-                          }
-                        >
-                          View logs
-                        </button>
-                      </td>
                     </tr>
                   ))
                 )}
@@ -4450,421 +4132,7 @@ const SystemDashboard = () => {
             </table>
           </div>
         </section>
-
-        <section className="card">
-          <div className="topline">
-            <h3 style={{ margin: 0 }}>Maintenance logs</h3>
-            <span className="muted small">
-              Showing {listRows.length} record{listRows.length === 1 ? '' : 's'}
-            </span>
-          </div>
-          <div className="row" style={{ gap: 12, flexWrap: 'wrap', marginTop: 12 }}>
-            <label className="muted small">
-              Operator
-              <select
-                value={maintenanceFilters.operator_id}
-                onChange={(e) => setMaintenanceFilters((f) => ({ ...f, operator_id: e.target.value }))}
-                style={{ padding: 10, minWidth: 200 }}
-              >
-                <option value="">All operators</option>
-                {operatorOptions.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="muted small">
-              Shuttle
-              <select
-                value={maintenanceFilters.shuttle_id}
-                onChange={(e) => setMaintenanceFilters((f) => ({ ...f, shuttle_id: e.target.value }))}
-                style={{ padding: 10, minWidth: 220 }}
-              >
-                <option value="">All shuttles</option>
-                {shuttleOptions.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="muted small">
-              Category
-              <select
-                value={maintenanceFilters.category}
-                onChange={(e) => setMaintenanceFilters((f) => ({ ...f, category: e.target.value }))}
-                style={{ padding: 10 }}
-              >
-                <option value="">All</option>
-                {MAINTENANCE_CATEGORIES.map((category) => (
-                  <option key={category} value={category}>
-                    {category}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="muted small">
-              Status
-              <select
-                value={maintenanceFilters.status}
-                onChange={(e) => setMaintenanceFilters((f) => ({ ...f, status: e.target.value }))}
-                style={{ padding: 10 }}
-              >
-                <option value="">All</option>
-                {MAINTENANCE_STATUS_OPTIONS.map((status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="muted small">
-              From
-              <input
-                className="input"
-                type="date"
-                value={maintenanceFilters.from}
-                onChange={(e) => setMaintenanceFilters((f) => ({ ...f, from: e.target.value }))}
-              />
-            </label>
-            <label className="muted small">
-              To
-              <input
-                className="input"
-                type="date"
-                value={maintenanceFilters.to}
-                onChange={(e) => setMaintenanceFilters((f) => ({ ...f, to: e.target.value }))}
-              />
-            </label>
-            <button
-              className="btn ghost"
-              type="button"
-              onClick={() =>
-                setMaintenanceFilters({
-                  operator_id: '',
-                  shuttle_id: '',
-                  status: '',
-                  category: '',
-                  from: '',
-                  to: '',
-                })
-              }
-            >
-              Clear filters
-            </button>
-          </div>
-          <div className="table-wrap" style={{ marginTop: 12 }}>
-            <table>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Shuttle</th>
-                  <th>Operator</th>
-                  <th>Category</th>
-                  <th>Status</th>
-                  <th>Cost</th>
-                  <th>Downtime</th>
-                  <th>Handled by</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {listRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={9} className="muted">
-                      No maintenance logs found.
-                    </td>
-                  </tr>
-                ) : (
-                  listRows.map((row) => {
-                    const isEditing = maintenanceEditId && row.id === maintenanceEditId
-                    const shuttleId = row.shuttle_id || row.shuttle?.id || ''
-                    const shuttle = shuttlesById.get(shuttleId) || null
-                    const plate = row.shuttle?.plate || shuttle?.plate || shuttleId || '-'
-                    const operatorId = row.operator_id || row.operator?.id || shuttle?.operator_id || ''
-                    const operatorLabel = operatorId ? operatorLabelFromParts(operatorId, row.operator || null) : '-'
-                    const handledBy = row.handled_by || systemStaff.find((s) => s.id === row.handled_by_staff_id) || null
-                    return (
-                      <Fragment key={row.id || `${row.shuttle_id}-${row.occurred_at}`}>
-                        <tr>
-                          <td>{row.occurred_at ? new Date(row.occurred_at).toLocaleDateString('en-KE') : '-'}</td>
-                          <td>{plate}</td>
-                          <td>{operatorLabel}</td>
-                          <td>{row.issue_category || '-'}</td>
-                          <td>{row.status || '-'}</td>
-                          <td>{row.total_cost_kes ? row.total_cost_kes.toLocaleString() : '-'}</td>
-                          <td>{row.downtime_days ?? '-'}</td>
-                          <td>{formatStaffLabel(handledBy)}</td>
-                          <td>
-                            <button className="btn ghost" type="button" onClick={() => startMaintenanceEdit(row)}>
-                              {isEditing ? 'Close' : 'Edit'}
-                            </button>
-                          </td>
-                        </tr>
-                        {isEditing ? (
-                          <tr>
-                            <td colSpan={9}>
-                              <div className="card" style={{ margin: '6px 0' }}>
-                                <div className="topline">
-                                  <h3 style={{ margin: 0 }}>Edit maintenance log</h3>
-                                  <span className="muted small">{row.id}</span>
-                                </div>
-                                {maintenanceEditError ? <div className="err">Update error: {maintenanceEditError}</div> : null}
-                                <div className="grid g2">
-                                  <label className="muted small">
-                                    Shuttle *
-                                    <select
-                                      value={maintenanceEditForm.shuttle_id}
-                                      onChange={(e) => {
-                                        const nextId = e.target.value
-                                        const shuttleRow = shuttlesById.get(nextId)
-                                        const operatorId = shuttleRow?.operator_id || shuttleRow?.operator?.id || ''
-                                        setMaintenanceEditForm((f) => ({
-                                          ...f,
-                                          shuttle_id: nextId,
-                                          operator_id: operatorId,
-                                        }))
-                                      }}
-                                      style={{ padding: 10 }}
-                                    >
-                                      <option value="">Select shuttle</option>
-                                      {shuttleOptions.map((option) => (
-                                        <option key={option.id} value={option.id}>
-                                          {option.label}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </label>
-                                  <label className="muted small">
-                                    Issue category *
-                                    <select
-                                      value={maintenanceEditForm.issue_category}
-                                      onChange={(e) =>
-                                        setMaintenanceEditForm((f) => ({ ...f, issue_category: e.target.value }))
-                                      }
-                                      style={{ padding: 10 }}
-                                    >
-                                      <option value="">Select category</option>
-                                      {MAINTENANCE_CATEGORIES.map((category) => (
-                                        <option key={category} value={category}>
-                                          {category}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </label>
-                                  <label className="muted small">
-                                    Status *
-                                    <select
-                                      value={maintenanceEditForm.status}
-                                      onChange={(e) => setMaintenanceEditForm((f) => ({ ...f, status: e.target.value }))}
-                                      style={{ padding: 10 }}
-                                    >
-                                      {MAINTENANCE_STATUS_OPTIONS.map((status) => (
-                                        <option key={status} value={status}>
-                                          {status}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </label>
-                                  <label className="muted small">
-                                    Handled by staff
-                                    <select
-                                      value={maintenanceEditForm.handled_by_staff_id}
-                                      onChange={(e) =>
-                                        setMaintenanceEditForm((f) => ({ ...f, handled_by_staff_id: e.target.value }))
-                                      }
-                                      style={{ padding: 10 }}
-                                    >
-                                      <option value="">Optional</option>
-                                      {staffOptions.map((option) => (
-                                        <option key={option.id} value={option.id}>
-                                          {option.label}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </label>
-                                  <label className="muted small">
-                                    Occurred at
-                                    <input
-                                      className="input"
-                                      type="date"
-                                      value={maintenanceEditForm.occurred_at}
-                                      onChange={(e) =>
-                                        setMaintenanceEditForm((f) => ({ ...f, occurred_at: e.target.value }))
-                                      }
-                                    />
-                                  </label>
-                                  <label className="muted small">
-                                    Resolved at
-                                    <input
-                                      className="input"
-                                      type="date"
-                                      value={maintenanceEditForm.resolved_at}
-                                      onChange={(e) =>
-                                        setMaintenanceEditForm((f) => ({ ...f, resolved_at: e.target.value }))
-                                      }
-                                    />
-                                  </label>
-                                  <label className="muted small">
-                                    Next service due
-                                    <input
-                                      className="input"
-                                      type="date"
-                                      value={maintenanceEditForm.next_service_due}
-                                      onChange={(e) =>
-                                        setMaintenanceEditForm((f) => ({ ...f, next_service_due: e.target.value }))
-                                      }
-                                    />
-                                  </label>
-                                  <label className="muted small">
-                                    Downtime days
-                                    <input
-                                      className="input"
-                                      type="number"
-                                      min={0}
-                                      value={maintenanceEditForm.downtime_days}
-                                      onChange={(e) =>
-                                        setMaintenanceEditForm((f) => ({ ...f, downtime_days: e.target.value }))
-                                      }
-                                    />
-                                  </label>
-                                  <label className="muted small">
-                                    Total cost (KES)
-                                    <input
-                                      className="input"
-                                      type="number"
-                                      min={0}
-                                      value={maintenanceEditForm.total_cost_kes}
-                                      onChange={(e) =>
-                                        setMaintenanceEditForm((f) => ({ ...f, total_cost_kes: e.target.value }))
-                                      }
-                                    />
-                                  </label>
-                                </div>
-                                <label className="muted small" style={{ display: 'block', marginTop: 10 }}>
-                                  Issue description *
-                                  <textarea
-                                    className="input"
-                                    value={maintenanceEditForm.issue_description}
-                                    onChange={(e) =>
-                                      setMaintenanceEditForm((f) => ({ ...f, issue_description: e.target.value }))
-                                    }
-                                    style={{ minHeight: 80 }}
-                                  />
-                                </label>
-                                <label className="muted small" style={{ display: 'block', marginTop: 10 }}>
-                                  Notes
-                                  <textarea
-                                    className="input"
-                                    value={maintenanceEditForm.notes}
-                                    onChange={(e) => setMaintenanceEditForm((f) => ({ ...f, notes: e.target.value }))}
-                                    style={{ minHeight: 70 }}
-                                  />
-                                </label>
-                                <div style={{ marginTop: 10 }}>
-                                  <h4 style={{ margin: '0 0 6px' }}>Parts used</h4>
-                                  {maintenanceEditForm.parts_used.map((part, idx) => (
-                                    <div
-                                      key={`edit-part-${idx}`}
-                                      className="row"
-                                      style={{ gap: 8, flexWrap: 'wrap', marginBottom: 8 }}
-                                    >
-                                      <input
-                                        className="input"
-                                        placeholder="Part name"
-                                        value={part.name}
-                                        onChange={(e) =>
-                                          setMaintenanceEditForm((f) => {
-                                            const next = [...f.parts_used]
-                                            next[idx] = { ...next[idx], name: e.target.value }
-                                            return { ...f, parts_used: next }
-                                          })
-                                        }
-                                        style={{ minWidth: 160 }}
-                                      />
-                                      <input
-                                        className="input"
-                                        type="number"
-                                        min={0}
-                                        placeholder="Qty"
-                                        value={part.qty}
-                                        onChange={(e) =>
-                                          setMaintenanceEditForm((f) => {
-                                            const next = [...f.parts_used]
-                                            next[idx] = { ...next[idx], qty: e.target.value }
-                                            return { ...f, parts_used: next }
-                                          })
-                                        }
-                                        style={{ width: 100 }}
-                                      />
-                                      <input
-                                        className="input"
-                                        type="number"
-                                        min={0}
-                                        placeholder="Cost"
-                                        value={part.cost}
-                                        onChange={(e) =>
-                                          setMaintenanceEditForm((f) => {
-                                            const next = [...f.parts_used]
-                                            next[idx] = { ...next[idx], cost: e.target.value }
-                                            return { ...f, parts_used: next }
-                                          })
-                                        }
-                                        style={{ width: 120 }}
-                                      />
-                                      {maintenanceEditForm.parts_used.length > 1 ? (
-                                        <button
-                                          className="btn ghost"
-                                          type="button"
-                                          onClick={() =>
-                                            setMaintenanceEditForm((f) => ({
-                                              ...f,
-                                              parts_used: f.parts_used.filter((_, partIdx) => partIdx !== idx),
-                                            }))
-                                          }
-                                        >
-                                          Remove
-                                        </button>
-                                      ) : null}
-                                    </div>
-                                  ))}
-                                  <button
-                                    className="btn ghost"
-                                    type="button"
-                                    onClick={() =>
-                                      setMaintenanceEditForm((f) => ({
-                                        ...f,
-                                        parts_used: [...f.parts_used, { name: '', qty: '', cost: '' }],
-                                      }))
-                                    }
-                                  >
-                                    Add part
-                                  </button>
-                                </div>
-                                <div className="row" style={{ marginTop: 8 }}>
-                                  <button className="btn" type="button" onClick={saveMaintenanceEdit}>
-                                    Save changes
-                                  </button>
-                                  <button className="btn ghost" type="button" onClick={resetMaintenanceEditState}>
-                                    Close
-                                  </button>
-                                  <span className="muted small">{maintenanceEditMsg}</span>
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                        ) : null}
-                      </Fragment>
-                    )
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        </>
+      </>
     )
   }
 
@@ -5333,23 +4601,6 @@ const SystemDashboard = () => {
                             <div className="row" style={{ gap: 6 }}>
                               <button className="btn ghost" type="button" onClick={() => startShuttleEdit(row)}>
                                 {isEditing ? 'Close' : 'Edit'}
-                              </button>
-                              <button
-                                className="btn ghost"
-                                type="button"
-                                onClick={() => {
-                                  const shuttleId = row.id || ''
-                                  if (!shuttleId) return
-                                  setMaintenanceFilters((f) => ({
-                                    ...f,
-                                    shuttle_id: shuttleId,
-                                    operator_id: row.operator_id || row.operator?.id || '',
-                                  }))
-                                  setActiveTab('shuttle_care')
-                                }}
-                                disabled={!row.id}
-                              >
-                                Care
                               </button>
                             </div>
                           </td>
@@ -6865,7 +6116,6 @@ const SystemDashboard = () => {
       ) : null}
 
       {activeTab === 'analytics' ? renderAnalyticsTab() : null}
-      {activeTab === 'shuttle_care' ? renderShuttleCareTab() : null}
       {activeTab === 'saccos' ? (
         <>
           <section className="card">

@@ -2,6 +2,8 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import DashboardShell from '../components/DashboardShell'
 import { authFetch } from '../lib/auth'
 import { getOperatorConfig, normalizeOperatorType } from '../lib/operatorConfig'
+import VehicleCarePage from '../modules/vehicleCare/VehicleCarePage'
+import { fetchAccessGrants, saveAccessGrant, type AccessGrant } from '../modules/vehicleCare/vehicleCare.api'
 
 type SaccoOption = {
   sacco_id: string
@@ -9,6 +11,8 @@ type SaccoOption = {
   operator_type?: string | null
   org_type?: string | null
   operatorType?: string | null
+  role?: string | null
+  manages_fleet?: boolean | null
 }
 type Matatu = {
   id?: string
@@ -117,6 +121,7 @@ type SaccoTabId =
   | 'loans'
   | 'staff'
   | 'routes'
+  | 'vehicle_care'
 
 function fmtKES(v: number | undefined | null) {
   return `KES ${(Number(v || 0)).toLocaleString('en-KE')}`
@@ -185,6 +190,19 @@ export default function SaccoDashboard() {
   })
   const [staffEditMsg, setStaffEditMsg] = useState('')
   const [staffEditError, setStaffEditError] = useState<string | null>(null)
+  const [accessGrants, setAccessGrants] = useState<AccessGrant[]>([])
+  const [accessGrantMsg, setAccessGrantMsg] = useState('')
+  const [accessGrantError, setAccessGrantError] = useState<string | null>(null)
+  const [myAccessGrants, setMyAccessGrants] = useState<AccessGrant[]>([])
+  const [staffAccessForm, setStaffAccessForm] = useState({
+    role: 'STAFF',
+    can_manage_staff: false,
+    can_manage_vehicles: false,
+    can_manage_vehicle_care: false,
+    can_manage_compliance: false,
+    can_view_analytics: true,
+    is_active: true,
+  })
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -239,6 +257,21 @@ export default function SaccoDashboard() {
   }, [saccos, currentSacco])
 
   const operatorConfig = useMemo(() => getOperatorConfig(operatorType), [operatorType])
+  const currentOperator = useMemo(() => saccos.find((s) => s.sacco_id === currentSacco) || null, [saccos, currentSacco])
+  const operatorRole = (currentOperator?.role || '').toString().toUpperCase()
+  const isOperatorAdmin = operatorRole === 'SACCO' || operatorRole === 'SACCO_ADMIN'
+  const operatorManagesFleet = currentOperator?.manages_fleet === true
+  const myOperatorGrant = useMemo(
+    () =>
+      myAccessGrants.find(
+        (grant) => grant.scope_type === 'OPERATOR' && String(grant.scope_id || '') === String(currentSacco || ''),
+      ) || null,
+    [myAccessGrants, currentSacco],
+  )
+  const canManageVehicleCare = Boolean((isOperatorAdmin && operatorManagesFleet) || myOperatorGrant?.can_manage_vehicle_care)
+  const canManageCompliance = Boolean((isOperatorAdmin && operatorManagesFleet) || myOperatorGrant?.can_manage_compliance)
+  const canViewVehicleCareAnalytics =
+    isOperatorAdmin || myOperatorGrant?.can_view_analytics === undefined || myOperatorGrant?.can_view_analytics === true
   const memberLabel = operatorConfig.memberLabel
   const memberIdLabel = operatorConfig.memberIdLabel
   const memberOwnerLabel = operatorConfig.memberOwnerLabel
@@ -258,6 +291,7 @@ export default function SaccoDashboard() {
       { id: 'loans', label: 'Loans' },
       { id: 'staff', label: 'Staff' },
       { id: 'routes', label: routesLabel },
+      { id: 'vehicle_care', label: 'Vehicle Care' },
     ],
     [feeLabel, memberLabel, routesLabel],
   )
@@ -273,6 +307,14 @@ export default function SaccoDashboard() {
     })
     return map
   }, [matatus])
+
+  const grantsByUserId = useMemo(() => {
+    const map = new Map<string, AccessGrant>()
+    accessGrants.forEach((grant) => {
+      if (grant.user_id) map.set(grant.user_id, grant)
+    })
+    return map
+  }, [accessGrants])
 
   const routeById = useMemo(() => {
     const map = new Map<string, SaccoRoute>()
@@ -359,6 +401,10 @@ export default function SaccoDashboard() {
   }, [])
 
   useEffect(() => {
+    void loadMyAccessGrants()
+  }, [])
+
+  useEffect(() => {
     if (!currentSacco) return
     async function load() {
       setLoading(true)
@@ -386,6 +432,7 @@ export default function SaccoDashboard() {
           loadNotifications(),
           loadLoans(),
         ])
+        await loadAccessGrants()
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load data')
       } finally {
@@ -630,6 +677,26 @@ export default function SaccoDashboard() {
     }
   }
 
+  async function loadAccessGrants() {
+    if (!currentSacco) return
+    setAccessGrantError(null)
+    try {
+      const items = await fetchAccessGrants({ scope_type: 'OPERATOR', scope_id: currentSacco, all: true })
+      setAccessGrants(items)
+    } catch (err) {
+      setAccessGrantError(err instanceof Error ? err.message : 'Failed to load access grants')
+    }
+  }
+
+  async function loadMyAccessGrants() {
+    try {
+      const items = await fetchAccessGrants()
+      setMyAccessGrants(items)
+    } catch (err) {
+      setMyAccessGrants([])
+    }
+  }
+
   async function createStaff() {
     if (!currentSacco) return
     if (!staffForm.name.trim()) {
@@ -654,6 +721,7 @@ export default function SaccoDashboard() {
       setStaffMsg('Staff saved')
       setStaffForm({ name: '', phone: '', email: '', role: 'SACCO_STAFF', password: '' })
       await reloadStaff()
+      await loadAccessGrants()
     } catch (err) {
       setStaffMsg('')
       setStaffError(err instanceof Error ? err.message : 'Failed to save staff')
@@ -680,6 +748,18 @@ export default function SaccoDashboard() {
       email: row.email || '',
       role: normalizedRole,
     })
+    const grant = row.user_id ? grantsByUserId.get(row.user_id) : null
+    setStaffAccessForm({
+      role: grant?.role || 'STAFF',
+      can_manage_staff: !!grant?.can_manage_staff,
+      can_manage_vehicles: !!grant?.can_manage_vehicles,
+      can_manage_vehicle_care: !!grant?.can_manage_vehicle_care,
+      can_manage_compliance: !!grant?.can_manage_compliance,
+      can_view_analytics: grant?.can_view_analytics !== false,
+      is_active: grant?.is_active !== false,
+    })
+    setAccessGrantMsg('')
+    setAccessGrantError(null)
   }
 
   async function saveStaffEdit() {
@@ -704,9 +784,39 @@ export default function SaccoDashboard() {
       })
       setStaffEditMsg('Staff updated')
       await reloadStaff()
+      await loadAccessGrants()
     } catch (err) {
       setStaffEditMsg('')
       setStaffEditError(err instanceof Error ? err.message : 'Update failed')
+    }
+  }
+
+  async function saveStaffAccess(userId?: string | null) {
+    if (!currentSacco) return
+    if (!userId) {
+      setAccessGrantMsg('Staff login not linked')
+      return
+    }
+    setAccessGrantMsg('Saving access...')
+    setAccessGrantError(null)
+    try {
+      await saveAccessGrant({
+        scope_type: 'OPERATOR',
+        scope_id: currentSacco,
+        user_id: userId,
+        role: staffAccessForm.role,
+        can_manage_staff: staffAccessForm.can_manage_staff,
+        can_manage_vehicles: staffAccessForm.can_manage_vehicles,
+        can_manage_vehicle_care: staffAccessForm.can_manage_vehicle_care,
+        can_manage_compliance: staffAccessForm.can_manage_compliance,
+        can_view_analytics: staffAccessForm.can_view_analytics,
+        is_active: staffAccessForm.is_active,
+      })
+      setAccessGrantMsg('Access updated')
+      await loadAccessGrants()
+    } catch (err) {
+      setAccessGrantMsg('')
+      setAccessGrantError(err instanceof Error ? err.message : 'Failed to save access')
     }
   }
 
@@ -720,6 +830,7 @@ export default function SaccoDashboard() {
         headers: { Accept: 'application/json' },
       })
       await reloadStaff()
+      await loadAccessGrants()
     } catch (err) {
       setStaffError(err instanceof Error ? err.message : 'Failed to remove staff')
     }
@@ -1992,6 +2103,24 @@ export default function SaccoDashboard() {
         </>
       ) : null}
 
+      {activeTab === 'vehicle_care' ? (
+        currentSacco ? (
+          <VehicleCarePage
+            context={{
+              scope_type: 'OPERATOR',
+              scope_id: currentSacco,
+              can_manage_vehicle_care: canManageVehicleCare,
+              can_manage_compliance: canManageCompliance,
+              can_view_analytics: canViewVehicleCareAnalytics,
+            }}
+          />
+        ) : (
+          <section className="card">
+            <div className="muted">Select an operator to view vehicle care.</div>
+          </section>
+        )
+      ) : null}
+
       {activeTab === 'loans' ? (
         <>
         <section className="card">
@@ -2591,6 +2720,103 @@ export default function SaccoDashboard() {
                                     <option value="SACCO_ADMIN">SACCO_ADMIN</option>
                                   </select>
                                 </label>
+                              </div>
+                              <div className="card" style={{ margin: '10px 0 0', boxShadow: 'none' }}>
+                                <div className="topline">
+                                  <h4 style={{ margin: 0 }}>Vehicle Care access</h4>
+                                  <span className="muted small">Grant permissions for staff dashboards</span>
+                                </div>
+                                {accessGrantError ? <div className="err">Access error: {accessGrantError}</div> : null}
+                                {!s.user_id ? (
+                                  <div className="muted small">No login linked to this staff profile.</div>
+                                ) : (
+                                  <>
+                                    <div className="grid g2" style={{ marginTop: 6 }}>
+                                      <label className="muted small">
+                                        Access role
+                                        <select
+                                          value={staffAccessForm.role}
+                                          onChange={(e) => setStaffAccessForm((f) => ({ ...f, role: e.target.value }))}
+                                          style={{ padding: 10 }}
+                                        >
+                                          <option value="STAFF">STAFF</option>
+                                          <option value="MANAGER">MANAGER</option>
+                                          <option value="ADMIN">ADMIN</option>
+                                        </select>
+                                      </label>
+                                      <label className="muted small">
+                                        <input
+                                          type="checkbox"
+                                          checked={staffAccessForm.is_active}
+                                          onChange={(e) => setStaffAccessForm((f) => ({ ...f, is_active: e.target.checked }))}
+                                          style={{ marginRight: 6 }}
+                                        />
+                                        Access active
+                                      </label>
+                                      <label className="muted small">
+                                        <input
+                                          type="checkbox"
+                                          checked={staffAccessForm.can_manage_vehicle_care}
+                                          onChange={(e) =>
+                                            setStaffAccessForm((f) => ({ ...f, can_manage_vehicle_care: e.target.checked }))
+                                          }
+                                          style={{ marginRight: 6 }}
+                                        />
+                                        Manage Vehicle Care
+                                      </label>
+                                      <label className="muted small">
+                                        <input
+                                          type="checkbox"
+                                          checked={staffAccessForm.can_manage_compliance}
+                                          onChange={(e) =>
+                                            setStaffAccessForm((f) => ({ ...f, can_manage_compliance: e.target.checked }))
+                                          }
+                                          style={{ marginRight: 6 }}
+                                        />
+                                        Manage compliance dates
+                                      </label>
+                                      <label className="muted small">
+                                        <input
+                                          type="checkbox"
+                                          checked={staffAccessForm.can_manage_vehicles}
+                                          onChange={(e) =>
+                                            setStaffAccessForm((f) => ({ ...f, can_manage_vehicles: e.target.checked }))
+                                          }
+                                          style={{ marginRight: 6 }}
+                                        />
+                                        Manage vehicles
+                                      </label>
+                                      <label className="muted small">
+                                        <input
+                                          type="checkbox"
+                                          checked={staffAccessForm.can_manage_staff}
+                                          onChange={(e) =>
+                                            setStaffAccessForm((f) => ({ ...f, can_manage_staff: e.target.checked }))
+                                          }
+                                          style={{ marginRight: 6 }}
+                                        />
+                                        Manage staff access
+                                      </label>
+                                      <label className="muted small">
+                                        <input
+                                          type="checkbox"
+                                          checked={staffAccessForm.can_view_analytics}
+                                          onChange={(e) =>
+                                            setStaffAccessForm((f) => ({ ...f, can_view_analytics: e.target.checked }))
+                                          }
+                                          style={{ marginRight: 6 }}
+                                        />
+                                        View analytics
+                                      </label>
+                                    </div>
+                                    <div className="row" style={{ marginTop: 8, gap: 8 }}>
+                                      <button className="btn" type="button" onClick={() => saveStaffAccess(s.user_id)}>
+                                        Save access
+                                      </button>
+                                      <span className="muted small">{accessGrantMsg}</span>
+                                    </div>
+                                  </>
+                                )}
                               </div>
                               <div className="row" style={{ marginTop: 8 }}>
                                 <button className="btn" type="button" onClick={saveStaffEdit}>

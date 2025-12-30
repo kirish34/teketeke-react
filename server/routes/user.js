@@ -53,7 +53,7 @@ async function getSaccoDetails(saccoId) {
   const { data, error } = await supabaseAdmin
     .from('saccos')
     .select(
-      'id,name,display_name,legal_name,registration_no,contact_name,contact_phone,contact_email,default_till,settlement_bank_name,settlement_bank_account_number,org_type,operator_type,fee_label,savings_enabled,loans_enabled,routes_enabled,status',
+      'id,name,display_name,legal_name,registration_no,contact_name,contact_phone,contact_email,default_till,settlement_bank_name,settlement_bank_account_number,org_type,operator_type,fee_label,savings_enabled,loans_enabled,routes_enabled,status,manages_fleet',
     )
     .eq('id', saccoId)
     .maybeSingle();
@@ -111,6 +111,296 @@ async function ensureMatatuAccess(userId, requestedId) {
     return { allowed: true, ctx, matatu };
   }
   return { allowed: false, ctx, matatu };
+}
+
+function normalizeScopeType(value) {
+  const raw = String(value || '').trim().toUpperCase();
+  if (raw === 'OPERATOR' || raw === 'OWNER') return raw;
+  return null;
+}
+
+function normalizeAssetType(value) {
+  const raw = String(value || '').trim().toUpperCase();
+  if (raw === 'SHUTTLE' || raw === 'TAXI' || raw === 'BODA') return raw;
+  return null;
+}
+
+function assetTypeFromVehicleType(vehicleType) {
+  const raw = String(vehicleType || '').trim().toUpperCase();
+  if (raw === 'TAXI') return 'TAXI';
+  if (raw === 'BODA' || raw === 'BODABODA') return 'BODA';
+  return 'SHUTTLE';
+}
+
+function normalizeDateBounds(fromRaw, toRaw) {
+  const from = fromRaw ? new Date(fromRaw) : null;
+  const to = toRaw ? new Date(toRaw) : null;
+  const dateOnly = (value) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+
+  if (from && Number.isNaN(from.getTime())) return { from: null, to: null };
+  if (to && Number.isNaN(to.getTime())) return { from: null, to: null };
+
+  if (from && dateOnly(fromRaw)) from.setHours(0, 0, 0, 0);
+  if (to && dateOnly(toRaw)) to.setHours(23, 59, 59, 999);
+
+  return { from, to };
+}
+
+async function getAccessGrant(userId, scopeType, scopeId) {
+  if (!userId || !scopeType || !scopeId) return null;
+  const { data, error } = await supabaseAdmin
+    .from('access_grants')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('scope_type', scopeType)
+    .eq('scope_id', scopeId)
+    .eq('is_active', true)
+    .maybeSingle();
+  if (error && error.code !== PG_ROW_NOT_FOUND) throw error;
+  return data || null;
+}
+
+async function getAccessGrantsForScope(scopeType, scopeId) {
+  if (!scopeType || !scopeId) return [];
+  const { data, error } = await supabaseAdmin
+    .from('access_grants')
+    .select('*')
+    .eq('scope_type', scopeType)
+    .eq('scope_id', scopeId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+function mapPermissionFlags(grant) {
+  return {
+    can_manage_staff: !!grant?.can_manage_staff,
+    can_manage_vehicles: !!grant?.can_manage_vehicles,
+    can_manage_vehicle_care: !!grant?.can_manage_vehicle_care,
+    can_manage_compliance: !!grant?.can_manage_compliance,
+    can_view_analytics: grant?.can_view_analytics !== false,
+  };
+}
+
+async function resolveVehicleCareScope(userId, scopeType, scopeId) {
+  const ctx = await getSaccoContext(userId);
+  const roleRow = ctx.role || (await getRoleRow(userId));
+  const role = String(roleRow?.role || '').toUpperCase();
+  const grant = await getAccessGrant(userId, scopeType, scopeId);
+
+  const isSaccoAdmin = role === 'SACCO' || role === 'SACCO_ADMIN';
+  const isOwnerRole = role === 'OWNER' || role === 'TAXI' || role === 'BODA';
+
+  if (scopeType === 'OPERATOR') {
+    const allowedBySacco = ctx.saccoId && String(ctx.saccoId) === String(scopeId);
+    const allowed = allowedBySacco ? isSaccoAdmin || !!grant : !!grant;
+    if (!allowed) return { allowed: false, ctx, role, grant: null, permissions: mapPermissionFlags(null) };
+    const sacco = await getSaccoDetails(scopeId);
+    const managesFleet = sacco?.manages_fleet === true;
+    const canManageFleet = (isSaccoAdmin && managesFleet) || grant?.can_manage_vehicle_care === true;
+    const canManageCompliance = (isSaccoAdmin && managesFleet) || grant?.can_manage_compliance === true;
+    const canManageStaff = isSaccoAdmin || grant?.can_manage_staff === true;
+    const canManageVehicles = isSaccoAdmin || grant?.can_manage_vehicles === true;
+    const canViewAnalytics = grant ? grant.can_view_analytics !== false : true;
+    return {
+      allowed: true,
+      ctx,
+      role,
+      grant,
+      permissions: {
+        can_manage_staff: canManageStaff,
+        can_manage_vehicles: canManageVehicles,
+        can_manage_vehicle_care: canManageFleet,
+        can_manage_compliance: canManageCompliance,
+        can_view_analytics: canViewAnalytics,
+      },
+    };
+  }
+
+  if (scopeType === 'OWNER') {
+    const ownerMatatuId = ctx.matatu?.id || roleRow?.matatu_id || null;
+    const allowedByOwner = ownerMatatuId && String(ownerMatatuId) === String(scopeId);
+    const allowed = isOwnerRole ? allowedByOwner : allowedByOwner && !!grant;
+    if (!allowed) return { allowed: false, ctx, role, grant: null, permissions: mapPermissionFlags(null) };
+    const ownerCanManage = isOwnerRole ? true : grant?.can_manage_vehicle_care === true;
+    const ownerCanManageCompliance = isOwnerRole ? true : grant?.can_manage_compliance === true;
+    const ownerCanManageStaff = isOwnerRole ? true : grant?.can_manage_staff === true;
+    const canViewAnalytics = grant ? grant.can_view_analytics !== false : true;
+    return {
+      allowed: true,
+      ctx,
+      role,
+      grant,
+      permissions: {
+        can_manage_staff: ownerCanManageStaff,
+        can_manage_vehicles: isOwnerRole ? true : grant?.can_manage_vehicles === true,
+        can_manage_vehicle_care: ownerCanManage,
+        can_manage_compliance: ownerCanManageCompliance,
+        can_view_analytics: canViewAnalytics,
+      },
+    };
+  }
+
+  return { allowed: false, ctx, role, grant: null, permissions: mapPermissionFlags(null) };
+}
+
+async function loadOwnerMatatus(scopeId) {
+  const base = await getMatatu(scopeId);
+  if (!base) return [];
+
+  let query = supabaseAdmin.from('matatus').select('*').order('created_at', { ascending: false });
+  if (base.owner_phone) {
+    query = query.eq('owner_phone', base.owner_phone);
+  } else if (base.owner_name) {
+    query = query.eq('owner_name', base.owner_name);
+  } else {
+    query = query.eq('id', base.id);
+  }
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || [];
+}
+
+function mapAssetRow(row, type) {
+  if (!row) return null;
+  if (type === 'SHUTTLE') {
+    return {
+      asset_type: 'SHUTTLE',
+      asset_id: row.id,
+      operator_id: row.operator_id || row.sacco_id || null,
+      label: row.plate || row.number_plate || row.id,
+      plate: row.plate || row.number_plate || null,
+      make: row.make || null,
+      model: row.model || null,
+      year: row.year || null,
+      vehicle_type: row.vehicle_type || null,
+      vehicle_type_other: row.vehicle_type_other || null,
+      seat_capacity: row.seat_capacity || null,
+      load_capacity_kg: row.load_capacity_kg || null,
+      tlb_expiry_date: row.tlb_expiry_date || null,
+      insurance_expiry_date: row.insurance_expiry_date || null,
+      inspection_expiry_date: row.inspection_expiry_date || null,
+    };
+  }
+  if (type === 'TAXI') {
+    return {
+      asset_type: 'TAXI',
+      asset_id: row.id,
+      operator_id: row.operator_id || row.sacco_id || null,
+      label: row.plate || row.number_plate || row.id,
+      plate: row.plate || row.number_plate || null,
+      make: row.make || null,
+      model: row.model || null,
+      year: row.year || null,
+      seat_capacity: row.seat_capacity || null,
+      insurance_expiry_date: row.insurance_expiry_date || null,
+      license_expiry_date: row.psv_badge_expiry_date || row.license_expiry_date || null,
+    };
+  }
+  if (type === 'BODA') {
+    return {
+      asset_type: 'BODA',
+      asset_id: row.id,
+      operator_id: row.operator_id || row.sacco_id || null,
+      label: row.identifier || row.plate || row.number_plate || row.id,
+      identifier: row.identifier || row.number_plate || null,
+      make: row.make || null,
+      model: row.model || null,
+      year: row.year || null,
+      insurance_expiry_date: row.insurance_expiry_date || null,
+      license_expiry_date: row.license_expiry_date || null,
+    };
+  }
+  return null;
+}
+
+async function loadAssetsForScope(scopeType, scopeId, assetType) {
+  const wantAll = !assetType || assetType === 'ALL';
+  const wantShuttle = wantAll || assetType === 'SHUTTLE';
+  const wantTaxi = wantAll || assetType === 'TAXI';
+  const wantBoda = wantAll || assetType === 'BODA';
+  const items = [];
+
+  if (scopeType === 'OPERATOR') {
+    if (wantShuttle) {
+      const { data, error } = await supabaseAdmin
+        .from('shuttles')
+        .select(
+          'id,plate,make,model,year,operator_id,vehicle_type,vehicle_type_other,seat_capacity,load_capacity_kg,tlb_expiry_date,insurance_expiry_date,inspection_expiry_date',
+        )
+        .eq('operator_id', scopeId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      (data || []).forEach((row) => {
+        const mapped = mapAssetRow(row, 'SHUTTLE');
+        if (mapped) items.push(mapped);
+      });
+    }
+
+    const { data: matatuRows, error: matatuErr } = await supabaseAdmin
+      .from('matatus')
+      .select('id,number_plate,owner_name,owner_phone,vehicle_type,tlb_number,till_number,sacco_id,created_at')
+      .eq('sacco_id', scopeId)
+      .order('created_at', { ascending: false });
+    if (matatuErr) throw matatuErr;
+    (matatuRows || []).forEach((row) => {
+      const type = assetTypeFromVehicleType(row.vehicle_type);
+      if ((type === 'SHUTTLE' && wantShuttle) || (type === 'TAXI' && wantTaxi) || (type === 'BODA' && wantBoda)) {
+        const mapped = mapAssetRow({ ...row, plate: row.number_plate }, type);
+        if (mapped) items.push(mapped);
+      }
+    });
+
+    if (wantTaxi) {
+      const { data, error } = await supabaseAdmin
+        .from('taxis')
+        .select('id,plate,make,model,year,operator_id,seat_capacity,insurance_expiry_date,psv_badge_expiry_date')
+        .eq('operator_id', scopeId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      (data || []).forEach((row) => {
+        const mapped = mapAssetRow(row, 'TAXI');
+        if (mapped) items.push(mapped);
+      });
+    }
+
+    if (wantBoda) {
+      const { data, error } = await supabaseAdmin
+        .from('boda_bikes')
+        .select('id,identifier,make,model,year,operator_id,insurance_expiry_date,rider_id')
+        .eq('operator_id', scopeId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      const riderIds = Array.from(new Set((data || []).map((row) => row.rider_id).filter(Boolean)));
+      let ridersById = new Map();
+      if (riderIds.length) {
+        const { data: riders, error: rErr } = await supabaseAdmin
+          .from('boda_riders')
+          .select('id,license_expiry_date')
+          .in('id', riderIds);
+        if (rErr) throw rErr;
+        ridersById = new Map((riders || []).map((r) => [r.id, r]));
+      }
+      (data || []).forEach((row) => {
+        const rider = row.rider_id ? ridersById.get(row.rider_id) : null;
+        const mapped = mapAssetRow({ ...row, license_expiry_date: rider?.license_expiry_date || null }, 'BODA');
+        if (mapped) items.push(mapped);
+      });
+    }
+  }
+
+  if (scopeType === 'OWNER') {
+    const matatuRows = await loadOwnerMatatus(scopeId);
+    matatuRows.forEach((row) => {
+      const type = assetTypeFromVehicleType(row.vehicle_type);
+      if ((type === 'SHUTTLE' && wantShuttle) || (type === 'TAXI' && wantTaxi) || (type === 'BODA' && wantBoda)) {
+        const mapped = mapAssetRow({ ...row, plate: row.number_plate }, type);
+        if (mapped) items.push(mapped);
+      }
+    });
+  }
+
+  return items;
 }
 
 // Current user profile summary for front-end role guards
@@ -181,6 +471,7 @@ router.get('/my-saccos', async (req, res) => {
           savings_enabled: sacco.savings_enabled ?? null,
           loans_enabled: sacco.loans_enabled ?? null,
           routes_enabled: sacco.routes_enabled ?? null,
+          manages_fleet: sacco.manages_fleet ?? false,
           status: sacco.status || null,
           role: ctx.role?.role || null,
           via: ctx.matatu ? 'matatu' : 'direct',
@@ -1414,4 +1705,412 @@ router.delete('/matatu/:id/staff/:user_id', async (req,res)=>{
     res.json({ deleted: 1 });
   }catch(e){ res.status(500).json({ error: e.message || 'Failed to remove staff' }); }
 });
+
+// ---------- Access grants (delegated permissions) ----------
+router.get('/access-grants', async (req, res) => {
+  try {
+    const scopeType = normalizeScopeType(req.query.scope_type);
+    const scopeId = req.query.scope_id ? String(req.query.scope_id) : '';
+    const wantsScope = String(req.query.all || req.query.for_scope || '').toLowerCase() === 'true';
+
+    if (wantsScope) {
+      if (!scopeType || !scopeId) return res.status(400).json({ error: 'scope_type and scope_id required' });
+      const access = await resolveVehicleCareScope(req.user.id, scopeType, scopeId);
+      if (!access.allowed || !access.permissions.can_manage_staff) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+      const items = await getAccessGrantsForScope(scopeType, scopeId);
+      return res.json({ items });
+    }
+
+    let query = supabaseAdmin
+      .from('access_grants')
+      .select('*')
+      .eq('user_id', req.user.id)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
+    if (scopeType) query = query.eq('scope_type', scopeType);
+    const { data, error } = await query;
+    if (error) throw error;
+    return res.json({ items: data || [] });
+  } catch (e) {
+    return res.status(500).json({ error: e.message || 'Failed to load access grants' });
+  }
+});
+
+router.post('/access-grants', async (req, res) => {
+  try {
+    const scopeType = normalizeScopeType(req.body?.scope_type);
+    const scopeId = req.body?.scope_id ? String(req.body.scope_id) : '';
+    const userId = req.body?.user_id ? String(req.body.user_id) : '';
+    if (!scopeType || !scopeId || !userId) {
+      return res.status(400).json({ error: 'scope_type, scope_id and user_id required' });
+    }
+
+    const access = await resolveVehicleCareScope(req.user.id, scopeType, scopeId);
+    if (!access.allowed || !access.permissions.can_manage_staff) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const roleRaw = String(req.body?.role || 'STAFF').trim().toUpperCase();
+    const role = ['ADMIN', 'MANAGER', 'STAFF'].includes(roleRaw) ? roleRaw : 'STAFF';
+    const row = {
+      granter_type: scopeType === 'OWNER' ? 'OWNER' : 'OPERATOR',
+      granter_id: scopeId,
+      user_id: userId,
+      scope_type: scopeType,
+      scope_id: scopeId,
+      role,
+      can_manage_staff: !!req.body?.can_manage_staff,
+      can_manage_vehicles: !!req.body?.can_manage_vehicles,
+      can_manage_vehicle_care: !!req.body?.can_manage_vehicle_care,
+      can_manage_compliance: !!req.body?.can_manage_compliance,
+      can_view_analytics: req.body?.can_view_analytics === false ? false : true,
+      is_active: req.body?.is_active === false ? false : true,
+    };
+
+    const { data: existing, error: existingErr } = await supabaseAdmin
+      .from('access_grants')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('scope_type', scopeType)
+      .eq('scope_id', scopeId)
+      .maybeSingle();
+    if (existingErr && existingErr.code !== PG_ROW_NOT_FOUND) throw existingErr;
+
+    if (existing?.id) {
+      const { data, error } = await supabaseAdmin
+        .from('access_grants')
+        .update(row)
+        .eq('id', existing.id)
+        .select('*')
+        .maybeSingle();
+      if (error) throw error;
+      return res.json(data || {});
+    }
+
+    const { data, error } = await supabaseAdmin.from('access_grants').insert(row).select('*').single();
+    if (error) throw error;
+    return res.json(data || {});
+  } catch (e) {
+    return res.status(500).json({ error: e.message || 'Failed to save access grant' });
+  }
+});
+
+// ---------- Vehicle care (maintenance logs) ----------
+router.get('/vehicle-care/assets', async (req, res) => {
+  try {
+    const scopeType = normalizeScopeType(req.query.scope_type);
+    const scopeId = req.query.scope_id ? String(req.query.scope_id) : '';
+    if (!scopeType || !scopeId) return res.status(400).json({ error: 'scope_type and scope_id required' });
+    const assetTypeRaw = String(req.query.asset_type || '').trim().toUpperCase();
+    const assetType = assetTypeRaw === 'ALL' || !assetTypeRaw ? 'ALL' : normalizeAssetType(assetTypeRaw);
+    if (!assetType) return res.status(400).json({ error: 'Invalid asset_type' });
+
+    const access = await resolveVehicleCareScope(req.user.id, scopeType, scopeId);
+    if (!access.allowed) return res.status(403).json({ error: 'Forbidden' });
+
+    const items = await loadAssetsForScope(scopeType, scopeId, assetType);
+    res.json({ items });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Failed to load assets' });
+  }
+});
+
+router.get('/vehicle-care/logs', async (req, res) => {
+  try {
+    const scopeType = normalizeScopeType(req.query.scope_type);
+    const scopeId = req.query.scope_id ? String(req.query.scope_id) : '';
+    if (!scopeType || !scopeId) return res.status(400).json({ error: 'scope_type and scope_id required' });
+    const access = await resolveVehicleCareScope(req.user.id, scopeType, scopeId);
+    if (!access.allowed) return res.status(403).json({ error: 'Forbidden' });
+
+    const assetTypeRaw = String(req.query.asset_type || '').trim().toUpperCase();
+    const assetType = assetTypeRaw === 'ALL' || !assetTypeRaw ? 'ALL' : normalizeAssetType(assetTypeRaw);
+    if (!assetType) return res.status(400).json({ error: 'Invalid asset_type' });
+
+    const assetId = req.query.asset_id ? String(req.query.asset_id) : '';
+    const status = String(req.query.status || '').trim().toUpperCase();
+    const category = String(req.query.category || '').trim().toUpperCase();
+    const priority = String(req.query.priority || '').trim().toUpperCase();
+
+    const { from, to } = normalizeDateBounds(req.query.from, req.query.to);
+
+    let query = supabaseAdmin.from('maintenance_logs').select('*').order('occurred_at', { ascending: false });
+
+    if (scopeType === 'OPERATOR') {
+      query = query.eq('operator_id', scopeId);
+    }
+
+    if (assetType !== 'ALL') {
+      query = query.eq('asset_type', assetType);
+    }
+
+    if (assetId) {
+      query = query.eq('asset_id', assetId);
+    }
+
+    if (status) query = query.eq('status', status);
+    if (category) query = query.eq('issue_category', category);
+    if (priority) query = query.eq('priority', priority);
+    if (from) query = query.gte('occurred_at', from.toISOString());
+    if (to) query = query.lte('occurred_at', to.toISOString());
+
+    if (scopeType === 'OWNER') {
+      const assets = await loadAssetsForScope(scopeType, scopeId, assetType);
+      const assetIds = assets.map((row) => row.asset_id).filter(Boolean);
+      if (!assetIds.length) return res.json({ items: [] });
+      query = query.in('asset_id', assetIds);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json({ items: data || [] });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Failed to load maintenance logs' });
+  }
+});
+
+router.post('/vehicle-care/logs', async (req, res) => {
+  try {
+    const scopeType = normalizeScopeType(req.body?.scope_type);
+    const scopeId = req.body?.scope_id ? String(req.body.scope_id) : '';
+    if (!scopeType || !scopeId) return res.status(400).json({ error: 'scope_type and scope_id required' });
+    const access = await resolveVehicleCareScope(req.user.id, scopeType, scopeId);
+    if (!access.allowed) return res.status(403).json({ error: 'Forbidden' });
+
+    const assetType = normalizeAssetType(req.body?.asset_type);
+    const assetId = req.body?.asset_id ? String(req.body.asset_id) : '';
+    if (!assetType || !assetId) return res.status(400).json({ error: 'asset_type and asset_id required' });
+
+    const assets = await loadAssetsForScope(scopeType, scopeId, 'ALL');
+    const asset = assets.find((row) => row.asset_type === assetType && String(row.asset_id) === String(assetId));
+    if (!asset) return res.status(404).json({ error: 'Asset not found in scope' });
+
+    const issueCategory = String(req.body?.issue_category || '').trim().toUpperCase();
+    const issueDescription = String(req.body?.issue_description || '').trim();
+    const priority = String(req.body?.priority || '').trim().toUpperCase();
+    if (!issueCategory || !issueDescription) return res.status(400).json({ error: 'issue_category and description required' });
+    if (!priority) return res.status(400).json({ error: 'priority required' });
+
+    const allowedStatuses = ['OPEN', 'DIAGNOSING', 'WAITING_PARTS', 'IN_PROGRESS', 'RESOLVED', 'REOPENED'];
+    const statusRaw = String(req.body?.status || 'OPEN').trim().toUpperCase();
+    const status = allowedStatuses.includes(statusRaw) ? statusRaw : 'OPEN';
+
+    const partsUsed = Array.isArray(req.body?.parts_used) ? req.body.parts_used : null;
+
+    const row = {
+      operator_id: asset.operator_id || null,
+      asset_type: assetType,
+      asset_id: assetId,
+      shuttle_id: assetType === 'SHUTTLE' ? assetId : null,
+      created_by_user_id: req.user.id,
+      handled_by_user_id: access.permissions.can_manage_vehicle_care ? req.body?.handled_by_user_id || null : null,
+      reported_by: ['SACCO_STAFF', 'SACCO_ADMIN', 'SACCO', 'STAFF'].includes(access.role) ? 'STAFF' : 'OWNER',
+      issue_category: issueCategory,
+      issue_tags: Array.isArray(req.body?.issue_tags) ? req.body.issue_tags : null,
+      issue_description: issueDescription,
+      priority,
+      status: access.permissions.can_manage_vehicle_care ? status : 'OPEN',
+      parts_used: access.permissions.can_manage_vehicle_care ? partsUsed : null,
+      total_cost_kes: access.permissions.can_manage_vehicle_care ? Number(req.body?.total_cost_kes || 0) || null : null,
+      downtime_days: access.permissions.can_manage_vehicle_care ? Number(req.body?.downtime_days || 0) || null : null,
+      occurred_at: req.body?.occurred_at ? new Date(req.body.occurred_at).toISOString() : new Date().toISOString(),
+      resolved_at: access.permissions.can_manage_vehicle_care && req.body?.resolved_at ? new Date(req.body.resolved_at).toISOString() : null,
+      next_service_due: access.permissions.can_manage_vehicle_care ? req.body?.next_service_due || null : null,
+      notes: req.body?.notes ? String(req.body.notes).trim() : null,
+    };
+
+    const { data, error } = await supabaseAdmin.from('maintenance_logs').insert(row).select('*').single();
+    if (error) throw error;
+    res.json(data || {});
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Failed to create maintenance log' });
+  }
+});
+
+router.patch('/vehicle-care/logs/:id', async (req, res) => {
+  try {
+    const scopeType = normalizeScopeType(req.body?.scope_type);
+    const scopeId = req.body?.scope_id ? String(req.body.scope_id) : '';
+    const logId = req.params.id;
+    if (!scopeType || !scopeId || !logId) return res.status(400).json({ error: 'scope_type, scope_id and id required' });
+    const access = await resolveVehicleCareScope(req.user.id, scopeType, scopeId);
+    if (!access.allowed || !access.permissions.can_manage_vehicle_care) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const { data: existing, error: existingErr } = await supabaseAdmin
+      .from('maintenance_logs')
+      .select('*')
+      .eq('id', logId)
+      .maybeSingle();
+    if (existingErr) throw existingErr;
+    if (!existing) return res.status(404).json({ error: 'Log not found' });
+
+    const assets = await loadAssetsForScope(scopeType, scopeId, 'ALL');
+    const assetMatch = assets.find(
+      (row) => row.asset_type === existing.asset_type && String(row.asset_id) === String(existing.asset_id),
+    );
+    if (!assetMatch) return res.status(403).json({ error: 'Log outside scope' });
+
+    const updates = {};
+    if ('asset_type' in req.body || 'asset_id' in req.body) {
+      const nextType = normalizeAssetType(req.body?.asset_type) || existing.asset_type;
+      const nextId = req.body?.asset_id ? String(req.body.asset_id) : existing.asset_id;
+      const nextAsset = assets.find((row) => row.asset_type === nextType && String(row.asset_id) === String(nextId));
+      if (!nextAsset) return res.status(404).json({ error: 'Asset not found in scope' });
+      updates.asset_type = nextType;
+      updates.asset_id = nextId;
+      updates.shuttle_id = nextType === 'SHUTTLE' ? nextId : null;
+      updates.operator_id = nextAsset.operator_id || existing.operator_id || null;
+    }
+
+    if ('issue_category' in req.body) {
+      const value = String(req.body.issue_category || '').trim().toUpperCase();
+      if (!value) return res.status(400).json({ error: 'issue_category required' });
+      updates.issue_category = value;
+    }
+    if ('issue_description' in req.body) {
+      const value = String(req.body.issue_description || '').trim();
+      if (!value) return res.status(400).json({ error: 'issue_description required' });
+      updates.issue_description = value;
+    }
+    if ('priority' in req.body) {
+      const value = String(req.body.priority || '').trim().toUpperCase();
+      if (!value) return res.status(400).json({ error: 'priority required' });
+      updates.priority = value;
+    }
+    if ('status' in req.body) {
+      const allowedStatuses = ['OPEN', 'DIAGNOSING', 'WAITING_PARTS', 'IN_PROGRESS', 'RESOLVED', 'REOPENED'];
+      const value = String(req.body.status || '').trim().toUpperCase();
+      updates.status = allowedStatuses.includes(value) ? value : 'OPEN';
+    }
+    if ('parts_used' in req.body) {
+      updates.parts_used = Array.isArray(req.body.parts_used) ? req.body.parts_used : null;
+    }
+    if ('total_cost_kes' in req.body) {
+      const value = Number(req.body.total_cost_kes || 0);
+      updates.total_cost_kes = value > 0 ? value : null;
+    }
+    if ('downtime_days' in req.body) {
+      const value = Number(req.body.downtime_days || 0);
+      updates.downtime_days = value > 0 ? value : null;
+    }
+    if ('handled_by_user_id' in req.body) {
+      updates.handled_by_user_id = req.body.handled_by_user_id || null;
+    }
+    if ('occurred_at' in req.body) {
+      updates.occurred_at = req.body.occurred_at ? new Date(req.body.occurred_at).toISOString() : null;
+    }
+    if ('resolved_at' in req.body) {
+      updates.resolved_at = req.body.resolved_at ? new Date(req.body.resolved_at).toISOString() : null;
+    }
+    if ('next_service_due' in req.body) {
+      updates.next_service_due = req.body.next_service_due || null;
+    }
+    if ('notes' in req.body) {
+      updates.notes = req.body.notes ? String(req.body.notes).trim() : null;
+    }
+    if ('issue_tags' in req.body) {
+      updates.issue_tags = Array.isArray(req.body.issue_tags) ? req.body.issue_tags : null;
+    }
+
+    if (!Object.keys(updates).length) {
+      return res.status(400).json({ error: 'No updates provided' });
+    }
+
+    updates.updated_at = new Date().toISOString();
+
+    const { data, error } = await supabaseAdmin
+      .from('maintenance_logs')
+      .update(updates)
+      .eq('id', logId)
+      .select('*')
+      .maybeSingle();
+    if (error) throw error;
+    res.json(data || {});
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Failed to update maintenance log' });
+  }
+});
+
+router.patch('/vehicle-care/assets/:assetType/:assetId/compliance', async (req, res) => {
+  try {
+    const scopeType = normalizeScopeType(req.body?.scope_type || req.query.scope_type);
+    const scopeId = req.body?.scope_id || req.query.scope_id;
+    if (!scopeType || !scopeId) return res.status(400).json({ error: 'scope_type and scope_id required' });
+    const assetType = normalizeAssetType(req.params.assetType);
+    const assetId = req.params.assetId;
+    if (!assetType || !assetId) return res.status(400).json({ error: 'asset_type and asset_id required' });
+
+    const access = await resolveVehicleCareScope(req.user.id, scopeType, String(scopeId));
+    if (!access.allowed || !access.permissions.can_manage_compliance) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const assets = await loadAssetsForScope(scopeType, String(scopeId), 'ALL');
+    const asset = assets.find((row) => row.asset_type === assetType && String(row.asset_id) === String(assetId));
+    if (!asset) return res.status(404).json({ error: 'Asset not found in scope' });
+
+    if (assetType === 'SHUTTLE') {
+      const updates = {
+        tlb_expiry_date: req.body?.tlb_expiry_date || null,
+        insurance_expiry_date: req.body?.insurance_expiry_date || null,
+        inspection_expiry_date: req.body?.inspection_expiry_date || null,
+      };
+      const { data, error } = await supabaseAdmin
+        .from('shuttles')
+        .update(updates)
+        .eq('id', assetId)
+        .select('*')
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return res.status(404).json({ error: 'Shuttle not found' });
+      return res.json({ ok: true, asset: data });
+    }
+
+    if (assetType === 'TAXI') {
+      const updates = {
+        insurance_expiry_date: req.body?.insurance_expiry_date || null,
+        psv_badge_expiry_date: req.body?.license_expiry_date || req.body?.psv_badge_expiry_date || null,
+      };
+      const { data, error } = await supabaseAdmin
+        .from('taxis')
+        .update(updates)
+        .eq('id', assetId)
+        .select('*')
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return res.status(404).json({ error: 'Taxi not found' });
+      return res.json({ ok: true, asset: data });
+    }
+
+    if (assetType === 'BODA') {
+      const bikeUpdates = {
+        insurance_expiry_date: req.body?.insurance_expiry_date || null,
+      };
+      const { data: bike, error: bikeErr } = await supabaseAdmin
+        .from('boda_bikes')
+        .select('id,rider_id')
+        .eq('id', assetId)
+        .maybeSingle();
+      if (bikeErr) throw bikeErr;
+      if (!bike) return res.status(404).json({ error: 'Boda bike not found' });
+      await supabaseAdmin.from('boda_bikes').update(bikeUpdates).eq('id', bike.id);
+      if (req.body?.license_expiry_date && bike.rider_id) {
+        await supabaseAdmin
+          .from('boda_riders')
+          .update({ license_expiry_date: req.body.license_expiry_date })
+          .eq('id', bike.rider_id);
+      }
+      return res.json({ ok: true });
+    }
+
+    return res.status(400).json({ error: 'Unsupported asset type' });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Failed to update compliance' });
+  }
+});
+
 module.exports = router;
