@@ -184,6 +184,8 @@ type AdminLogin = {
 
 type SystemTabId =
   | 'overview'
+  | 'analytics'
+  | 'shuttle_care'
   | 'finance'
   | 'c2b'
   | 'payouts'
@@ -276,6 +278,9 @@ type ShuttleRow = {
   load_capacity_kg?: number | null
   operator_id?: string | null
   tlb_license?: string | null
+  tlb_expiry_date?: string | null
+  insurance_expiry_date?: string | null
+  inspection_expiry_date?: string | null
   till_number?: string | null
   owner_id?: string | null
   created_at?: string
@@ -340,6 +345,37 @@ type BodaBikeRow = {
   created_at?: string
   rider?: BodaRiderRow | null
   operator?: ShuttleOperatorRow | null
+}
+
+type StaffProfileRow = {
+  id?: string
+  name?: string
+  email?: string | null
+  phone?: string | null
+  role?: string | null
+  sacco_id?: string | null
+}
+
+type MaintenanceLogRow = {
+  id?: string
+  shuttle_id?: string | null
+  operator_id?: string | null
+  reported_by_staff_id?: string | null
+  handled_by_staff_id?: string | null
+  issue_category?: string | null
+  issue_description?: string | null
+  parts_used?: Array<{ name?: string; qty?: number | null; cost?: number | null }> | null
+  total_cost_kes?: number | null
+  downtime_days?: number | null
+  status?: string | null
+  occurred_at?: string | null
+  resolved_at?: string | null
+  next_service_due?: string | null
+  notes?: string | null
+  shuttle?: { id?: string; plate?: string | null; operator_id?: string | null } | null
+  operator?: ShuttleOperatorRow | null
+  reported_by?: StaffProfileRow | null
+  handled_by?: StaffProfileRow | null
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -506,6 +542,9 @@ function createShuttleForm() {
     load_capacity_kg: '',
     operator_id: '',
     tlb_license: '',
+    tlb_expiry_date: '',
+    insurance_expiry_date: '',
+    inspection_expiry_date: '',
     till_number: '',
   }
 }
@@ -575,6 +614,40 @@ function createBodaBikeForm() {
   }
 }
 
+const MAINTENANCE_CATEGORIES = [
+  'ENGINE',
+  'TYRES',
+  'BRAKES',
+  'ELECTRICAL',
+  'BODY',
+  'SUSPENSION',
+  'SERVICE',
+  'OTHER',
+]
+
+const MAINTENANCE_STATUS_OPTIONS = ['OPEN', 'IN_PROGRESS', 'RESOLVED']
+
+type MaintenancePartForm = { name: string; qty: string; cost: string }
+
+function createMaintenanceForm() {
+  return {
+    shuttle_id: '',
+    operator_id: '',
+    reported_by_staff_id: '',
+    handled_by_staff_id: '',
+    issue_category: '',
+    issue_description: '',
+    parts_used: [{ name: '', qty: '', cost: '' }] as MaintenancePartForm[],
+    total_cost_kes: '',
+    downtime_days: '',
+    status: 'OPEN',
+    occurred_at: formatDateInput(new Date().toISOString()),
+    resolved_at: '',
+    next_service_due: '',
+    notes: '',
+  }
+}
+
 function normalizePhoneInput(value: string) {
   return String(value || '').replace(/\s+/g, '')
 }
@@ -613,10 +686,87 @@ function formatDateInput(value?: string | null) {
   return String(value).slice(0, 10)
 }
 
+type ExpiryStatus = 'unknown' | 'expired' | 'due_soon' | 'warning' | 'ok'
+
+function getVehicleAge(year?: number | null) {
+  if (!Number.isFinite(year)) return null
+  const currentYear = new Date().getFullYear()
+  const age = currentYear - Number(year)
+  if (!Number.isFinite(age) || age < 0) return null
+  return age
+}
+
+function getRiskScoreForAge(age?: number | null) {
+  if (age === null || age === undefined) return 50
+  if (age <= 3) return 10
+  if (age <= 6) return 25
+  if (age <= 10) return 45
+  if (age <= 15) return 70
+  return 90
+}
+
+function getRiskLabel(score: number) {
+  if (score <= 25) return 'Low'
+  if (score <= 50) return 'Medium'
+  if (score <= 75) return 'High'
+  return 'Critical'
+}
+
+function getExpiryStatus(value?: string | null): { status: ExpiryStatus; daysRemaining: number | null } {
+  if (!value) return { status: 'unknown', daysRemaining: null }
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return { status: 'unknown', daysRemaining: null }
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const expiry = new Date(parsed)
+  expiry.setHours(0, 0, 0, 0)
+  const diffMs = expiry.getTime() - today.getTime()
+  const daysRemaining = Math.ceil(diffMs / 86400000)
+  if (daysRemaining < 0) return { status: 'expired', daysRemaining }
+  if (daysRemaining <= 30) return { status: 'due_soon', daysRemaining }
+  if (daysRemaining <= 60) return { status: 'warning', daysRemaining }
+  return { status: 'ok', daysRemaining }
+}
+
+function formatExpiryStatusLabel(status: ExpiryStatus) {
+  if (status === 'expired') return 'Expired'
+  if (status === 'due_soon') return 'Due soon'
+  if (status === 'warning') return 'Warning'
+  if (status === 'ok') return 'OK'
+  return 'Unknown'
+}
+
+function formatExpiryDate(value?: string | null) {
+  if (!value) return '-'
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return '-'
+  return parsed.toLocaleDateString('en-KE')
+}
+
+function riskBadgeStyle(score: number) {
+  if (score <= 25) return { background: '#dcfce7', color: '#166534', border: '1px solid #86efac' }
+  if (score <= 50) return { background: '#fef9c3', color: '#854d0e', border: '1px solid #fde047' }
+  if (score <= 75) return { background: '#fee2e2', color: '#991b1b', border: '1px solid #fecaca' }
+  return { background: '#fecaca', color: '#7f1d1d', border: '1px solid #fca5a5' }
+}
+
+function expiryBadgeStyle(status: ExpiryStatus) {
+  if (status === 'expired') return { background: '#fee2e2', color: '#991b1b', border: '1px solid #fecaca' }
+  if (status === 'due_soon') return { background: '#ffedd5', color: '#9a3412', border: '1px solid #fed7aa' }
+  if (status === 'warning') return { background: '#fef9c3', color: '#854d0e', border: '1px solid #fde047' }
+  if (status === 'ok') return { background: '#dcfce7', color: '#166534', border: '1px solid #86efac' }
+  return { background: '#e2e8f0', color: '#475569', border: '1px solid #cbd5e1' }
+}
+
 function formatOperatorTypeLabel(value?: string | null) {
   const normalized = normalizeOperatorType(value)
   const match = operatorTypeOptions.find((option) => option.value === normalized)
   return match ? match.label : normalized
+}
+
+function formatStaffLabel(row?: StaffProfileRow | null) {
+  if (!row) return '-'
+  return row.name || row.email || row.id || '-'
 }
 
 type CsvHeader = { key: string; label: string }
@@ -868,6 +1018,26 @@ const SystemDashboard = () => {
   const [shuttleEditForm, setShuttleEditForm] = useState(() => createShuttleForm())
   const [shuttleEditMsg, setShuttleEditMsg] = useState('')
   const [shuttleEditError, setShuttleEditError] = useState<string | null>(null)
+  const [analyticsOperatorFilter, setAnalyticsOperatorFilter] = useState('')
+  const [analyticsTypeFilter, setAnalyticsTypeFilter] = useState('')
+  const [maintenanceLogs, setMaintenanceLogs] = useState<MaintenanceLogRow[]>([])
+  const [maintenanceError, setMaintenanceError] = useState<string | null>(null)
+  const [maintenanceForm, setMaintenanceForm] = useState(() => createMaintenanceForm())
+  const [maintenanceMsg, setMaintenanceMsg] = useState('')
+  const [maintenanceFilters, setMaintenanceFilters] = useState({
+    operator_id: '',
+    shuttle_id: '',
+    status: '',
+    category: '',
+    from: '',
+    to: '',
+  })
+  const [maintenanceEditId, setMaintenanceEditId] = useState('')
+  const [maintenanceEditForm, setMaintenanceEditForm] = useState(() => createMaintenanceForm())
+  const [maintenanceEditMsg, setMaintenanceEditMsg] = useState('')
+  const [maintenanceEditError, setMaintenanceEditError] = useState<string | null>(null)
+  const [systemStaff, setSystemStaff] = useState<StaffProfileRow[]>([])
+  const [systemStaffError, setSystemStaffError] = useState<string | null>(null)
 
   const [taxis, setTaxis] = useState<TaxiRow[]>([])
   const [taxisError, setTaxisError] = useState<string | null>(null)
@@ -946,6 +1116,7 @@ const SystemDashboard = () => {
 
   const tabs: Array<{ id: SystemTabId; label: string }> = [
     { id: 'overview', label: 'Overview' },
+    { id: 'analytics', label: 'Analytics' },
     { id: 'registry', label: 'System Registry' },
     { id: 'finance', label: 'Finance' },
     { id: 'c2b', label: 'C2B Payments' },
@@ -953,6 +1124,7 @@ const SystemDashboard = () => {
     { id: 'worker_monitor', label: 'Worker Monitor' },
     { id: 'saccos', label: 'Operators' },
     { id: 'matatu', label: 'Shuttles' },
+    { id: 'shuttle_care', label: 'Shuttle Care' },
     { id: 'taxis', label: 'Taxis' },
     { id: 'bodabodas', label: 'BodaBodas' },
     { id: 'ussd', label: 'USSD' },
@@ -1022,6 +1194,14 @@ const SystemDashboard = () => {
       .sort((a, b) => a.label.localeCompare(b.label))
   }, [saccos])
 
+  const shuttlesById = useMemo(() => {
+    const map = new Map<string, ShuttleRow>()
+    shuttles.forEach((row) => {
+      if (row.id) map.set(row.id, row)
+    })
+    return map
+  }, [shuttles])
+
   const shuttleOperatorSummary = useMemo(() => {
     const map = new Map<string, { id: string; label: string; count: number }>()
     shuttles.forEach((row) => {
@@ -1047,6 +1227,340 @@ const SystemDashboard = () => {
     if (!shuttleOperatorFilter) return shuttles
     return shuttles.filter((row) => (row.operator_id || row.operator?.id || '') === shuttleOperatorFilter)
   }, [shuttles, shuttleOperatorFilter])
+
+  const maintenanceCountsByShuttle = useMemo(() => {
+    const map = new Map<string, number>()
+    const since = new Date()
+    since.setDate(since.getDate() - 30)
+    maintenanceLogs.forEach((row) => {
+      const shuttleId = row.shuttle_id || row.shuttle?.id || ''
+      if (!shuttleId) return
+      const occurredAt = row.occurred_at ? new Date(row.occurred_at) : null
+      if (!occurredAt || Number.isNaN(occurredAt.getTime())) return
+      if (occurredAt < since) return
+      map.set(shuttleId, (map.get(shuttleId) || 0) + 1)
+    })
+    return map
+  }, [maintenanceLogs])
+
+  const complianceAlerts = useMemo(() => {
+    const alerts: Array<{
+      id: string
+      plate: string
+      operatorLabel: string
+      expiryType: string
+      expiryDate: string
+      daysRemaining: number
+      status: ExpiryStatus
+    }> = []
+    shuttles.forEach((row) => {
+      const operatorId = row.operator_id || row.operator?.id || ''
+      const operatorRow = operatorId ? saccoById.get(operatorId) : null
+      const operatorLabel =
+        row.operator?.display_name ||
+        row.operator?.name ||
+        row.operator?.sacco_name ||
+        operatorRow?.display_name ||
+        operatorRow?.name ||
+        operatorId ||
+        '-'
+      const plate = row.plate || row.id || '-'
+      const entries = [
+        { type: 'TLB', date: row.tlb_expiry_date },
+        { type: 'Insurance', date: row.insurance_expiry_date },
+        { type: 'Inspection', date: row.inspection_expiry_date },
+      ]
+      entries.forEach((entry) => {
+        const info = getExpiryStatus(entry.date)
+        if (info.status === 'expired' || info.status === 'due_soon') {
+          alerts.push({
+            id: `${row.id || row.plate || operatorId}-${entry.type}`,
+            plate,
+            operatorLabel,
+            expiryType: entry.type,
+            expiryDate: entry.date || '',
+            daysRemaining: info.daysRemaining ?? 0,
+            status: info.status,
+          })
+        }
+      })
+    })
+    return alerts.sort((a, b) => a.daysRemaining - b.daysRemaining)
+  }, [shuttles, saccoById])
+
+  const analyticsShuttles = useMemo(() => {
+    return shuttles.filter((row) => {
+      if (analyticsOperatorFilter && (row.operator_id || row.operator?.id || '') !== analyticsOperatorFilter) {
+        return false
+      }
+      if (analyticsTypeFilter) {
+        const rowType = normalizeShuttleType(row.vehicle_type)
+        if (rowType !== analyticsTypeFilter) return false
+      }
+      return true
+    })
+  }, [shuttles, analyticsOperatorFilter, analyticsTypeFilter])
+
+  const analyticsSummary = useMemo(() => {
+    let totalSeats = 0
+    let totalLoad = 0
+    let missingCapacity = 0
+    let highRisk = 0
+    analyticsShuttles.forEach((row) => {
+      const seat = row.seat_capacity || 0
+      const load = row.load_capacity_kg || 0
+      if (seat > 0) totalSeats += seat
+      if (load > 0) totalLoad += load
+      if (seat <= 0 && load <= 0) missingCapacity += 1
+      const age = getVehicleAge(row.year)
+      const riskScore = getRiskScoreForAge(age)
+      if (riskScore >= 70) highRisk += 1
+    })
+    return { totalSeats, totalLoad, missingCapacity, highRisk }
+  }, [analyticsShuttles])
+
+  const analyticsByType = useMemo(() => {
+    const map = new Map<string, { type: string; count: number }>()
+    analyticsShuttles.forEach((row) => {
+      const type = normalizeShuttleType(row.vehicle_type) || 'UNKNOWN'
+      const existing = map.get(type) || { type, count: 0 }
+      existing.count += 1
+      map.set(type, existing)
+    })
+    return [...map.values()].sort((a, b) => b.count - a.count)
+  }, [analyticsShuttles])
+
+  const analyticsSeatsByOperator = useMemo(() => {
+    const map = new Map<string, { id: string; label: string; seats: number; count: number }>()
+    analyticsShuttles.forEach((row) => {
+      const seat = row.seat_capacity || 0
+      if (seat <= 0) return
+      const id = row.operator_id || row.operator?.id || ''
+      if (!id) return
+      const label = operatorLabelFromParts(id, row.operator || null)
+      const existing = map.get(id) || { id, label, seats: 0, count: 0 }
+      existing.seats += seat
+      existing.count += 1
+      if (label && existing.label !== label) existing.label = label
+      map.set(id, existing)
+    })
+    return [...map.values()].sort((a, b) => b.seats - a.seats)
+  }, [analyticsShuttles])
+
+  const analyticsLoadByOperator = useMemo(() => {
+    const map = new Map<string, { id: string; label: string; load: number; count: number }>()
+    analyticsShuttles.forEach((row) => {
+      const load = row.load_capacity_kg || 0
+      if (load <= 0) return
+      const id = row.operator_id || row.operator?.id || ''
+      if (!id) return
+      const label = operatorLabelFromParts(id, row.operator || null)
+      const existing = map.get(id) || { id, label, load: 0, count: 0 }
+      existing.load += load
+      existing.count += 1
+      if (label && existing.label !== label) existing.label = label
+      map.set(id, existing)
+    })
+    return [...map.values()].sort((a, b) => b.load - a.load)
+  }, [analyticsShuttles])
+
+  const analyticsTopMakes = useMemo(() => {
+    const map = new Map<string, { label: string; count: number }>()
+    analyticsShuttles.forEach((row) => {
+      const label = (row.make || '').trim() || 'Unknown'
+      const existing = map.get(label) || { label, count: 0 }
+      existing.count += 1
+      map.set(label, existing)
+    })
+    return [...map.values()].sort((a, b) => b.count - a.count)
+  }, [analyticsShuttles])
+
+  const analyticsTopModels = useMemo(() => {
+    const map = new Map<string, { label: string; count: number }>()
+    analyticsShuttles.forEach((row) => {
+      const label = (row.model || '').trim() || 'Unknown'
+      const existing = map.get(label) || { label, count: 0 }
+      existing.count += 1
+      map.set(label, existing)
+    })
+    return [...map.values()].sort((a, b) => b.count - a.count)
+  }, [analyticsShuttles])
+
+  const analyticsMakeModelStats = useMemo(() => {
+    const map = new Map<
+      string,
+      { make: string; model: string; count: number; riskSum: number; ageCounts: Map<string, number> }
+    >()
+    analyticsShuttles.forEach((row) => {
+      const make = (row.make || '').trim() || 'Unknown'
+      const model = (row.model || '').trim() || 'Unknown'
+      const key = `${make}||${model}`
+      const age = getVehicleAge(row.year)
+      const riskScore = getRiskScoreForAge(age)
+      const existing =
+        map.get(key) || {
+          make,
+          model,
+          count: 0,
+          riskSum: 0,
+          ageCounts: new Map<string, number>(),
+        }
+      existing.count += 1
+      existing.riskSum += riskScore
+      const ageKey = age === null ? 'Unknown' : String(age)
+      existing.ageCounts.set(ageKey, (existing.ageCounts.get(ageKey) || 0) + 1)
+      map.set(key, existing)
+    })
+    const rows = [...map.values()].map((entry) => {
+      let topAge = 'Unknown'
+      let topAgeCount = 0
+      entry.ageCounts.forEach((count, ageKey) => {
+        if (count > topAgeCount) {
+          topAge = ageKey
+          topAgeCount = count
+        }
+      })
+      const avgRisk = entry.count ? entry.riskSum / entry.count : 0
+      return {
+        make: entry.make,
+        model: entry.model,
+        count: entry.count,
+        avgRisk,
+        commonAge: topAge,
+        commonAgeCount: topAgeCount,
+      }
+    })
+    return rows.sort((a, b) => b.avgRisk - a.avgRisk)
+  }, [analyticsShuttles])
+
+  const filteredMaintenanceLogs = useMemo(() => {
+    return maintenanceLogs.filter((row) => {
+      if (maintenanceFilters.operator_id && (row.operator_id || row.operator?.id || '') !== maintenanceFilters.operator_id) {
+        return false
+      }
+      if (maintenanceFilters.shuttle_id && (row.shuttle_id || row.shuttle?.id || '') !== maintenanceFilters.shuttle_id) {
+        return false
+      }
+      if (maintenanceFilters.status && (row.status || '').toUpperCase() !== maintenanceFilters.status) {
+        return false
+      }
+      if (maintenanceFilters.category && (row.issue_category || '').toUpperCase() !== maintenanceFilters.category) {
+        return false
+      }
+      const occurredAt = row.occurred_at ? new Date(row.occurred_at) : null
+      if (maintenanceFilters.from) {
+        const fromDate = new Date(maintenanceFilters.from)
+        fromDate.setHours(0, 0, 0, 0)
+        if (occurredAt && occurredAt < fromDate) return false
+      }
+      if (maintenanceFilters.to) {
+        const toDate = new Date(maintenanceFilters.to)
+        toDate.setHours(23, 59, 59, 999)
+        if (occurredAt && occurredAt > toDate) return false
+      }
+      return true
+    })
+  }, [maintenanceLogs, maintenanceFilters])
+
+  const maintenanceIssuesThisMonth = useMemo(() => {
+    const now = new Date()
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const map = new Map<string, number>()
+    filteredMaintenanceLogs.forEach((row) => {
+      const occurredAt = row.occurred_at ? new Date(row.occurred_at) : null
+      if (!occurredAt || Number.isNaN(occurredAt.getTime())) return
+      if (occurredAt < monthStart) return
+      const category = (row.issue_category || 'UNKNOWN').toUpperCase()
+      map.set(category, (map.get(category) || 0) + 1)
+    })
+    return [...map.entries()].map(([category, count]) => ({ category, count })).sort((a, b) => b.count - a.count)
+  }, [filteredMaintenanceLogs])
+
+  const maintenancePartsSummary = useMemo(() => {
+    const map = new Map<string, { part: string; count: number; cost: number }>()
+    filteredMaintenanceLogs.forEach((row) => {
+      const parts = Array.isArray(row.parts_used) ? row.parts_used : []
+      parts.forEach((part) => {
+        const label = (part?.name || '').trim() || 'Unknown'
+        const qty = Number(part?.qty || 0) || 0
+        const cost = Number(part?.cost || 0) || 0
+        const existing = map.get(label) || { part: label, count: 0, cost: 0 }
+        existing.count += qty || 1
+        existing.cost += cost
+        map.set(label, existing)
+      })
+    })
+    return [...map.values()].sort((a, b) => b.cost - a.cost || b.count - a.count)
+  }, [filteredMaintenanceLogs])
+
+  const maintenanceCostByShuttle = useMemo(() => {
+    const map = new Map<string, { shuttleId: string; plate: string; operatorLabel: string; cost: number; count: number }>()
+    filteredMaintenanceLogs.forEach((row) => {
+      const shuttleId = row.shuttle_id || row.shuttle?.id || ''
+      if (!shuttleId) return
+      const shuttle = shuttlesById.get(shuttleId) || null
+      const plate = row.shuttle?.plate || shuttle?.plate || shuttleId
+      const operatorId = row.operator_id || row.operator?.id || shuttle?.operator_id || ''
+      const operatorLabel = operatorId ? operatorLabelFromParts(operatorId, row.operator || null) : '-'
+      const cost = Number(row.total_cost_kes || 0) || 0
+      const existing = map.get(shuttleId) || { shuttleId, plate, operatorLabel, cost: 0, count: 0 }
+      existing.cost += cost
+      existing.count += 1
+      map.set(shuttleId, existing)
+    })
+    return [...map.values()].sort((a, b) => b.cost - a.cost)
+  }, [filteredMaintenanceLogs, shuttlesById])
+
+  const maintenanceStaffPerformance = useMemo(() => {
+    const map = new Map<
+      string,
+      { staffId: string; label: string; count: number; totalDays: number; resolvedCount: number }
+    >()
+    filteredMaintenanceLogs.forEach((row) => {
+      const staffId = row.handled_by_staff_id || row.handled_by?.id || ''
+      if (!staffId) return
+      const staffLabel = row.handled_by?.name || systemStaff.find((s) => s.id === staffId)?.name || staffId
+      const existing = map.get(staffId) || {
+        staffId,
+        label: staffLabel,
+        count: 0,
+        totalDays: 0,
+        resolvedCount: 0,
+      }
+      existing.count += 1
+      const occurredAt = row.occurred_at ? new Date(row.occurred_at) : null
+      const resolvedAt = row.resolved_at ? new Date(row.resolved_at) : null
+      if (occurredAt && resolvedAt && !Number.isNaN(occurredAt.getTime()) && !Number.isNaN(resolvedAt.getTime())) {
+        const diffMs = resolvedAt.getTime() - occurredAt.getTime()
+        const days = diffMs / 86400000
+        if (Number.isFinite(days) && days >= 0) {
+          existing.totalDays += days
+          existing.resolvedCount += 1
+        }
+      }
+      map.set(staffId, existing)
+    })
+    return [...map.values()].map((row) => ({
+      staffId: row.staffId,
+      label: row.label,
+      count: row.count,
+      avgResolutionDays: row.resolvedCount ? row.totalDays / row.resolvedCount : null,
+    }))
+  }, [filteredMaintenanceLogs, systemStaff])
+
+  const maintenanceRepeatShuttles = useMemo(() => {
+    const map = new Map<string, { shuttleId: string; plate: string; count: number }>()
+    filteredMaintenanceLogs.forEach((row) => {
+      const shuttleId = row.shuttle_id || row.shuttle?.id || ''
+      if (!shuttleId) return
+      const shuttle = shuttlesById.get(shuttleId) || null
+      const plate = row.shuttle?.plate || shuttle?.plate || shuttleId
+      const existing = map.get(shuttleId) || { shuttleId, plate, count: 0 }
+      existing.count += 1
+      map.set(shuttleId, existing)
+    })
+    return [...map.values()].filter((row) => row.count >= 2).sort((a, b) => b.count - a.count)
+  }, [filteredMaintenanceLogs, shuttlesById])
 
   const taxiOperatorSummary = useMemo(() => {
     const map = new Map<string, { id: string; label: string; count: number }>()
@@ -1404,6 +1918,9 @@ const SystemDashboard = () => {
       load_capacity_kg: row.load_capacity_kg ? String(row.load_capacity_kg) : '',
       operator_id: row.operator_id || row.operator?.id || '',
       tlb_license: row.tlb_license || '',
+      tlb_expiry_date: formatDateInput(row.tlb_expiry_date),
+      insurance_expiry_date: formatDateInput(row.insurance_expiry_date),
+      inspection_expiry_date: formatDateInput(row.inspection_expiry_date),
       till_number: row.till_number || '',
     })
     setShuttleEditMsg('')
@@ -1438,6 +1955,9 @@ const SystemDashboard = () => {
       load_capacity_kg: shouldShowLoadCapacity(vehicleType) || vehicleType === 'OTHER' ? loadCapacity : null,
       operator_id: shuttleForm.operator_id || null,
       tlb_license: shuttleForm.tlb_license.trim() || null,
+      tlb_expiry_date: shuttleForm.tlb_expiry_date || null,
+      insurance_expiry_date: shuttleForm.insurance_expiry_date || null,
+      inspection_expiry_date: shuttleForm.inspection_expiry_date || null,
       till_number: shuttleForm.till_number.trim(),
     }
     if (!ownerPayload.full_name) {
@@ -1533,6 +2053,9 @@ const SystemDashboard = () => {
       load_capacity_kg: shouldShowLoadCapacity(vehicleType) || vehicleType === 'OTHER' ? loadCapacity : null,
       operator_id: shuttleEditForm.operator_id || null,
       tlb_license: shuttleEditForm.tlb_license.trim() || null,
+      tlb_expiry_date: shuttleEditForm.tlb_expiry_date || null,
+      insurance_expiry_date: shuttleEditForm.insurance_expiry_date || null,
+      inspection_expiry_date: shuttleEditForm.inspection_expiry_date || null,
       till_number: shuttleEditForm.till_number.trim(),
     }
     if (!ownerPayload.full_name) {
@@ -2878,6 +3401,195 @@ const SystemDashboard = () => {
     }
   }
 
+  function resetMaintenanceFormState() {
+    setMaintenanceForm(createMaintenanceForm())
+    setMaintenanceMsg('')
+  }
+
+  function resetMaintenanceEditState() {
+    setMaintenanceEditId('')
+    setMaintenanceEditForm(createMaintenanceForm())
+    setMaintenanceEditMsg('')
+    setMaintenanceEditError(null)
+  }
+
+  function normalizePartsUsed(parts: MaintenancePartForm[]) {
+    return parts
+      .map((part) => {
+        const name = part.name.trim()
+        const qtyVal = parsePositiveIntInput(part.qty || '')
+        const costVal = parseAmountInput(part.cost || '')
+        if (!name && !qtyVal && !costVal) return null
+        return {
+          name: name || 'Unknown',
+          qty: qtyVal || null,
+          cost: costVal || null,
+        }
+      })
+      .filter(Boolean) as Array<{ name: string; qty: number | null; cost: number | null }>
+  }
+
+  function startMaintenanceEdit(row: MaintenanceLogRow) {
+    if (!row.id) return
+    if (maintenanceEditId === row.id) {
+      resetMaintenanceEditState()
+      return
+    }
+    const parts = Array.isArray(row.parts_used) && row.parts_used.length ? row.parts_used : []
+    setMaintenanceEditId(row.id)
+    setMaintenanceEditForm({
+      shuttle_id: row.shuttle_id || row.shuttle?.id || '',
+      operator_id: row.operator_id || row.operator?.id || '',
+      reported_by_staff_id: row.reported_by_staff_id || row.reported_by?.id || '',
+      handled_by_staff_id: row.handled_by_staff_id || row.handled_by?.id || '',
+      issue_category: row.issue_category || '',
+      issue_description: row.issue_description || '',
+      parts_used:
+        parts.length > 0
+          ? parts.map((part) => ({
+              name: part?.name ? String(part.name) : '',
+              qty: part?.qty !== null && part?.qty !== undefined ? String(part.qty) : '',
+              cost: part?.cost !== null && part?.cost !== undefined ? String(part.cost) : '',
+            }))
+          : [{ name: '', qty: '', cost: '' }],
+      total_cost_kes: row.total_cost_kes !== null && row.total_cost_kes !== undefined ? String(row.total_cost_kes) : '',
+      downtime_days: row.downtime_days !== null && row.downtime_days !== undefined ? String(row.downtime_days) : '',
+      status: row.status || 'OPEN',
+      occurred_at: formatDateInput(row.occurred_at),
+      resolved_at: formatDateInput(row.resolved_at),
+      next_service_due: formatDateInput(row.next_service_due),
+      notes: row.notes || '',
+    })
+    setMaintenanceEditMsg('')
+    setMaintenanceEditError(null)
+  }
+
+  async function submitMaintenanceLog() {
+    const shuttleId = maintenanceForm.shuttle_id
+    const operatorId =
+      maintenanceForm.operator_id ||
+      shuttlesById.get(shuttleId)?.operator_id ||
+      shuttlesById.get(shuttleId)?.operator?.id ||
+      ''
+    const payload = {
+      shuttle_id: shuttleId || null,
+      operator_id: operatorId || null,
+      reported_by_staff_id: maintenanceForm.reported_by_staff_id || null,
+      handled_by_staff_id: maintenanceForm.handled_by_staff_id || null,
+      issue_category: maintenanceForm.issue_category.trim().toUpperCase(),
+      issue_description: maintenanceForm.issue_description.trim(),
+      parts_used: normalizePartsUsed(maintenanceForm.parts_used),
+      total_cost_kes: parseAmountInput(maintenanceForm.total_cost_kes) || null,
+      downtime_days: parsePositiveIntInput(maintenanceForm.downtime_days) || null,
+      status: maintenanceForm.status || 'OPEN',
+      occurred_at: maintenanceForm.occurred_at || null,
+      resolved_at: maintenanceForm.resolved_at || null,
+      next_service_due: maintenanceForm.next_service_due || null,
+      notes: maintenanceForm.notes.trim() || null,
+    }
+    if (!payload.shuttle_id) {
+      setMaintenanceMsg('Select a shuttle')
+      return
+    }
+    if (!payload.issue_category) {
+      setMaintenanceMsg('Issue category is required')
+      return
+    }
+    if (!payload.issue_description) {
+      setMaintenanceMsg('Issue description is required')
+      return
+    }
+    if (!payload.status) {
+      setMaintenanceMsg('Status is required')
+      return
+    }
+    setMaintenanceMsg('Saving...')
+    try {
+      await sendJson('/api/admin/maintenance-logs', 'POST', payload)
+      setMaintenanceMsg('Maintenance log saved')
+      resetMaintenanceFormState()
+      await loadMaintenanceLogs()
+    } catch (err) {
+      setMaintenanceMsg(err instanceof Error ? err.message : 'Save failed')
+    }
+  }
+
+  async function saveMaintenanceEdit() {
+    if (!maintenanceEditId) return
+    const shuttleId = maintenanceEditForm.shuttle_id
+    const operatorId =
+      maintenanceEditForm.operator_id ||
+      shuttlesById.get(shuttleId)?.operator_id ||
+      shuttlesById.get(shuttleId)?.operator?.id ||
+      ''
+    const payload = {
+      id: maintenanceEditId,
+      shuttle_id: shuttleId || null,
+      operator_id: operatorId || null,
+      reported_by_staff_id: maintenanceEditForm.reported_by_staff_id || null,
+      handled_by_staff_id: maintenanceEditForm.handled_by_staff_id || null,
+      issue_category: maintenanceEditForm.issue_category.trim().toUpperCase(),
+      issue_description: maintenanceEditForm.issue_description.trim(),
+      parts_used: normalizePartsUsed(maintenanceEditForm.parts_used),
+      total_cost_kes: parseAmountInput(maintenanceEditForm.total_cost_kes) || null,
+      downtime_days: parsePositiveIntInput(maintenanceEditForm.downtime_days) || null,
+      status: maintenanceEditForm.status || 'OPEN',
+      occurred_at: maintenanceEditForm.occurred_at || null,
+      resolved_at: maintenanceEditForm.resolved_at || null,
+      next_service_due: maintenanceEditForm.next_service_due || null,
+      notes: maintenanceEditForm.notes.trim() || null,
+    }
+    if (!payload.shuttle_id) {
+      setMaintenanceEditMsg('Select a shuttle')
+      return
+    }
+    if (!payload.issue_category) {
+      setMaintenanceEditMsg('Issue category is required')
+      return
+    }
+    if (!payload.issue_description) {
+      setMaintenanceEditMsg('Issue description is required')
+      return
+    }
+    if (!payload.status) {
+      setMaintenanceEditMsg('Status is required')
+      return
+    }
+    setMaintenanceEditMsg('Saving...')
+    setMaintenanceEditError(null)
+    try {
+      await sendJson('/api/admin/maintenance-logs/update', 'POST', payload)
+      setMaintenanceEditMsg('Maintenance log updated')
+      resetMaintenanceEditState()
+      await loadMaintenanceLogs()
+    } catch (err) {
+      setMaintenanceEditMsg('')
+      setMaintenanceEditError(err instanceof Error ? err.message : 'Update failed')
+    }
+  }
+
+  async function loadMaintenanceLogs() {
+    try {
+      const rows = await fetchList<MaintenanceLogRow>('/api/admin/maintenance-logs')
+      setMaintenanceLogs(rows)
+      setMaintenanceError(null)
+    } catch (err) {
+      setMaintenanceLogs([])
+      setMaintenanceError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function loadSystemStaff() {
+    try {
+      const rows = await fetchList<StaffProfileRow>('/api/admin/staff')
+      setSystemStaff(rows)
+      setSystemStaffError(null)
+    } catch (err) {
+      setSystemStaff([])
+      setSystemStaffError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   async function loadTaxis() {
     try {
       const rows = await fetchList<TaxiRow>('/api/admin/taxis')
@@ -2956,6 +3668,8 @@ const SystemDashboard = () => {
       await loadRouteUsage()
       await loadRoutes()
       await loadShuttles()
+      await loadMaintenanceLogs()
+      await loadSystemStaff()
       await loadTaxis()
       await loadBodaBikes()
       await loadLogins()
@@ -2966,6 +3680,1194 @@ const SystemDashboard = () => {
   const counts = overview?.counts || {}
   const pool = overview?.ussd_pool || {}
 
+  const renderAnalyticsTab = () => {
+    const totalShuttles = analyticsShuttles.length
+    const selectedOperatorLabel = analyticsOperatorFilter
+      ? operatorOptions.find((row) => row.id === analyticsOperatorFilter)?.label || analyticsOperatorFilter
+      : 'All operators'
+    const selectedTypeLabel = analyticsTypeFilter || 'All types'
+    const topMakes = analyticsTopMakes.slice(0, 10)
+    const topModels = analyticsTopModels.slice(0, 10)
+    const makeModelRows = analyticsMakeModelStats.slice(0, 15)
+    return (
+      <>
+        <section className="card">
+          <div className="topline">
+            <h3 style={{ margin: 0 }}>Fleet analytics</h3>
+            <span className="muted small">
+              {totalShuttles} shuttle{totalShuttles === 1 ? '' : 's'}
+            </span>
+          </div>
+          <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
+            <label className="muted small">
+              Operator
+              <select
+                value={analyticsOperatorFilter}
+                onChange={(e) => setAnalyticsOperatorFilter(e.target.value)}
+                style={{ padding: 10, minWidth: 200 }}
+              >
+                <option value="">All operators</option>
+                {operatorOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="muted small">
+              Vehicle type
+              <select
+                value={analyticsTypeFilter}
+                onChange={(e) => setAnalyticsTypeFilter(e.target.value)}
+                style={{ padding: 10, minWidth: 180 }}
+              >
+                <option value="">All types</option>
+                {SHUTTLE_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="muted small" style={{ display: 'flex', alignItems: 'center' }}>
+              Showing: {selectedOperatorLabel} / {selectedTypeLabel}
+            </div>
+          </div>
+        </section>
+
+        <section className="card">
+          <h3 style={{ margin: '0 0 8px' }}>Fleet summary</h3>
+          <div className="grid metrics">
+            <div className="metric">
+              <div className="k">Total shuttles</div>
+              <div className="v">{totalShuttles}</div>
+            </div>
+            <div className="metric">
+              <div className="k">Total seats</div>
+              <div className="v">{analyticsSummary.totalSeats.toLocaleString()}</div>
+            </div>
+            <div className="metric">
+              <div className="k">Total load (kg)</div>
+              <div className="v">{analyticsSummary.totalLoad.toLocaleString()}</div>
+            </div>
+            <div className="metric">
+              <div className="k">Missing capacity</div>
+              <div className="v">{analyticsSummary.missingCapacity}</div>
+            </div>
+            <div className="metric">
+              <div className="k">High risk vehicles</div>
+              <div className="v">{analyticsSummary.highRisk}</div>
+            </div>
+          </div>
+        </section>
+
+        <section className="grid g2">
+          <div className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Vehicles by type</h3>
+              <span className="muted small">{analyticsByType.length} type(s)</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {analyticsByType.length === 0 ? (
+                    <tr>
+                      <td colSpan={2} className="muted">
+                        No vehicles to summarize.
+                      </td>
+                    </tr>
+                  ) : (
+                    analyticsByType.map((row) => (
+                      <tr key={row.type}>
+                        <td>{row.type}</td>
+                        <td>{row.count}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Seats by operator</h3>
+              <span className="muted small">{analyticsSeatsByOperator.length} operator(s)</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Operator</th>
+                    <th>Seats</th>
+                    <th>Vehicles</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {analyticsSeatsByOperator.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="muted">
+                        No seat capacity data.
+                      </td>
+                    </tr>
+                  ) : (
+                    analyticsSeatsByOperator.map((row) => (
+                      <tr key={row.id}>
+                        <td>{row.label}</td>
+                        <td>{row.seats.toLocaleString()}</td>
+                        <td>{row.count}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section className="grid g2">
+          <div className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Load capacity by operator</h3>
+              <span className="muted small">{analyticsLoadByOperator.length} operator(s)</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Operator</th>
+                    <th>Load (kg)</th>
+                    <th>Vehicles</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {analyticsLoadByOperator.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="muted">
+                        No load capacity data.
+                      </td>
+                    </tr>
+                  ) : (
+                    analyticsLoadByOperator.map((row) => (
+                      <tr key={row.id}>
+                        <td>{row.label}</td>
+                        <td>{row.load.toLocaleString()}</td>
+                        <td>{row.count}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Top makes</h3>
+              <span className="muted small">Top {topMakes.length}</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Make</th>
+                    <th>Count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topMakes.length === 0 ? (
+                    <tr>
+                      <td colSpan={2} className="muted">
+                        No make data.
+                      </td>
+                    </tr>
+                  ) : (
+                    topMakes.map((row) => (
+                      <tr key={row.label}>
+                        <td>{row.label}</td>
+                        <td>{row.count}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section className="grid g2">
+          <div className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Top models</h3>
+              <span className="muted small">Top {topModels.length}</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Model</th>
+                    <th>Count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topModels.length === 0 ? (
+                    <tr>
+                      <td colSpan={2} className="muted">
+                        No model data.
+                      </td>
+                    </tr>
+                  ) : (
+                    topModels.map((row) => (
+                      <tr key={row.label}>
+                        <td>{row.label}</td>
+                        <td>{row.count}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Make & model risk</h3>
+              <span className="muted small">Top {makeModelRows.length}</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Make</th>
+                    <th>Model</th>
+                    <th>Avg risk</th>
+                    <th>Common age</th>
+                    <th>Vehicles</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {makeModelRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="muted">
+                        No make/model data.
+                      </td>
+                    </tr>
+                  ) : (
+                    makeModelRows.map((row) => (
+                      <tr key={`${row.make}-${row.model}`}>
+                        <td>{row.make}</td>
+                        <td>{row.model}</td>
+                        <td>{row.avgRisk.toFixed(1)}</td>
+                        <td>{row.commonAge === 'Unknown' ? '-' : `${row.commonAge} yrs`}</td>
+                        <td>{row.count}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </>
+    )
+  }
+
+  const renderShuttleCareTab = () => {
+    const shuttleOptions = shuttles
+      .map((row) => {
+        const id = row.id || ''
+        if (!id) return null
+        const plate = row.plate || id
+        const operatorId = row.operator_id || row.operator?.id || ''
+        const operatorLabel = operatorId ? operatorLabelFromParts(operatorId, row.operator || null) : ''
+        const label = operatorLabel ? `${plate} • ${operatorLabel}` : plate
+        return { id, label }
+      })
+      .filter((row): row is { id: string; label: string } => Boolean(row))
+      .sort((a, b) => a.label.localeCompare(b.label))
+
+    const staffOptions = systemStaff
+      .map((row) => {
+        const id = row.id || ''
+        if (!id) return null
+        return { id, label: formatStaffLabel(row) }
+      })
+      .filter((row): row is { id: string; label: string } => Boolean(row))
+      .sort((a, b) => a.label.localeCompare(b.label))
+
+    const listRows = filteredMaintenanceLogs
+    const topIssues = maintenanceIssuesThisMonth.slice(0, 6)
+    const topParts = maintenancePartsSummary.slice(0, 6)
+    const topCosts = maintenanceCostByShuttle.slice(0, 6)
+    const topStaff = maintenanceStaffPerformance
+      .slice()
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8)
+    const repeatShuttles = maintenanceRepeatShuttles.slice(0, 8)
+
+    const operatorLabel = maintenanceForm.operator_id
+      ? operatorLabelFromParts(maintenanceForm.operator_id, null)
+      : ''
+
+    return (
+      <>
+        <section className="card">
+          <h3 style={{ marginTop: 0 }}>Shuttle Care</h3>
+          {maintenanceError ? <div className="err">Maintenance error: {maintenanceError}</div> : null}
+          {systemStaffError ? <div className="err">Staff load error: {systemStaffError}</div> : null}
+          <div className="grid g2">
+            <div className="card" style={{ margin: 0, boxShadow: 'none' }}>
+              <h4 style={{ margin: '0 0 8px' }}>Maintenance entry</h4>
+              <div className="grid g2">
+                <label className="muted small">
+                  Shuttle *
+                  <select
+                    value={maintenanceForm.shuttle_id}
+                    onChange={(e) => {
+                      const nextId = e.target.value
+                      const shuttle = shuttlesById.get(nextId)
+                      const operatorId = shuttle?.operator_id || shuttle?.operator?.id || ''
+                      setMaintenanceForm((f) => ({ ...f, shuttle_id: nextId, operator_id: operatorId }))
+                    }}
+                    style={{ padding: 10 }}
+                  >
+                    <option value="">Select shuttle</option>
+                    {shuttleOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="muted small">
+                  Issue category *
+                  <select
+                    value={maintenanceForm.issue_category}
+                    onChange={(e) => setMaintenanceForm((f) => ({ ...f, issue_category: e.target.value }))}
+                    style={{ padding: 10 }}
+                  >
+                    <option value="">Select category</option>
+                    {MAINTENANCE_CATEGORIES.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="muted small">
+                  Status *
+                  <select
+                    value={maintenanceForm.status}
+                    onChange={(e) => setMaintenanceForm((f) => ({ ...f, status: e.target.value }))}
+                    style={{ padding: 10 }}
+                  >
+                    {MAINTENANCE_STATUS_OPTIONS.map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="muted small">
+                  Reported by staff
+                  <select
+                    value={maintenanceForm.reported_by_staff_id}
+                    onChange={(e) => setMaintenanceForm((f) => ({ ...f, reported_by_staff_id: e.target.value }))}
+                    style={{ padding: 10 }}
+                  >
+                    <option value="">Optional</option>
+                    {staffOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="muted small">
+                  Handled by staff
+                  <select
+                    value={maintenanceForm.handled_by_staff_id}
+                    onChange={(e) => setMaintenanceForm((f) => ({ ...f, handled_by_staff_id: e.target.value }))}
+                    style={{ padding: 10 }}
+                  >
+                    <option value="">Optional</option>
+                    {staffOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="muted small">
+                  Occurred at
+                  <input
+                    className="input"
+                    type="date"
+                    value={maintenanceForm.occurred_at}
+                    onChange={(e) => setMaintenanceForm((f) => ({ ...f, occurred_at: e.target.value }))}
+                  />
+                </label>
+                <label className="muted small">
+                  Resolved at
+                  <input
+                    className="input"
+                    type="date"
+                    value={maintenanceForm.resolved_at}
+                    onChange={(e) => setMaintenanceForm((f) => ({ ...f, resolved_at: e.target.value }))}
+                  />
+                </label>
+                <label className="muted small">
+                  Next service due
+                  <input
+                    className="input"
+                    type="date"
+                    value={maintenanceForm.next_service_due}
+                    onChange={(e) => setMaintenanceForm((f) => ({ ...f, next_service_due: e.target.value }))}
+                  />
+                </label>
+                <label className="muted small">
+                  Downtime days
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    value={maintenanceForm.downtime_days}
+                    onChange={(e) => setMaintenanceForm((f) => ({ ...f, downtime_days: e.target.value }))}
+                  />
+                </label>
+                <label className="muted small">
+                  Total cost (KES)
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    value={maintenanceForm.total_cost_kes}
+                    onChange={(e) => setMaintenanceForm((f) => ({ ...f, total_cost_kes: e.target.value }))}
+                  />
+                </label>
+              </div>
+              {operatorLabel ? (
+                <div className="muted small" style={{ marginTop: 8 }}>
+                  Operator: {operatorLabel}
+                </div>
+              ) : null}
+              <label className="muted small" style={{ display: 'block', marginTop: 10 }}>
+                Issue description *
+                <textarea
+                  className="input"
+                  value={maintenanceForm.issue_description}
+                  onChange={(e) => setMaintenanceForm((f) => ({ ...f, issue_description: e.target.value }))}
+                  style={{ minHeight: 90 }}
+                />
+              </label>
+              <label className="muted small" style={{ display: 'block', marginTop: 10 }}>
+                Notes
+                <textarea
+                  className="input"
+                  value={maintenanceForm.notes}
+                  onChange={(e) => setMaintenanceForm((f) => ({ ...f, notes: e.target.value }))}
+                  style={{ minHeight: 70 }}
+                />
+              </label>
+            </div>
+
+            <div className="card" style={{ margin: 0, boxShadow: 'none' }}>
+              <h4 style={{ margin: '0 0 8px' }}>Parts used</h4>
+              {maintenanceForm.parts_used.map((part, idx) => (
+                <div key={`part-${idx}`} className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                  <input
+                    className="input"
+                    placeholder="Part name"
+                    value={part.name}
+                    onChange={(e) =>
+                      setMaintenanceForm((f) => {
+                        const next = [...f.parts_used]
+                        next[idx] = { ...next[idx], name: e.target.value }
+                        return { ...f, parts_used: next }
+                      })
+                    }
+                    style={{ minWidth: 160 }}
+                  />
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    placeholder="Qty"
+                    value={part.qty}
+                    onChange={(e) =>
+                      setMaintenanceForm((f) => {
+                        const next = [...f.parts_used]
+                        next[idx] = { ...next[idx], qty: e.target.value }
+                        return { ...f, parts_used: next }
+                      })
+                    }
+                    style={{ width: 100 }}
+                  />
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    placeholder="Cost"
+                    value={part.cost}
+                    onChange={(e) =>
+                      setMaintenanceForm((f) => {
+                        const next = [...f.parts_used]
+                        next[idx] = { ...next[idx], cost: e.target.value }
+                        return { ...f, parts_used: next }
+                      })
+                    }
+                    style={{ width: 120 }}
+                  />
+                  {maintenanceForm.parts_used.length > 1 ? (
+                    <button
+                      className="btn ghost"
+                      type="button"
+                      onClick={() =>
+                        setMaintenanceForm((f) => ({
+                          ...f,
+                          parts_used: f.parts_used.filter((_, partIdx) => partIdx !== idx),
+                        }))
+                      }
+                    >
+                      Remove
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+              <button
+                className="btn ghost"
+                type="button"
+                onClick={() =>
+                  setMaintenanceForm((f) => ({ ...f, parts_used: [...f.parts_used, { name: '', qty: '', cost: '' }] }))
+                }
+              >
+                Add part
+              </button>
+            </div>
+          </div>
+          <div className="row" style={{ marginTop: 12 }}>
+            <button className="btn" type="button" onClick={submitMaintenanceLog}>
+              Save maintenance log
+            </button>
+            <span className="muted small">{maintenanceMsg}</span>
+          </div>
+        </section>
+
+        <section className="grid g2">
+          <div className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Most common issues (this month)</h3>
+              <span className="muted small">Top {topIssues.length}</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Issue</th>
+                    <th>Count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topIssues.length === 0 ? (
+                    <tr>
+                      <td colSpan={2} className="muted">
+                        No issues logged this month.
+                      </td>
+                    </tr>
+                  ) : (
+                    topIssues.map((row) => (
+                      <tr key={row.category}>
+                        <td>{row.category}</td>
+                        <td>{row.count}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Top parts used</h3>
+              <span className="muted small">Top {topParts.length}</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Part</th>
+                    <th>Qty</th>
+                    <th>Cost (KES)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topParts.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="muted">
+                        No parts logged.
+                      </td>
+                    </tr>
+                  ) : (
+                    topParts.map((row) => (
+                      <tr key={row.part}>
+                        <td>{row.part}</td>
+                        <td>{row.count}</td>
+                        <td>{row.cost.toLocaleString()}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section className="grid g2">
+          <div className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Highest maintenance cost vehicles</h3>
+              <span className="muted small">Top {topCosts.length}</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Plate</th>
+                    <th>Operator</th>
+                    <th>Total cost (KES)</th>
+                    <th>Logs</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topCosts.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="muted">
+                        No maintenance costs captured.
+                      </td>
+                    </tr>
+                  ) : (
+                    topCosts.map((row) => (
+                      <tr key={row.shuttleId}>
+                        <td>{row.plate}</td>
+                        <td>{row.operatorLabel}</td>
+                        <td>{row.cost.toLocaleString()}</td>
+                        <td>{row.count}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Staff performance</h3>
+              <span className="muted small">Top {topStaff.length}</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Staff</th>
+                    <th>Issues handled</th>
+                    <th>Avg resolution (days)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topStaff.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="muted">
+                        No staff performance data.
+                      </td>
+                    </tr>
+                  ) : (
+                    topStaff.map((row) => (
+                      <tr key={row.staffId}>
+                        <td>{row.label}</td>
+                        <td>{row.count}</td>
+                        <td>{row.avgResolutionDays === null ? '-' : row.avgResolutionDays.toFixed(1)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section className="card">
+          <div className="topline">
+            <h3 style={{ margin: 0 }}>Repeat issues per shuttle</h3>
+            <span className="muted small">Shuttles with 2+ logs</span>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Plate</th>
+                  <th>Issues logged</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {repeatShuttles.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="muted">
+                      No repeat issues yet.
+                    </td>
+                  </tr>
+                ) : (
+                  repeatShuttles.map((row) => (
+                    <tr key={row.shuttleId}>
+                      <td>{row.plate}</td>
+                      <td>{row.count}</td>
+                      <td>
+                        <button
+                          className="btn ghost"
+                          type="button"
+                          onClick={() =>
+                            setMaintenanceFilters((f) => ({
+                              ...f,
+                              shuttle_id: row.shuttleId,
+                            }))
+                          }
+                        >
+                          View logs
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="card">
+          <div className="topline">
+            <h3 style={{ margin: 0 }}>Maintenance logs</h3>
+            <span className="muted small">
+              Showing {listRows.length} record{listRows.length === 1 ? '' : 's'}
+            </span>
+          </div>
+          <div className="row" style={{ gap: 12, flexWrap: 'wrap', marginTop: 12 }}>
+            <label className="muted small">
+              Operator
+              <select
+                value={maintenanceFilters.operator_id}
+                onChange={(e) => setMaintenanceFilters((f) => ({ ...f, operator_id: e.target.value }))}
+                style={{ padding: 10, minWidth: 200 }}
+              >
+                <option value="">All operators</option>
+                {operatorOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="muted small">
+              Shuttle
+              <select
+                value={maintenanceFilters.shuttle_id}
+                onChange={(e) => setMaintenanceFilters((f) => ({ ...f, shuttle_id: e.target.value }))}
+                style={{ padding: 10, minWidth: 220 }}
+              >
+                <option value="">All shuttles</option>
+                {shuttleOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="muted small">
+              Category
+              <select
+                value={maintenanceFilters.category}
+                onChange={(e) => setMaintenanceFilters((f) => ({ ...f, category: e.target.value }))}
+                style={{ padding: 10 }}
+              >
+                <option value="">All</option>
+                {MAINTENANCE_CATEGORIES.map((category) => (
+                  <option key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="muted small">
+              Status
+              <select
+                value={maintenanceFilters.status}
+                onChange={(e) => setMaintenanceFilters((f) => ({ ...f, status: e.target.value }))}
+                style={{ padding: 10 }}
+              >
+                <option value="">All</option>
+                {MAINTENANCE_STATUS_OPTIONS.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="muted small">
+              From
+              <input
+                className="input"
+                type="date"
+                value={maintenanceFilters.from}
+                onChange={(e) => setMaintenanceFilters((f) => ({ ...f, from: e.target.value }))}
+              />
+            </label>
+            <label className="muted small">
+              To
+              <input
+                className="input"
+                type="date"
+                value={maintenanceFilters.to}
+                onChange={(e) => setMaintenanceFilters((f) => ({ ...f, to: e.target.value }))}
+              />
+            </label>
+            <button
+              className="btn ghost"
+              type="button"
+              onClick={() =>
+                setMaintenanceFilters({
+                  operator_id: '',
+                  shuttle_id: '',
+                  status: '',
+                  category: '',
+                  from: '',
+                  to: '',
+                })
+              }
+            >
+              Clear filters
+            </button>
+          </div>
+          <div className="table-wrap" style={{ marginTop: 12 }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Shuttle</th>
+                  <th>Operator</th>
+                  <th>Category</th>
+                  <th>Status</th>
+                  <th>Cost</th>
+                  <th>Downtime</th>
+                  <th>Handled by</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {listRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="muted">
+                      No maintenance logs found.
+                    </td>
+                  </tr>
+                ) : (
+                  listRows.map((row) => {
+                    const isEditing = maintenanceEditId && row.id === maintenanceEditId
+                    const shuttleId = row.shuttle_id || row.shuttle?.id || ''
+                    const shuttle = shuttlesById.get(shuttleId) || null
+                    const plate = row.shuttle?.plate || shuttle?.plate || shuttleId || '-'
+                    const operatorId = row.operator_id || row.operator?.id || shuttle?.operator_id || ''
+                    const operatorLabel = operatorId ? operatorLabelFromParts(operatorId, row.operator || null) : '-'
+                    const handledBy = row.handled_by || systemStaff.find((s) => s.id === row.handled_by_staff_id) || null
+                    return (
+                      <Fragment key={row.id || `${row.shuttle_id}-${row.occurred_at}`}>
+                        <tr>
+                          <td>{row.occurred_at ? new Date(row.occurred_at).toLocaleDateString('en-KE') : '-'}</td>
+                          <td>{plate}</td>
+                          <td>{operatorLabel}</td>
+                          <td>{row.issue_category || '-'}</td>
+                          <td>{row.status || '-'}</td>
+                          <td>{row.total_cost_kes ? row.total_cost_kes.toLocaleString() : '-'}</td>
+                          <td>{row.downtime_days ?? '-'}</td>
+                          <td>{formatStaffLabel(handledBy)}</td>
+                          <td>
+                            <button className="btn ghost" type="button" onClick={() => startMaintenanceEdit(row)}>
+                              {isEditing ? 'Close' : 'Edit'}
+                            </button>
+                          </td>
+                        </tr>
+                        {isEditing ? (
+                          <tr>
+                            <td colSpan={9}>
+                              <div className="card" style={{ margin: '6px 0' }}>
+                                <div className="topline">
+                                  <h3 style={{ margin: 0 }}>Edit maintenance log</h3>
+                                  <span className="muted small">{row.id}</span>
+                                </div>
+                                {maintenanceEditError ? <div className="err">Update error: {maintenanceEditError}</div> : null}
+                                <div className="grid g2">
+                                  <label className="muted small">
+                                    Shuttle *
+                                    <select
+                                      value={maintenanceEditForm.shuttle_id}
+                                      onChange={(e) => {
+                                        const nextId = e.target.value
+                                        const shuttleRow = shuttlesById.get(nextId)
+                                        const operatorId = shuttleRow?.operator_id || shuttleRow?.operator?.id || ''
+                                        setMaintenanceEditForm((f) => ({
+                                          ...f,
+                                          shuttle_id: nextId,
+                                          operator_id: operatorId,
+                                        }))
+                                      }}
+                                      style={{ padding: 10 }}
+                                    >
+                                      <option value="">Select shuttle</option>
+                                      {shuttleOptions.map((option) => (
+                                        <option key={option.id} value={option.id}>
+                                          {option.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <label className="muted small">
+                                    Issue category *
+                                    <select
+                                      value={maintenanceEditForm.issue_category}
+                                      onChange={(e) =>
+                                        setMaintenanceEditForm((f) => ({ ...f, issue_category: e.target.value }))
+                                      }
+                                      style={{ padding: 10 }}
+                                    >
+                                      <option value="">Select category</option>
+                                      {MAINTENANCE_CATEGORIES.map((category) => (
+                                        <option key={category} value={category}>
+                                          {category}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <label className="muted small">
+                                    Status *
+                                    <select
+                                      value={maintenanceEditForm.status}
+                                      onChange={(e) => setMaintenanceEditForm((f) => ({ ...f, status: e.target.value }))}
+                                      style={{ padding: 10 }}
+                                    >
+                                      {MAINTENANCE_STATUS_OPTIONS.map((status) => (
+                                        <option key={status} value={status}>
+                                          {status}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <label className="muted small">
+                                    Handled by staff
+                                    <select
+                                      value={maintenanceEditForm.handled_by_staff_id}
+                                      onChange={(e) =>
+                                        setMaintenanceEditForm((f) => ({ ...f, handled_by_staff_id: e.target.value }))
+                                      }
+                                      style={{ padding: 10 }}
+                                    >
+                                      <option value="">Optional</option>
+                                      {staffOptions.map((option) => (
+                                        <option key={option.id} value={option.id}>
+                                          {option.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <label className="muted small">
+                                    Occurred at
+                                    <input
+                                      className="input"
+                                      type="date"
+                                      value={maintenanceEditForm.occurred_at}
+                                      onChange={(e) =>
+                                        setMaintenanceEditForm((f) => ({ ...f, occurred_at: e.target.value }))
+                                      }
+                                    />
+                                  </label>
+                                  <label className="muted small">
+                                    Resolved at
+                                    <input
+                                      className="input"
+                                      type="date"
+                                      value={maintenanceEditForm.resolved_at}
+                                      onChange={(e) =>
+                                        setMaintenanceEditForm((f) => ({ ...f, resolved_at: e.target.value }))
+                                      }
+                                    />
+                                  </label>
+                                  <label className="muted small">
+                                    Next service due
+                                    <input
+                                      className="input"
+                                      type="date"
+                                      value={maintenanceEditForm.next_service_due}
+                                      onChange={(e) =>
+                                        setMaintenanceEditForm((f) => ({ ...f, next_service_due: e.target.value }))
+                                      }
+                                    />
+                                  </label>
+                                  <label className="muted small">
+                                    Downtime days
+                                    <input
+                                      className="input"
+                                      type="number"
+                                      min={0}
+                                      value={maintenanceEditForm.downtime_days}
+                                      onChange={(e) =>
+                                        setMaintenanceEditForm((f) => ({ ...f, downtime_days: e.target.value }))
+                                      }
+                                    />
+                                  </label>
+                                  <label className="muted small">
+                                    Total cost (KES)
+                                    <input
+                                      className="input"
+                                      type="number"
+                                      min={0}
+                                      value={maintenanceEditForm.total_cost_kes}
+                                      onChange={(e) =>
+                                        setMaintenanceEditForm((f) => ({ ...f, total_cost_kes: e.target.value }))
+                                      }
+                                    />
+                                  </label>
+                                </div>
+                                <label className="muted small" style={{ display: 'block', marginTop: 10 }}>
+                                  Issue description *
+                                  <textarea
+                                    className="input"
+                                    value={maintenanceEditForm.issue_description}
+                                    onChange={(e) =>
+                                      setMaintenanceEditForm((f) => ({ ...f, issue_description: e.target.value }))
+                                    }
+                                    style={{ minHeight: 80 }}
+                                  />
+                                </label>
+                                <label className="muted small" style={{ display: 'block', marginTop: 10 }}>
+                                  Notes
+                                  <textarea
+                                    className="input"
+                                    value={maintenanceEditForm.notes}
+                                    onChange={(e) => setMaintenanceEditForm((f) => ({ ...f, notes: e.target.value }))}
+                                    style={{ minHeight: 70 }}
+                                  />
+                                </label>
+                                <div style={{ marginTop: 10 }}>
+                                  <h4 style={{ margin: '0 0 6px' }}>Parts used</h4>
+                                  {maintenanceEditForm.parts_used.map((part, idx) => (
+                                    <div
+                                      key={`edit-part-${idx}`}
+                                      className="row"
+                                      style={{ gap: 8, flexWrap: 'wrap', marginBottom: 8 }}
+                                    >
+                                      <input
+                                        className="input"
+                                        placeholder="Part name"
+                                        value={part.name}
+                                        onChange={(e) =>
+                                          setMaintenanceEditForm((f) => {
+                                            const next = [...f.parts_used]
+                                            next[idx] = { ...next[idx], name: e.target.value }
+                                            return { ...f, parts_used: next }
+                                          })
+                                        }
+                                        style={{ minWidth: 160 }}
+                                      />
+                                      <input
+                                        className="input"
+                                        type="number"
+                                        min={0}
+                                        placeholder="Qty"
+                                        value={part.qty}
+                                        onChange={(e) =>
+                                          setMaintenanceEditForm((f) => {
+                                            const next = [...f.parts_used]
+                                            next[idx] = { ...next[idx], qty: e.target.value }
+                                            return { ...f, parts_used: next }
+                                          })
+                                        }
+                                        style={{ width: 100 }}
+                                      />
+                                      <input
+                                        className="input"
+                                        type="number"
+                                        min={0}
+                                        placeholder="Cost"
+                                        value={part.cost}
+                                        onChange={(e) =>
+                                          setMaintenanceEditForm((f) => {
+                                            const next = [...f.parts_used]
+                                            next[idx] = { ...next[idx], cost: e.target.value }
+                                            return { ...f, parts_used: next }
+                                          })
+                                        }
+                                        style={{ width: 120 }}
+                                      />
+                                      {maintenanceEditForm.parts_used.length > 1 ? (
+                                        <button
+                                          className="btn ghost"
+                                          type="button"
+                                          onClick={() =>
+                                            setMaintenanceEditForm((f) => ({
+                                              ...f,
+                                              parts_used: f.parts_used.filter((_, partIdx) => partIdx !== idx),
+                                            }))
+                                          }
+                                        >
+                                          Remove
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                  ))}
+                                  <button
+                                    className="btn ghost"
+                                    type="button"
+                                    onClick={() =>
+                                      setMaintenanceEditForm((f) => ({
+                                        ...f,
+                                        parts_used: [...f.parts_used, { name: '', qty: '', cost: '' }],
+                                      }))
+                                    }
+                                  >
+                                    Add part
+                                  </button>
+                                </div>
+                                <div className="row" style={{ marginTop: 8 }}>
+                                  <button className="btn" type="button" onClick={saveMaintenanceEdit}>
+                                    Save changes
+                                  </button>
+                                  <button className="btn ghost" type="button" onClick={resetMaintenanceEditState}>
+                                    Close
+                                  </button>
+                                  <span className="muted small">{maintenanceEditMsg}</span>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        </>
+    )
+  }
+
   const renderShuttlesTab = () => {
     const selectedOperatorLabel = shuttleOperatorFilter
       ? shuttleOperatorSummary.find((row) => row.id === shuttleOperatorFilter)?.label ||
@@ -2975,7 +4877,7 @@ const SystemDashboard = () => {
     const normalizedType = normalizeShuttleType(shuttleForm.vehicle_type)
     const showSeatCapacity = shouldShowSeatCapacity(normalizedType) || normalizedType === 'OTHER'
     const showLoadCapacity = shouldShowLoadCapacity(normalizedType) || normalizedType === 'OTHER'
-    const shuttlesTableColSpan = 12
+    const shuttlesTableColSpan = 15
     return (
       <>
         <section className="card">
@@ -3196,6 +5098,33 @@ const SystemDashboard = () => {
                   />
                 </label>
                 <label className="muted small">
+                  TLB expiry date
+                  <input
+                    className="input"
+                    type="date"
+                    value={shuttleForm.tlb_expiry_date}
+                    onChange={(e) => setShuttleForm((f) => ({ ...f, tlb_expiry_date: e.target.value }))}
+                  />
+                </label>
+                <label className="muted small">
+                  Insurance expiry date
+                  <input
+                    className="input"
+                    type="date"
+                    value={shuttleForm.insurance_expiry_date}
+                    onChange={(e) => setShuttleForm((f) => ({ ...f, insurance_expiry_date: e.target.value }))}
+                  />
+                </label>
+                <label className="muted small">
+                  Inspection expiry date
+                  <input
+                    className="input"
+                    type="date"
+                    value={shuttleForm.inspection_expiry_date}
+                    onChange={(e) => setShuttleForm((f) => ({ ...f, inspection_expiry_date: e.target.value }))}
+                  />
+                </label>
+                <label className="muted small">
                   Till number *
                   <input
                     className="input"
@@ -3291,8 +5220,11 @@ const SystemDashboard = () => {
                   <th>Make</th>
                   <th>Model</th>
                   <th>Year</th>
+                  <th>Age</th>
+                  <th>Risk</th>
                   <th>Type</th>
                   <th>Capacity</th>
+                  <th>Compliance</th>
                   <th>Operator</th>
                   <th>TLB/License</th>
                   <th>Till</th>
@@ -3318,6 +5250,17 @@ const SystemDashboard = () => {
                       : row.load_capacity_kg
                         ? `${row.load_capacity_kg} kg`
                         : '-'
+                    const age = getVehicleAge(row.year)
+                    const riskScore = getRiskScoreForAge(age)
+                    const maintenanceCount = row.id ? maintenanceCountsByShuttle.get(row.id) || 0 : 0
+                    const adjustedRisk = maintenanceCount >= 3 ? Math.min(100, riskScore + 15) : riskScore
+                    const riskLabel = getRiskLabel(adjustedRisk)
+                    const riskStyle = riskBadgeStyle(adjustedRisk)
+                    const complianceItems = [
+                      { label: 'TLB', value: row.tlb_expiry_date },
+                      { label: 'Insurance', value: row.insurance_expiry_date },
+                      { label: 'Inspection', value: row.inspection_expiry_date },
+                    ]
                     const editType = normalizeShuttleType(shuttleEditForm.vehicle_type)
                     const showSeatEdit = shouldShowSeatCapacity(editType) || editType === 'OTHER'
                     const showLoadEdit = shouldShowLoadCapacity(editType) || editType === 'OTHER'
@@ -3330,15 +5273,85 @@ const SystemDashboard = () => {
                           <td>{row.make || '-'}</td>
                           <td>{row.model || '-'}</td>
                           <td>{row.year || '-'}</td>
+                          <td>{age === null ? '-' : age}</td>
+                          <td>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              <span
+                                style={{
+                                  ...riskStyle,
+                                  padding: '2px 8px',
+                                  borderRadius: 999,
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  width: 'fit-content',
+                                }}
+                              >
+                                {riskLabel} {adjustedRisk}
+                              </span>
+                              {maintenanceCount >= 3 ? (
+                                <span className="muted small">Adjusted +15</span>
+                              ) : null}
+                            </div>
+                          </td>
                           <td>{rowTypeLabel}</td>
                           <td>{capacityLabel}</td>
+                          <td>
+                            <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                              {complianceItems.map((item) => {
+                                const info = getExpiryStatus(item.value)
+                                const label = formatExpiryStatusLabel(info.status)
+                                const style = expiryBadgeStyle(info.status)
+                                const title = item.value
+                                  ? `${item.label} expiry: ${formatExpiryDate(item.value)}`
+                                  : `${item.label} expiry: Unknown`
+                                return (
+                                  <span
+                                    key={item.label}
+                                    title={title}
+                                    style={{
+                                      ...style,
+                                      padding: '2px 6px',
+                                      borderRadius: 999,
+                                      fontSize: 11,
+                                      fontWeight: 700,
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                    }}
+                                  >
+                                    {item.label}: {label}
+                                  </span>
+                                )
+                              })}
+                            </div>
+                          </td>
                           <td>{operatorLabelFor(row)}</td>
                           <td>{row.tlb_license || '-'}</td>
                           <td>{row.till_number || '-'}</td>
                           <td>
-                            <button className="btn ghost" type="button" onClick={() => startShuttleEdit(row)}>
-                              {isEditing ? 'Close' : 'Edit'}
-                            </button>
+                            <div className="row" style={{ gap: 6 }}>
+                              <button className="btn ghost" type="button" onClick={() => startShuttleEdit(row)}>
+                                {isEditing ? 'Close' : 'Edit'}
+                              </button>
+                              <button
+                                className="btn ghost"
+                                type="button"
+                                onClick={() => {
+                                  const shuttleId = row.id || ''
+                                  if (!shuttleId) return
+                                  setMaintenanceFilters((f) => ({
+                                    ...f,
+                                    shuttle_id: shuttleId,
+                                    operator_id: row.operator_id || row.operator?.id || '',
+                                  }))
+                                  setActiveTab('shuttle_care')
+                                }}
+                                disabled={!row.id}
+                              >
+                                Care
+                              </button>
+                            </div>
                           </td>
                         </tr>
                         {isEditing ? (
@@ -3597,6 +5610,39 @@ const SystemDashboard = () => {
                                         />
                                       </label>
                                       <label className="muted small">
+                                        TLB expiry date
+                                        <input
+                                          className="input"
+                                          type="date"
+                                          value={shuttleEditForm.tlb_expiry_date}
+                                          onChange={(e) =>
+                                            setShuttleEditForm((f) => ({ ...f, tlb_expiry_date: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Insurance expiry date
+                                        <input
+                                          className="input"
+                                          type="date"
+                                          value={shuttleEditForm.insurance_expiry_date}
+                                          onChange={(e) =>
+                                            setShuttleEditForm((f) => ({ ...f, insurance_expiry_date: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Inspection expiry date
+                                        <input
+                                          className="input"
+                                          type="date"
+                                          value={shuttleEditForm.inspection_expiry_date}
+                                          onChange={(e) =>
+                                            setShuttleEditForm((f) => ({ ...f, inspection_expiry_date: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
                                         Till number *
                                         <input
                                           className="input"
@@ -3633,6 +5679,7 @@ const SystemDashboard = () => {
       </>
     )
   }
+
 
   const renderTaxiTab = () => {
     const selectedOperatorLabel = taxiOperatorFilter
@@ -4168,6 +6215,7 @@ const SystemDashboard = () => {
       </>
     )
   }
+
 
   const renderBodaTab = () => {
     const selectedOperatorLabel = bodaOperatorFilter
@@ -4710,42 +6758,114 @@ const SystemDashboard = () => {
       </nav>
 
       {activeTab === 'overview' ? (
-      <section className="card">
-        <h3 style={{ margin: '0 0 8px' }}>Platform snapshot</h3>
-        {overviewError ? <div className="err">Overview error: {overviewError}</div> : null}
-        <div className="grid metrics">
-          <div className="metric">
-            <div className="k">SACCOs</div>
-            <div className="v">{counts.saccos ?? '-'}</div>
-          </div>
-          <div className="metric">
-            <div className="k">Matatus</div>
-            <div className="v">{counts.matatus ?? '-'}</div>
-          </div>
-          <div className="metric">
-            <div className="k">Taxis</div>
-            <div className="v">{counts.taxis ?? '-'}</div>
-          </div>
-          <div className="metric">
-            <div className="k">BodaBodas</div>
-            <div className="v">{counts.bodas ?? '-'}</div>
-          </div>
-          <div className="metric">
-            <div className="k">Transactions today</div>
-            <div className="v">{counts.tx_today ?? '-'}</div>
-          </div>
-          <div className="metric">
-            <div className="k">USSD available</div>
-            <div className="v">{pool.available ?? '-'}</div>
-          </div>
-          <div className="metric">
-            <div className="k">USSD total</div>
-            <div className="v">{pool.total ?? '-'}</div>
-          </div>
-        </div>
-      </section>
+        <>
+          <section className="card">
+            <h3 style={{ margin: '0 0 8px' }}>Platform snapshot</h3>
+            {overviewError ? <div className="err">Overview error: {overviewError}</div> : null}
+            <div className="grid metrics">
+              <div className="metric">
+                <div className="k">SACCOs</div>
+                <div className="v">{counts.saccos ?? '-'}</div>
+              </div>
+              <div className="metric">
+                <div className="k">Matatus</div>
+                <div className="v">{counts.matatus ?? '-'}</div>
+              </div>
+              <div className="metric">
+                <div className="k">Taxis</div>
+                <div className="v">{counts.taxis ?? '-'}</div>
+              </div>
+              <div className="metric">
+                <div className="k">BodaBodas</div>
+                <div className="v">{counts.bodas ?? '-'}</div>
+              </div>
+              <div className="metric">
+                <div className="k">Transactions today</div>
+                <div className="v">{counts.tx_today ?? '-'}</div>
+              </div>
+              <div className="metric">
+                <div className="k">USSD available</div>
+                <div className="v">{pool.available ?? '-'}</div>
+              </div>
+              <div className="metric">
+                <div className="k">USSD total</div>
+                <div className="v">{pool.total ?? '-'}</div>
+              </div>
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Compliance alerts</h3>
+              <span className="muted small">
+                {complianceAlerts.length} alert{complianceAlerts.length === 1 ? '' : 's'}
+              </span>
+            </div>
+            <p className="muted small" style={{ marginTop: 6 }}>
+              Expired or due soon in the next 30 days (TLB, insurance, inspection).
+            </p>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Plate</th>
+                    <th>Operator</th>
+                    <th>Expiry type</th>
+                    <th>Expiry date</th>
+                    <th>Days remaining</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {complianceAlerts.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="muted">
+                        No compliance alerts.
+                      </td>
+                    </tr>
+                  ) : (
+                    complianceAlerts.map((alert) => {
+                      const style = expiryBadgeStyle(alert.status)
+                      const statusLabel = formatExpiryStatusLabel(alert.status)
+                      const daysLabel =
+                        alert.status === 'expired'
+                          ? `${Math.abs(alert.daysRemaining)} overdue`
+                          : `${alert.daysRemaining}`
+                      return (
+                        <tr key={alert.id}>
+                          <td>{alert.plate}</td>
+                          <td>{alert.operatorLabel}</td>
+                          <td>{alert.expiryType}</td>
+                          <td>{formatExpiryDate(alert.expiryDate)}</td>
+                          <td>{daysLabel}</td>
+                          <td>
+                            <span
+                              style={{
+                                ...style,
+                                padding: '2px 8px',
+                                borderRadius: 999,
+                                fontSize: 12,
+                                fontWeight: 700,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                              }}
+                            >
+                              {statusLabel}
+                            </span>
+                          </td>
+                        </tr>
+                      )
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
       ) : null}
 
+      {activeTab === 'analytics' ? renderAnalyticsTab() : null}
+      {activeTab === 'shuttle_care' ? renderShuttleCareTab() : null}
       {activeTab === 'saccos' ? (
         <>
           <section className="card">

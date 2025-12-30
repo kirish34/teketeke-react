@@ -804,6 +804,15 @@ router.post('/register-shuttle', async (req,res)=>{
 
   const rawYear = shuttle.year ? Number(shuttle.year) : null;
   const year = Number.isFinite(rawYear) ? Math.trunc(rawYear) : null;
+  const normalizeDate = (value) => {
+    if (!value) return null;
+    const trimmed = String(value).trim();
+    if (!trimmed) return null;
+    return trimmed.slice(0, 10);
+  };
+  const tlbExpiry = normalizeDate(shuttle.tlb_expiry_date);
+  const insuranceExpiry = normalizeDate(shuttle.insurance_expiry_date);
+  const inspectionExpiry = normalizeDate(shuttle.inspection_expiry_date);
 
   const { data: ownerData, error: ownerError } = await supabaseAdmin
     .from('shuttle_owners')
@@ -823,6 +832,9 @@ router.post('/register-shuttle', async (req,res)=>{
     seat_capacity: needsSeatCapacity || vehicleType === 'OTHER' ? seatCapacity : null,
     load_capacity_kg: needsLoadCapacity || vehicleType === 'OTHER' ? loadCapacity : null,
     tlb_license: shuttle.tlb_license ? String(shuttle.tlb_license).trim() : null,
+    tlb_expiry_date: tlbExpiry,
+    insurance_expiry_date: insuranceExpiry,
+    inspection_expiry_date: inspectionExpiry,
     till_number: tillNumber,
     owner_id: ownerData.id,
   };
@@ -890,6 +902,15 @@ router.post('/update-shuttle', async (req,res)=>{
 
   const rawYear = shuttlePayload.year ? Number(shuttlePayload.year) : null;
   const year = Number.isFinite(rawYear) ? Math.trunc(rawYear) : null;
+  const normalizeDate = (value) => {
+    if (!value) return null;
+    const trimmed = String(value).trim();
+    if (!trimmed) return null;
+    return trimmed.slice(0, 10);
+  };
+  const tlbExpiry = normalizeDate(shuttlePayload.tlb_expiry_date);
+  const insuranceExpiry = normalizeDate(shuttlePayload.insurance_expiry_date);
+  const inspectionExpiry = normalizeDate(shuttlePayload.inspection_expiry_date);
 
   const { error: ownerError } = await supabaseAdmin
     .from('shuttle_owners')
@@ -908,6 +929,9 @@ router.post('/update-shuttle', async (req,res)=>{
     seat_capacity: needsSeatCapacity || vehicleType === 'OTHER' ? seatCapacity : null,
     load_capacity_kg: needsLoadCapacity || vehicleType === 'OTHER' ? loadCapacity : null,
     tlb_license: shuttlePayload.tlb_license ? String(shuttlePayload.tlb_license).trim() : null,
+    tlb_expiry_date: tlbExpiry,
+    insurance_expiry_date: insuranceExpiry,
+    inspection_expiry_date: inspectionExpiry,
     till_number: tillNumber,
   };
   const { error: shuttleError } = await supabaseAdmin.from('shuttles').update(shuttleUpdate).eq('id', id);
@@ -1185,6 +1209,199 @@ router.post('/update-boda', async (req,res)=>{
     .from('boda_bikes')
     .select('*, rider:rider_id(*), operator:operator_id(id, display_name, name)')
     .eq('id', id)
+    .single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// Shuttle Care - Maintenance Logs
+router.get('/maintenance-logs', async (req,res)=>{
+  let q = supabaseAdmin
+    .from('maintenance_logs')
+    .select(
+      '*, shuttle:shuttle_id(id, plate, operator_id), operator:operator_id(id, display_name, name), reported_by:reported_by_staff_id(id, name, email), handled_by:handled_by_staff_id(id, name, email)',
+    )
+    .order('occurred_at',{ascending:false});
+  if (req.query.operator_id) q = q.eq('operator_id', req.query.operator_id);
+  if (req.query.shuttle_id) q = q.eq('shuttle_id', req.query.shuttle_id);
+  if (req.query.status) q = q.eq('status', String(req.query.status).toUpperCase());
+  if (req.query.category) q = q.eq('issue_category', String(req.query.category).toUpperCase());
+  const { from, to } = normalizeDateBounds(req.query.from, req.query.to);
+  if (from) q = q.gte('occurred_at', from.toISOString());
+  if (to) q = q.lte('occurred_at', to.toISOString());
+  const { data, error } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ items: data||[] });
+});
+
+router.post('/maintenance-logs', async (req,res)=>{
+  const payload = req.body || {};
+  const shuttleId = payload.shuttle_id || null;
+  let operatorId = payload.operator_id || null;
+  if (!shuttleId) return res.status(400).json({ error: 'shuttle_id required' });
+
+  if (!operatorId) {
+    const { data: shuttleRow, error: shuttleError } = await supabaseAdmin
+      .from('shuttles')
+      .select('operator_id')
+      .eq('id', shuttleId)
+      .maybeSingle();
+    if (shuttleError) return res.status(500).json({ error: shuttleError.message });
+    operatorId = shuttleRow?.operator_id || null;
+  }
+
+  const issueCategory = String(payload.issue_category || '').trim().toUpperCase();
+  const issueDescription = String(payload.issue_description || '').trim();
+  const status = String(payload.status || 'OPEN').trim().toUpperCase();
+  if (!issueCategory) return res.status(400).json({ error: 'issue_category required' });
+  if (!issueDescription) return res.status(400).json({ error: 'issue_description required' });
+  if (!status) return res.status(400).json({ error: 'status required' });
+
+  const parseNumber = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+    const num = Number(value);
+    if (!Number.isFinite(num)) return null;
+    return num;
+  };
+  const parseIntVal = (value) => {
+    const num = parseNumber(value);
+    if (num === null) return null;
+    const intVal = Math.trunc(num);
+    return intVal < 0 ? null : intVal;
+  };
+  const normalizeDate = (value) => {
+    if (!value) return null;
+    const trimmed = String(value).trim();
+    if (!trimmed) return null;
+    return trimmed;
+  };
+  const normalizeParts = (value) => {
+    if (!Array.isArray(value)) return null;
+    const parts = value
+      .map((part) => ({
+        name: String(part?.name || '').trim() || 'Unknown',
+        qty: parseIntVal(part?.qty),
+        cost: parseNumber(part?.cost),
+      }))
+      .filter((part) => part.name || part.qty !== null || part.cost !== null);
+    return parts.length ? parts : null;
+  };
+
+  const occurredAt = normalizeDate(payload.occurred_at) || new Date().toISOString();
+  let resolvedAt = normalizeDate(payload.resolved_at);
+  if (status === 'RESOLVED' && !resolvedAt) resolvedAt = new Date().toISOString();
+
+  const row = {
+    shuttle_id: shuttleId,
+    operator_id: operatorId,
+    reported_by_staff_id: payload.reported_by_staff_id || null,
+    handled_by_staff_id: payload.handled_by_staff_id || null,
+    issue_category: issueCategory,
+    issue_description: issueDescription,
+    parts_used: normalizeParts(payload.parts_used),
+    total_cost_kes: parseNumber(payload.total_cost_kes),
+    downtime_days: parseIntVal(payload.downtime_days),
+    status,
+    occurred_at: occurredAt,
+    resolved_at: resolvedAt,
+    next_service_due: normalizeDate(payload.next_service_due),
+    notes: payload.notes ? String(payload.notes).trim() : null,
+  };
+
+  const { data, error } = await supabaseAdmin
+    .from('maintenance_logs')
+    .insert(row)
+    .select(
+      '*, shuttle:shuttle_id(id, plate, operator_id), operator:operator_id(id, display_name, name), reported_by:reported_by_staff_id(id, name, email), handled_by:handled_by_staff_id(id, name, email)',
+    )
+    .single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+router.post('/maintenance-logs/update', async (req,res)=>{
+  const payload = req.body || {};
+  const id = payload.id || null;
+  const shuttleId = payload.shuttle_id || null;
+  let operatorId = payload.operator_id || null;
+  if (!id) return res.status(400).json({ error: 'id required' });
+  if (!shuttleId) return res.status(400).json({ error: 'shuttle_id required' });
+
+  if (!operatorId) {
+    const { data: shuttleRow, error: shuttleError } = await supabaseAdmin
+      .from('shuttles')
+      .select('operator_id')
+      .eq('id', shuttleId)
+      .maybeSingle();
+    if (shuttleError) return res.status(500).json({ error: shuttleError.message });
+    operatorId = shuttleRow?.operator_id || null;
+  }
+
+  const issueCategory = String(payload.issue_category || '').trim().toUpperCase();
+  const issueDescription = String(payload.issue_description || '').trim();
+  const status = String(payload.status || 'OPEN').trim().toUpperCase();
+  if (!issueCategory) return res.status(400).json({ error: 'issue_category required' });
+  if (!issueDescription) return res.status(400).json({ error: 'issue_description required' });
+  if (!status) return res.status(400).json({ error: 'status required' });
+
+  const parseNumber = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+    const num = Number(value);
+    if (!Number.isFinite(num)) return null;
+    return num;
+  };
+  const parseIntVal = (value) => {
+    const num = parseNumber(value);
+    if (num === null) return null;
+    const intVal = Math.trunc(num);
+    return intVal < 0 ? null : intVal;
+  };
+  const normalizeDate = (value) => {
+    if (!value) return null;
+    const trimmed = String(value).trim();
+    if (!trimmed) return null;
+    return trimmed;
+  };
+  const normalizeParts = (value) => {
+    if (!Array.isArray(value)) return null;
+    const parts = value
+      .map((part) => ({
+        name: String(part?.name || '').trim() || 'Unknown',
+        qty: parseIntVal(part?.qty),
+        cost: parseNumber(part?.cost),
+      }))
+      .filter((part) => part.name || part.qty !== null || part.cost !== null);
+    return parts.length ? parts : null;
+  };
+
+  const occurredAt = normalizeDate(payload.occurred_at) || new Date().toISOString();
+  let resolvedAt = normalizeDate(payload.resolved_at);
+  if (status === 'RESOLVED' && !resolvedAt) resolvedAt = new Date().toISOString();
+
+  const row = {
+    shuttle_id: shuttleId,
+    operator_id: operatorId,
+    reported_by_staff_id: payload.reported_by_staff_id || null,
+    handled_by_staff_id: payload.handled_by_staff_id || null,
+    issue_category: issueCategory,
+    issue_description: issueDescription,
+    parts_used: normalizeParts(payload.parts_used),
+    total_cost_kes: parseNumber(payload.total_cost_kes),
+    downtime_days: parseIntVal(payload.downtime_days),
+    status,
+    occurred_at: occurredAt,
+    resolved_at: resolvedAt,
+    next_service_due: normalizeDate(payload.next_service_due),
+    notes: payload.notes ? String(payload.notes).trim() : null,
+  };
+
+  const { data, error } = await supabaseAdmin
+    .from('maintenance_logs')
+    .update(row)
+    .eq('id', id)
+    .select(
+      '*, shuttle:shuttle_id(id, plate, operator_id), operator:operator_id(id, display_name, name), reported_by:reported_by_staff_id(id, name, email), handled_by:handled_by_staff_id(id, name, email)',
+    )
     .single();
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
