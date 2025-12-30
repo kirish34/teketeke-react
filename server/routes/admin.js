@@ -586,7 +586,6 @@ router.post('/register-sacco', async (req,res)=>{
     registration_no: String(req.body?.registration_no || '').trim() || null,
     status: statusRaw === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE',
     contact_name: String(req.body?.contact_name || '').trim() || null,
-    contact_account_number: String(req.body?.contact_account_number || '').trim() || null,
     contact_phone: String(req.body?.contact_phone || '').trim() || null,
     contact_email: String(req.body?.contact_email || '').trim() || null,
     default_till: String(req.body?.default_till || '').trim() || null,
