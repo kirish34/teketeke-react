@@ -273,6 +273,10 @@ type ShuttleRow = {
   make?: string | null
   model?: string | null
   year?: number | null
+  vehicle_type?: string | null
+  vehicle_type_other?: string | null
+  seat_capacity?: number | null
+  load_capacity_kg?: number | null
   operator_id?: string | null
   tlb_license?: string | null
   till_number?: string | null
@@ -395,6 +399,32 @@ function createOperatorForm(operatorType?: string | null) {
   }
 }
 
+const SHUTTLE_TYPE_OPTIONS = [
+  { value: 'VAN', label: 'VAN' },
+  { value: 'MINIBUS', label: 'MINIBUS' },
+  { value: 'BUS', label: 'BUS' },
+  { value: 'PICKUP', label: 'PICKUP' },
+  { value: 'LORRY', label: 'LORRY' },
+  { value: 'OTHER', label: 'OTHER' },
+]
+
+const SEAT_CAPACITY_TYPES = new Set(['VAN', 'MINIBUS', 'BUS'])
+const LOAD_CAPACITY_TYPES = new Set(['PICKUP', 'LORRY'])
+
+function normalizeShuttleType(value?: string | null) {
+  return String(value || '').trim().toUpperCase()
+}
+
+function shouldShowSeatCapacity(value?: string | null) {
+  const normalized = normalizeShuttleType(value)
+  return SEAT_CAPACITY_TYPES.has(normalized)
+}
+
+function shouldShowLoadCapacity(value?: string | null) {
+  const normalized = normalizeShuttleType(value)
+  return LOAD_CAPACITY_TYPES.has(normalized)
+}
+
 function createShuttleOwnerForm() {
   return {
     full_name: '',
@@ -415,6 +445,10 @@ function createShuttleForm() {
     make: '',
     model: '',
     year: '',
+    vehicle_type: '',
+    vehicle_type_other: '',
+    seat_capacity: '',
+    load_capacity_kg: '',
     operator_id: '',
     tlb_license: '',
     till_number: '',
@@ -442,6 +476,16 @@ function parseYearInput(value: string) {
   const num = Number(trimmed)
   if (!Number.isFinite(num)) return null
   return Math.trunc(num)
+}
+
+function parsePositiveIntInput(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  const num = Number(trimmed)
+  if (!Number.isFinite(num)) return null
+  const intVal = Math.trunc(num)
+  if (intVal <= 0) return null
+  return intVal
 }
 
 function formatDateInput(value?: string | null) {
@@ -1247,6 +1291,10 @@ const SystemDashboard = () => {
       make: row.make || '',
       model: row.model || '',
       year: row.year ? String(row.year) : '',
+      vehicle_type: normalizeShuttleType(row.vehicle_type) || 'MINIBUS',
+      vehicle_type_other: row.vehicle_type_other || '',
+      seat_capacity: row.seat_capacity ? String(row.seat_capacity) : '',
+      load_capacity_kg: row.load_capacity_kg ? String(row.load_capacity_kg) : '',
       operator_id: row.operator_id || row.operator?.id || '',
       tlb_license: row.tlb_license || '',
       till_number: row.till_number || '',
@@ -1267,11 +1315,20 @@ const SystemDashboard = () => {
       location: shuttleOwnerForm.location.trim() || null,
       date_of_birth: shuttleOwnerForm.date_of_birth || null,
     }
+    const vehicleType = normalizeShuttleType(shuttleForm.vehicle_type)
+    const seatCapacityInput = shuttleForm.seat_capacity.trim()
+    const loadCapacityInput = shuttleForm.load_capacity_kg.trim()
+    const seatCapacity = parsePositiveIntInput(seatCapacityInput)
+    const loadCapacity = parsePositiveIntInput(loadCapacityInput)
     const shuttlePayload = {
       plate: shuttleForm.plate.trim().toUpperCase(),
       make: shuttleForm.make.trim() || null,
       model: shuttleForm.model.trim() || null,
       year: parseYearInput(shuttleForm.year),
+      vehicle_type: vehicleType || null,
+      vehicle_type_other: vehicleType === 'OTHER' ? shuttleForm.vehicle_type_other.trim() || null : null,
+      seat_capacity: shouldShowSeatCapacity(vehicleType) || vehicleType === 'OTHER' ? seatCapacity : null,
+      load_capacity_kg: shouldShowLoadCapacity(vehicleType) || vehicleType === 'OTHER' ? loadCapacity : null,
       operator_id: shuttleForm.operator_id || null,
       tlb_license: shuttleForm.tlb_license.trim() || null,
       till_number: shuttleForm.till_number.trim(),
@@ -1298,6 +1355,28 @@ const SystemDashboard = () => {
     }
     if (!shuttlePayload.operator_id) {
       setShuttleMsg('Operator is required')
+      return
+    }
+    if (!vehicleType) {
+      setShuttleMsg('Vehicle type is required')
+      return
+    }
+    if (shouldShowSeatCapacity(vehicleType)) {
+      if (!seatCapacity) {
+        setShuttleMsg('Seat capacity is required')
+        return
+      }
+    } else if (seatCapacityInput && !seatCapacity) {
+      setShuttleMsg('Seat capacity must be a positive integer')
+      return
+    }
+    if (shouldShowLoadCapacity(vehicleType)) {
+      if (!loadCapacity) {
+        setShuttleMsg('Load capacity is required')
+        return
+      }
+    } else if (loadCapacityInput && !loadCapacity) {
+      setShuttleMsg('Load capacity must be a positive integer')
       return
     }
     if (!shuttlePayload.till_number) {
@@ -1331,11 +1410,20 @@ const SystemDashboard = () => {
       location: shuttleEditOwnerForm.location.trim() || null,
       date_of_birth: shuttleEditOwnerForm.date_of_birth || null,
     }
+    const vehicleType = normalizeShuttleType(shuttleEditForm.vehicle_type)
+    const seatCapacityInput = shuttleEditForm.seat_capacity.trim()
+    const loadCapacityInput = shuttleEditForm.load_capacity_kg.trim()
+    const seatCapacity = parsePositiveIntInput(seatCapacityInput)
+    const loadCapacity = parsePositiveIntInput(loadCapacityInput)
     const shuttlePayload = {
       plate: shuttleEditForm.plate.trim().toUpperCase(),
       make: shuttleEditForm.make.trim() || null,
       model: shuttleEditForm.model.trim() || null,
       year: parseYearInput(shuttleEditForm.year),
+      vehicle_type: vehicleType || null,
+      vehicle_type_other: vehicleType === 'OTHER' ? shuttleEditForm.vehicle_type_other.trim() || null : null,
+      seat_capacity: shouldShowSeatCapacity(vehicleType) || vehicleType === 'OTHER' ? seatCapacity : null,
+      load_capacity_kg: shouldShowLoadCapacity(vehicleType) || vehicleType === 'OTHER' ? loadCapacity : null,
       operator_id: shuttleEditForm.operator_id || null,
       tlb_license: shuttleEditForm.tlb_license.trim() || null,
       till_number: shuttleEditForm.till_number.trim(),
@@ -1362,6 +1450,28 @@ const SystemDashboard = () => {
     }
     if (!shuttlePayload.operator_id) {
       setShuttleEditMsg('Operator is required')
+      return
+    }
+    if (!vehicleType) {
+      setShuttleEditMsg('Vehicle type is required')
+      return
+    }
+    if (shouldShowSeatCapacity(vehicleType)) {
+      if (!seatCapacity) {
+        setShuttleEditMsg('Seat capacity is required')
+        return
+      }
+    } else if (seatCapacityInput && !seatCapacity) {
+      setShuttleEditMsg('Seat capacity must be a positive integer')
+      return
+    }
+    if (shouldShowLoadCapacity(vehicleType)) {
+      if (!loadCapacity) {
+        setShuttleEditMsg('Load capacity is required')
+        return
+      }
+    } else if (loadCapacityInput && !loadCapacity) {
+      setShuttleEditMsg('Load capacity must be a positive integer')
       return
     }
     if (!shuttlePayload.till_number) {
@@ -2371,7 +2481,10 @@ const SystemDashboard = () => {
         operatorOptions.find((row) => row.id === shuttleOperatorFilter)?.label ||
         shuttleOperatorFilter
       : 'All operators'
-    const shuttlesTableColSpan = 10
+    const normalizedType = normalizeShuttleType(shuttleForm.vehicle_type)
+    const showSeatCapacity = shouldShowSeatCapacity(normalizedType) || normalizedType === 'OTHER'
+    const showLoadCapacity = shouldShowLoadCapacity(normalizedType) || normalizedType === 'OTHER'
+    const shuttlesTableColSpan = 12
     return (
       <>
         <section className="card">
@@ -2505,6 +2618,69 @@ const SystemDashboard = () => {
                   />
                 </label>
                 <label className="muted small">
+                  Shuttle type / vehicle type *
+                  <select
+                    value={shuttleForm.vehicle_type}
+                    onChange={(e) => {
+                      const nextType = e.target.value
+                      const normalized = normalizeShuttleType(nextType)
+                      setShuttleForm((f) => ({
+                        ...f,
+                        vehicle_type: nextType,
+                        vehicle_type_other: normalized === 'OTHER' ? f.vehicle_type_other : '',
+                        seat_capacity: shouldShowSeatCapacity(normalized) || normalized === 'OTHER' ? f.seat_capacity : '',
+                        load_capacity_kg:
+                          shouldShowLoadCapacity(normalized) || normalized === 'OTHER' ? f.load_capacity_kg : '',
+                      }))
+                    }}
+                    style={{ padding: 10 }}
+                  >
+                    <option value="">Select type</option>
+                    {SHUTTLE_TYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {normalizedType === 'OTHER' ? (
+                  <label className="muted small">
+                    Other type (optional)
+                    <input
+                      className="input"
+                      value={shuttleForm.vehicle_type_other}
+                      onChange={(e) => setShuttleForm((f) => ({ ...f, vehicle_type_other: e.target.value }))}
+                      placeholder="Describe type"
+                    />
+                  </label>
+                ) : null}
+                {showSeatCapacity ? (
+                  <label className="muted small">
+                    Seat capacity {shouldShowSeatCapacity(normalizedType) ? '*' : ''}
+                    <input
+                      className="input"
+                      type="number"
+                      min={1}
+                      value={shuttleForm.seat_capacity}
+                      onChange={(e) => setShuttleForm((f) => ({ ...f, seat_capacity: e.target.value }))}
+                      placeholder="Number of seats"
+                    />
+                  </label>
+                ) : null}
+                {showLoadCapacity ? (
+                  <label className="muted small">
+                    Load capacity (kg) {shouldShowLoadCapacity(normalizedType) ? '*' : ''}
+                    <input
+                      className="input"
+                      type="number"
+                      min={1}
+                      value={shuttleForm.load_capacity_kg}
+                      onChange={(e) => setShuttleForm((f) => ({ ...f, load_capacity_kg: e.target.value }))}
+                      placeholder="Weight in kg"
+                    />
+                  </label>
+                ) : null}
+                <label className="muted small">
                   Operator *
                   <select
                     value={shuttleForm.operator_id}
@@ -2624,6 +2800,8 @@ const SystemDashboard = () => {
                   <th>Make</th>
                   <th>Model</th>
                   <th>Year</th>
+                  <th>Type</th>
+                  <th>Capacity</th>
                   <th>Operator</th>
                   <th>TLB/License</th>
                   <th>Till</th>
@@ -2640,6 +2818,18 @@ const SystemDashboard = () => {
                 ) : (
                   filteredShuttles.map((row) => {
                     const isEditing = shuttleEditId && row.id === shuttleEditId
+                    const rowType = normalizeShuttleType(row.vehicle_type) || 'MINIBUS'
+                    const rowTypeLabel =
+                      rowType === 'OTHER' ? `OTHER${row.vehicle_type_other ? ` (${row.vehicle_type_other})` : ''}` : rowType
+                    // TODO: Use capacity data for fleet analysis, revenue per seat/kg, utilization, and operator comparisons.
+                    const capacityLabel = row.seat_capacity
+                      ? `${row.seat_capacity} seats`
+                      : row.load_capacity_kg
+                        ? `${row.load_capacity_kg} kg`
+                        : '-'
+                    const editType = normalizeShuttleType(shuttleEditForm.vehicle_type)
+                    const showSeatEdit = shouldShowSeatCapacity(editType) || editType === 'OTHER'
+                    const showLoadEdit = shouldShowLoadCapacity(editType) || editType === 'OTHER'
                     return (
                       <Fragment key={row.id || row.plate}>
                         <tr>
@@ -2649,6 +2839,8 @@ const SystemDashboard = () => {
                           <td>{row.make || '-'}</td>
                           <td>{row.model || '-'}</td>
                           <td>{row.year || '-'}</td>
+                          <td>{rowTypeLabel}</td>
+                          <td>{capacityLabel}</td>
                           <td>{operatorLabelFor(row)}</td>
                           <td>{row.tlb_license || '-'}</td>
                           <td>{row.till_number || '-'}</td>
@@ -2812,6 +3004,80 @@ const SystemDashboard = () => {
                                           }
                                         />
                                       </label>
+                                      <label className="muted small">
+                                        Shuttle type / vehicle type *
+                                        <select
+                                          value={shuttleEditForm.vehicle_type}
+                                          onChange={(e) => {
+                                            const nextType = e.target.value
+                                            const normalized = normalizeShuttleType(nextType)
+                                            setShuttleEditForm((f) => ({
+                                              ...f,
+                                              vehicle_type: nextType,
+                                              vehicle_type_other: normalized === 'OTHER' ? f.vehicle_type_other : '',
+                                              seat_capacity:
+                                                shouldShowSeatCapacity(normalized) || normalized === 'OTHER'
+                                                  ? f.seat_capacity
+                                                  : '',
+                                              load_capacity_kg:
+                                                shouldShowLoadCapacity(normalized) || normalized === 'OTHER'
+                                                  ? f.load_capacity_kg
+                                                  : '',
+                                            }))
+                                          }}
+                                          style={{ padding: 10 }}
+                                        >
+                                          <option value="">Select type</option>
+                                          {SHUTTLE_TYPE_OPTIONS.map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                              {option.label}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </label>
+                                      {editType === 'OTHER' ? (
+                                        <label className="muted small">
+                                          Other type (optional)
+                                          <input
+                                            className="input"
+                                            value={shuttleEditForm.vehicle_type_other}
+                                            onChange={(e) =>
+                                              setShuttleEditForm((f) => ({
+                                                ...f,
+                                                vehicle_type_other: e.target.value,
+                                              }))
+                                            }
+                                          />
+                                        </label>
+                                      ) : null}
+                                      {showSeatEdit ? (
+                                        <label className="muted small">
+                                          Seat capacity {shouldShowSeatCapacity(editType) ? '*' : ''}
+                                          <input
+                                            className="input"
+                                            type="number"
+                                            min={1}
+                                            value={shuttleEditForm.seat_capacity}
+                                            onChange={(e) =>
+                                              setShuttleEditForm((f) => ({ ...f, seat_capacity: e.target.value }))
+                                            }
+                                          />
+                                        </label>
+                                      ) : null}
+                                      {showLoadEdit ? (
+                                        <label className="muted small">
+                                          Load capacity (kg) {shouldShowLoadCapacity(editType) ? '*' : ''}
+                                          <input
+                                            className="input"
+                                            type="number"
+                                            min={1}
+                                            value={shuttleEditForm.load_capacity_kg}
+                                            onChange={(e) =>
+                                              setShuttleEditForm((f) => ({ ...f, load_capacity_kg: e.target.value }))
+                                            }
+                                          />
+                                        </label>
+                                      ) : null}
                                       <label className="muted small">
                                         Operator *
                                         <select

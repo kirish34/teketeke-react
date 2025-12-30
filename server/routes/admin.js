@@ -770,9 +770,38 @@ router.post('/register-shuttle', async (req,res)=>{
   const plate = String(shuttle.plate || '').trim().toUpperCase();
   const operatorId = shuttle.operator_id || null;
   const tillNumber = String(shuttle.till_number || '').trim();
+  const vehicleType = String(shuttle.vehicle_type || '').trim().toUpperCase();
+  const vehicleTypeOther = vehicleType === 'OTHER' ? String(shuttle.vehicle_type_other || '').trim() : '';
   if (!plate) return res.status(400).json({ error: 'plate required' });
   if (!operatorId) return res.status(400).json({ error: 'operator_id required' });
+  if (!vehicleType) return res.status(400).json({ error: 'vehicle_type required' });
   if (!tillNumber) return res.status(400).json({ error: 'till_number required' });
+
+  const parsePositiveInt = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+    const num = Number(value);
+    if (!Number.isFinite(num)) return null;
+    const intVal = Math.trunc(num);
+    if (intVal <= 0) return null;
+    return intVal;
+  };
+  const seatCapacityRaw = shuttle.seat_capacity;
+  const loadCapacityRaw = shuttle.load_capacity_kg;
+  const seatCapacity = parsePositiveInt(seatCapacityRaw);
+  const loadCapacity = parsePositiveInt(loadCapacityRaw);
+  const needsSeatCapacity = ['VAN','MINIBUS','BUS'].includes(vehicleType);
+  const needsLoadCapacity = ['PICKUP','LORRY'].includes(vehicleType);
+  const seatCapacityProvided = seatCapacityRaw !== null && seatCapacityRaw !== undefined && String(seatCapacityRaw).trim() !== '';
+  const loadCapacityProvided = loadCapacityRaw !== null && loadCapacityRaw !== undefined && String(loadCapacityRaw).trim() !== '';
+
+  if (needsSeatCapacity && !seatCapacity) return res.status(400).json({ error: 'seat_capacity required' });
+  if (needsLoadCapacity && !loadCapacity) return res.status(400).json({ error: 'load_capacity_kg required' });
+  if (!needsSeatCapacity && seatCapacityProvided && !seatCapacity) {
+    return res.status(400).json({ error: 'seat_capacity must be positive integer' });
+  }
+  if (!needsLoadCapacity && loadCapacityProvided && !loadCapacity) {
+    return res.status(400).json({ error: 'load_capacity_kg must be positive integer' });
+  }
 
   const rawYear = shuttle.year ? Number(shuttle.year) : null;
   const year = Number.isFinite(rawYear) ? Math.trunc(rawYear) : null;
@@ -790,6 +819,10 @@ router.post('/register-shuttle', async (req,res)=>{
     model: shuttle.model ? String(shuttle.model).trim() : null,
     year,
     operator_id: operatorId,
+    vehicle_type: vehicleType,
+    vehicle_type_other: vehicleType === 'OTHER' && vehicleTypeOther ? vehicleTypeOther : null,
+    seat_capacity: needsSeatCapacity || vehicleType === 'OTHER' ? seatCapacity : null,
+    load_capacity_kg: needsLoadCapacity || vehicleType === 'OTHER' ? loadCapacity : null,
     tlb_license: shuttle.tlb_license ? String(shuttle.tlb_license).trim() : null,
     till_number: tillNumber,
     owner_id: ownerData.id,
@@ -823,9 +856,38 @@ router.post('/update-shuttle', async (req,res)=>{
   const plate = String(shuttlePayload.plate || '').trim().toUpperCase();
   const operatorId = shuttlePayload.operator_id || null;
   const tillNumber = String(shuttlePayload.till_number || '').trim();
+  const vehicleType = String(shuttlePayload.vehicle_type || '').trim().toUpperCase();
+  const vehicleTypeOther = vehicleType === 'OTHER' ? String(shuttlePayload.vehicle_type_other || '').trim() : '';
   if (!plate) return res.status(400).json({ error: 'plate required' });
   if (!operatorId) return res.status(400).json({ error: 'operator_id required' });
+  if (!vehicleType) return res.status(400).json({ error: 'vehicle_type required' });
   if (!tillNumber) return res.status(400).json({ error: 'till_number required' });
+
+  const parsePositiveInt = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+    const num = Number(value);
+    if (!Number.isFinite(num)) return null;
+    const intVal = Math.trunc(num);
+    if (intVal <= 0) return null;
+    return intVal;
+  };
+  const seatCapacityRaw = shuttlePayload.seat_capacity;
+  const loadCapacityRaw = shuttlePayload.load_capacity_kg;
+  const seatCapacity = parsePositiveInt(seatCapacityRaw);
+  const loadCapacity = parsePositiveInt(loadCapacityRaw);
+  const needsSeatCapacity = ['VAN','MINIBUS','BUS'].includes(vehicleType);
+  const needsLoadCapacity = ['PICKUP','LORRY'].includes(vehicleType);
+  const seatCapacityProvided = seatCapacityRaw !== null && seatCapacityRaw !== undefined && String(seatCapacityRaw).trim() !== '';
+  const loadCapacityProvided = loadCapacityRaw !== null && loadCapacityRaw !== undefined && String(loadCapacityRaw).trim() !== '';
+
+  if (needsSeatCapacity && !seatCapacity) return res.status(400).json({ error: 'seat_capacity required' });
+  if (needsLoadCapacity && !loadCapacity) return res.status(400).json({ error: 'load_capacity_kg required' });
+  if (!needsSeatCapacity && seatCapacityProvided && !seatCapacity) {
+    return res.status(400).json({ error: 'seat_capacity must be positive integer' });
+  }
+  if (!needsLoadCapacity && loadCapacityProvided && !loadCapacity) {
+    return res.status(400).json({ error: 'load_capacity_kg must be positive integer' });
+  }
 
   const rawYear = shuttlePayload.year ? Number(shuttlePayload.year) : null;
   const year = Number.isFinite(rawYear) ? Math.trunc(rawYear) : null;
@@ -842,6 +904,10 @@ router.post('/update-shuttle', async (req,res)=>{
     model: shuttlePayload.model ? String(shuttlePayload.model).trim() : null,
     year,
     operator_id: operatorId,
+    vehicle_type: vehicleType,
+    vehicle_type_other: vehicleType === 'OTHER' && vehicleTypeOther ? vehicleTypeOther : null,
+    seat_capacity: needsSeatCapacity || vehicleType === 'OTHER' ? seatCapacity : null,
+    load_capacity_kg: needsLoadCapacity || vehicleType === 'OTHER' ? loadCapacity : null,
     tlb_license: shuttlePayload.tlb_license ? String(shuttlePayload.tlb_license).trim() : null,
     till_number: tillNumber,
   };
