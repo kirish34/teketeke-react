@@ -201,8 +201,6 @@ type SystemTabId =
 
 type VehicleKind = 'MATATU' | 'TAXI' | 'BODABODA'
 
-type VehicleTabKey = 'matatu' | 'taxis' | 'bodabodas'
-
 type SaccoRow = {
   id?: string
   sacco_id?: string
@@ -754,7 +752,6 @@ const SystemDashboard = () => {
   const [saccosError, setSaccosError] = useState<string | null>(null)
 
   const [matatus, setMatatus] = useState<VehicleRow[]>([])
-  const [vehiclesError, setVehiclesError] = useState<string | null>(null)
 
   const [finance, setFinance] = useState<FinanceOverview | null>(null)
   const [financeError, setFinanceError] = useState<string | null>(null)
@@ -898,28 +895,6 @@ const SystemDashboard = () => {
   const [bodaEditMsg, setBodaEditMsg] = useState('')
   const [bodaEditError, setBodaEditError] = useState<string | null>(null)
 
-  const [matatuForm, setMatatuForm] = useState({
-    plate: '',
-    owner: '',
-    phone: '',
-    till: '',
-    sacco: '',
-    body: '',
-  })
-  const [matatuMsg, setMatatuMsg] = useState('')
-  const [vehicleEditId, setVehicleEditId] = useState('')
-  const [vehicleEditKind, setVehicleEditKind] = useState<VehicleKind | ''>('')
-  const [vehicleEditForm, setVehicleEditForm] = useState({
-    number_plate: '',
-    owner_name: '',
-    owner_phone: '',
-    sacco_id: '',
-    tlb_number: '',
-    till_number: '',
-  })
-  const [vehicleEditMsg, setVehicleEditMsg] = useState('')
-  const [vehicleEditError, setVehicleEditError] = useState<string | null>(null)
-
   const [ussdAssignForm, setUssdAssignForm] = useState({
     prefix: '',
     tier: '',
@@ -1000,12 +975,6 @@ const SystemDashboard = () => {
     if (!next || next === 'registry') return
     setActiveTab((prev) => (prev === next ? prev : next))
   }, [tabFromState, tabFromPath])
-
-  const vehicleTabMeta: Record<VehicleTabKey, { label: string; plural: string; type: VehicleKind }> = {
-    matatu: { label: 'Matatu', plural: 'Matatus', type: 'MATATU' },
-    taxis: { label: 'Taxi', plural: 'Taxis', type: 'TAXI' },
-    bodabodas: { label: 'BodaBoda', plural: 'BodaBodas', type: 'BODABODA' },
-  }
 
   const selectedRoute = useMemo(
     () => routes.find((r) => (r.id || '') === routeEditId) || null,
@@ -1367,74 +1336,6 @@ const SystemDashboard = () => {
     } catch (err) {
       setSaccoEditMsg('')
       setSaccoEditError(err instanceof Error ? err.message : 'Update failed')
-    }
-  }
-
-  function startVehicleEdit(row: VehicleRow, kind: VehicleKind) {
-    const id = row.id
-    if (!id) return
-    if (vehicleEditId === id && vehicleEditKind === kind) {
-      setVehicleEditId('')
-      setVehicleEditKind('')
-      setVehicleEditMsg('')
-      setVehicleEditError(null)
-      return
-    }
-    setVehicleEditId(id)
-    setVehicleEditKind(kind)
-    setVehicleEditMsg('')
-    setVehicleEditError(null)
-    setVehicleEditForm({
-      number_plate: row.number_plate || row.plate || row.registration || '',
-      owner_name: row.owner_name || '',
-      owner_phone: row.owner_phone || '',
-      sacco_id: row.sacco_id || '',
-      tlb_number: row.tlb_number || '',
-      till_number: row.till_number || '',
-    })
-  }
-
-  async function saveVehicleEdit() {
-    if (!vehicleEditId) return
-    setVehicleEditMsg('Saving...')
-    setVehicleEditError(null)
-    try {
-      const payload = {
-        id: vehicleEditId,
-        number_plate: vehicleEditForm.number_plate.trim().toUpperCase(),
-        owner_name: vehicleEditForm.owner_name.trim() || null,
-        owner_phone: vehicleEditForm.owner_phone.trim() || null,
-        sacco_id: vehicleEditForm.sacco_id || null,
-        tlb_number: vehicleEditForm.tlb_number.trim() || null,
-        till_number: vehicleEditForm.till_number.trim() || null,
-      }
-      if (!payload.number_plate) {
-        setVehicleEditMsg('Plate is required')
-        return
-      }
-      if (vehicleEditKind === 'MATATU' && !payload.sacco_id) {
-        setVehicleEditMsg('Select a SACCO for this matatu')
-        return
-      }
-      const data = await sendJson<VehicleRow>('/api/admin/update-matatu', 'POST', payload)
-      setVehicleEditMsg(`${vehicleEditKind || 'Vehicle'} updated`)
-      setVehicleEditForm({
-        number_plate: data.number_plate || payload.number_plate,
-        owner_name: data.owner_name || '',
-        owner_phone: data.owner_phone || '',
-        sacco_id: data.sacco_id || payload.sacco_id || '',
-        tlb_number: data.tlb_number || '',
-        till_number: data.till_number || '',
-      })
-      try {
-        const rows = await fetchList<VehicleRow>('/api/admin/matatus')
-        setMatatus(rows)
-      } catch (err) {
-        setVehiclesError(err instanceof Error ? err.message : String(err))
-      }
-    } catch (err) {
-      setVehicleEditMsg('')
-      setVehicleEditError(err instanceof Error ? err.message : 'Update failed')
     }
   }
 
@@ -2313,13 +2214,6 @@ const SystemDashboard = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [parsedRoutePoints])
 
-  useEffect(() => {
-    const forcedBody =
-      activeTab === 'matatu' ? 'MATATU' : activeTab === 'taxis' ? 'TAXI' : activeTab === 'bodabodas' ? 'BODABODA' : ''
-    if (!forcedBody) return
-    setMatatuForm((f) => (f.body === forcedBody ? f : { ...f, body: forcedBody }))
-  }, [activeTab])
-
   async function loadWallet(code: string) {
     const clean = code.trim()
     if (!clean) return
@@ -2744,7 +2638,7 @@ const SystemDashboard = () => {
           const rows = await fetchList<VehicleRow>('/api/admin/matatus')
           setMatatus(rows)
         } catch (err) {
-          setVehiclesError(err instanceof Error ? err.message : String(err))
+          console.warn('matatu refresh failed', err)
         }
       } else {
         await sendJson('/api/admin/update-sacco', 'POST', { id: targetId, default_till: paybillAccount })
@@ -2810,7 +2704,7 @@ const SystemDashboard = () => {
       const rows = await fetchList<VehicleRow>('/api/admin/matatus')
       setMatatus(rows)
     } catch (err) {
-      setVehiclesError(err instanceof Error ? err.message : String(err))
+      console.warn('matatu refresh failed', err)
     }
   }
 
@@ -3035,7 +2929,7 @@ const SystemDashboard = () => {
         .catch((err) => setSaccosError(err instanceof Error ? err.message : String(err)))
       fetchList<VehicleRow>('/api/admin/matatus')
         .then((rows) => setMatatus(rows))
-        .catch((err) => setVehiclesError(err instanceof Error ? err.message : String(err)))
+        .catch((err) => console.warn('matatu load failed', err))
       Promise.all([
         fetchJson<PlatformTotals>(
           '/api/admin/platform-overview?from=' + getRange('today').from + '&to=' + getRange('today').to,
@@ -4786,238 +4680,6 @@ const SystemDashboard = () => {
                     )
                   })
                 )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </>
-    )
-  }
-
-  const renderVehicleTab = (meta: { label: string; plural: string; type: VehicleKind }) => {
-    const rows = vehiclesFor(meta.type)
-    const editActive = vehicleEditId && vehicleEditKind === meta.type
-    return (
-      <>
-        <section className="card">
-          <h3 style={{ marginTop: 0 }}>Register {meta.label}</h3>
-          <div className="row">
-            <input
-              className="input"
-              placeholder="Plate (KDA123A)"
-              value={matatuForm.plate}
-              onChange={(e) => setMatatuForm((f) => ({ ...f, plate: e.target.value }))}
-            />
-            <input
-              className="input"
-              placeholder="Owner name"
-              value={matatuForm.owner}
-              onChange={(e) => setMatatuForm((f) => ({ ...f, owner: e.target.value }))}
-            />
-            <input
-              className="input"
-              placeholder="Owner phone"
-              value={matatuForm.phone}
-              onChange={(e) => setMatatuForm((f) => ({ ...f, phone: e.target.value }))}
-            />
-            <input
-              className="input"
-              placeholder="Till number"
-              value={matatuForm.till}
-              onChange={(e) => setMatatuForm((f) => ({ ...f, till: e.target.value }))}
-            />
-            <select
-              value={matatuForm.sacco}
-              onChange={(e) => setMatatuForm((f) => ({ ...f, sacco: e.target.value }))}
-              style={{ padding: 10 }}
-            >
-              <option value="">Select SACCO</option>
-              {saccos.map((s) => (
-                <option key={s.id || s.sacco_id} value={s.id || s.sacco_id || ''}>
-                  {s.display_name || s.name || s.sacco_name || s.sacco_id}
-                </option>
-              ))}
-            </select>
-            <select value={matatuForm.body} disabled style={{ padding: 10 }}>
-              <option value={meta.type}>{meta.label}</option>
-            </select>
-            <button
-              className="btn"
-              type="button"
-              onClick={async () => {
-                setMatatuMsg('Saving...')
-                try {
-                  await sendJson('/api/admin/register-matatu', 'POST', {
-                    number_plate: matatuForm.plate.trim(),
-                    owner_name: matatuForm.owner.trim(),
-                    owner_phone: matatuForm.phone.trim(),
-                    till_number: matatuForm.till.trim(),
-                    sacco_id: matatuForm.sacco || null,
-                    vehicle_type: matatuForm.body || null,
-                  })
-                  setMatatuMsg(`${meta.label} registered`)
-                  setMatatuForm({ plate: '', owner: '', phone: '', till: '', sacco: '', body: meta.type })
-                  await fetchList<VehicleRow>('/api/admin/matatus')
-                    .then((rows) => setMatatus(rows))
-                    .catch((err) => setVehiclesError(err instanceof Error ? err.message : String(err)))
-                } catch (err) {
-                  const msg = err instanceof Error ? err.message : 'Create failed'
-                  if (/created but wallet failed/i.test(msg)) {
-                    setMatatuMsg(msg)
-                    setMatatuForm({ plate: '', owner: '', phone: '', till: '', sacco: '', body: meta.type })
-                    await fetchList<VehicleRow>('/api/admin/matatus')
-                      .then((rows) => setMatatus(rows))
-                      .catch((loadErr) => setVehiclesError(loadErr instanceof Error ? loadErr.message : String(loadErr)))
-                    return
-                  }
-                  setMatatuMsg(msg)
-                }
-              }}
-            >
-              Register {meta.label}
-            </button>
-          </div>
-          <div className="muted small">{matatuMsg}</div>
-        </section>
-
-        <section className="card">
-          <div className="topline">
-            <h3 style={{ margin: 0 }}>{meta.plural}</h3>
-            <span className="muted small">
-              Showing {rows.length} record{rows.length === 1 ? '' : 's'}
-            </span>
-          </div>
-          {vehiclesError ? <div className="err">Vehicle load error: {vehiclesError}</div> : null}
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Plate</th>
-                  <th>Owner</th>
-                  <th>Phone</th>
-                  <th>SACCO</th>
-                  <th>Type</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="muted">
-                      No vehicles yet.
-                    </td>
-                  </tr>
-                  ) : (
-                  rows.map((v) => {
-                    const isEditing = !!v.id && editActive && v.id === vehicleEditId
-                    return (
-                      <Fragment key={v.id || v.plate || v.registration}>
-                        <tr>
-                          <td>{v.plate || v.number_plate || v.registration || '-'}</td>
-                          <td>{v.owner_name || '-'}</td>
-                          <td>{v.owner_phone || '-'}</td>
-                          <td>{v.sacco_name || v.sacco || '-'}</td>
-                          <td>{normalizeVehicleType(v.vehicle_type || v.body_type || v.type) || '-'}</td>
-                          <td>
-                            <button className="btn ghost" type="button" onClick={() => startVehicleEdit(v, meta.type)}>
-                              {isEditing ? 'Close' : 'Edit'}
-                            </button>
-                          </td>
-                        </tr>
-                        {isEditing ? (
-                          <tr>
-                            <td colSpan={6}>
-                              <div className="card" style={{ margin: '6px 0' }}>
-                                <div className="topline">
-                                  <h3 style={{ margin: 0 }}>Edit {meta.label}</h3>
-                                  <span className="muted small">
-                                    {formatVehicleLabel(v)} | ID: {vehicleEditId}
-                                  </span>
-                                </div>
-                                {vehicleEditError ? <div className="err">Update error: {vehicleEditError}</div> : null}
-                                <div className="grid g2">
-                                  <label className="muted small">
-                                    Plate
-                                    <input
-                                      className="input"
-                                      value={vehicleEditForm.number_plate}
-                                      onChange={(e) => setVehicleEditForm((f) => ({ ...f, number_plate: e.target.value }))}
-                                    />
-                                  </label>
-                                  <label className="muted small">
-                                    Owner name
-                                    <input
-                                      className="input"
-                                      value={vehicleEditForm.owner_name}
-                                      onChange={(e) => setVehicleEditForm((f) => ({ ...f, owner_name: e.target.value }))}
-                                    />
-                                  </label>
-                                  <label className="muted small">
-                                    Owner phone
-                                    <input
-                                      className="input"
-                                      value={vehicleEditForm.owner_phone}
-                                      onChange={(e) => setVehicleEditForm((f) => ({ ...f, owner_phone: e.target.value }))}
-                                    />
-                                  </label>
-                                  <label className="muted small">
-                                    {meta.type === 'MATATU' ? 'SACCO' : 'SACCO (optional)'}
-                                    <select
-                                      value={vehicleEditForm.sacco_id}
-                                      onChange={(e) => setVehicleEditForm((f) => ({ ...f, sacco_id: e.target.value }))}
-                                      style={{ padding: 10 }}
-                                    >
-                                      <option value="">Select SACCO</option>
-                                      {saccos.map((s) => (
-                                        <option key={s.id || s.sacco_id} value={s.id || s.sacco_id || ''}>
-                                          {s.display_name || s.name || s.sacco_name || s.sacco_id}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </label>
-                                  <label className="muted small">
-                                    TLB number
-                                    <input
-                                      className="input"
-                                      value={vehicleEditForm.tlb_number}
-                                      onChange={(e) => setVehicleEditForm((f) => ({ ...f, tlb_number: e.target.value }))}
-                                    />
-                                  </label>
-                                  <label className="muted small">
-                                    Till number
-                                    <input
-                                      className="input"
-                                      value={vehicleEditForm.till_number}
-                                      onChange={(e) => setVehicleEditForm((f) => ({ ...f, till_number: e.target.value }))}
-                                    />
-                                  </label>
-                                </div>
-                                <div className="row" style={{ marginTop: 8 }}>
-                                  <button className="btn" type="button" onClick={saveVehicleEdit}>
-                                    Save changes
-                                  </button>
-                                  <button
-                                    className="btn ghost"
-                                    type="button"
-                                    onClick={() => {
-                                      setVehicleEditId('')
-                                      setVehicleEditKind('')
-                                      setVehicleEditMsg('')
-                                      setVehicleEditError(null)
-                                    }}
-                                  >
-                                    Close
-                                  </button>
-                                  <span className="muted small">{vehicleEditMsg}</span>
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                        ) : null}
-                      </Fragment>
-                    )
-                  })
-                  )}
               </tbody>
             </table>
           </div>
