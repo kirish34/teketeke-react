@@ -218,6 +218,7 @@ type SaccoRow = {
   loans_enabled?: boolean | null
   routes_enabled?: boolean | null
   status?: string | null
+  contact_account_number?: string | null
   settlement_bank_name?: string | null
   settlement_bank_account_number?: string | null
   contact_name?: string
@@ -344,6 +345,7 @@ function createOperatorForm(operatorType?: string | null) {
     contact_name: '',
     contact_phone: '',
     contact_email: '',
+    contact_account_number: '',
     default_till: '',
     settlement_method: 'MPESA',
     settlement_bank_name: '',
@@ -617,7 +619,6 @@ const SystemDashboard = () => {
     plate: '',
     owner: '',
     phone: '',
-    tlb: '',
     till: '',
     sacco: '',
     body: '',
@@ -1039,7 +1040,7 @@ const SystemDashboard = () => {
         return
       }
       if (vehicleEditKind === 'MATATU' && !payload.sacco_id) {
-        setVehicleEditMsg('Select an operator for this matatu')
+        setVehicleEditMsg('Select a SACCO for this matatu')
         return
       }
       const data = await sendJson<VehicleRow>('/api/admin/update-matatu', 'POST', payload)
@@ -2034,186 +2035,9 @@ const SystemDashboard = () => {
   const renderVehicleTab = (meta: { label: string; plural: string; type: VehicleKind }) => {
     const rows = vehiclesFor(meta.type)
     const editActive = vehicleEditId && vehicleEditKind === meta.type
-    const isMatatu = meta.type === 'MATATU'
-    const sectionBase = meta.type.toLowerCase()
-    const sectionId = (suffix: string) => `${sectionBase}-${suffix}`
-    const totalRows = rows.length
-    const withOwner = rows.filter((row) => (row.owner_name || '').trim()).length
-    const withPhone = rows.filter((row) => (row.owner_phone || '').trim()).length
-    const withTill = rows.filter((row) => (row.till_number || '').trim()).length
-    const withTLB = rows.filter((row) => (row.tlb_number || '').trim()).length
-    const withOperator = rows.filter((row) => row.sacco_id || row.sacco).length
-    const completenessRows = [
-      { label: 'Owner name', have: withOwner },
-      { label: 'Owner phone', have: withPhone },
-      { label: 'Till number', have: withTill },
-      { label: 'TLB number', have: withTLB },
-      { label: 'Operator assigned', have: withOperator },
-    ]
-    const operatorCounts = new Map<string, number>()
-    rows.forEach((row) => {
-      const rawId = row.sacco_id || row.sacco || ''
-      if (!rawId) return
-      const saccoRow = saccoById.get(rawId)
-      const label =
-        saccoRow?.display_name || saccoRow?.name || row.sacco_name || row.sacco || rawId
-      operatorCounts.set(label, (operatorCounts.get(label) || 0) + 1)
-    })
-    const topOperators = [...operatorCounts.entries()]
-      .map(([label, count]) => ({ label, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 5)
-    const moduleSections = [
-      { key: 'overview', label: 'Overview' },
-      { key: 'matatus', label: meta.plural },
-      { key: 'staff', label: 'Staff' },
-      { key: 'routes', label: 'Routes' },
-      { key: 'daily_fee', label: 'Daily Fee' },
-      { key: 'savings', label: 'Savings' },
-      { key: 'loans', label: 'Loans' },
-    ]
-    const operatorLabel = 'Operator'
-    const tableColSpan = isMatatu ? 8 : 6
-    const staffLogins = isMatatu
-      ? logins.filter((row) => {
-          const role = (row.role || '').toUpperCase()
-          const hasMatatu = Boolean(String(row.matatu_id || '').trim())
-          return hasMatatu && (role === 'OWNER' || role === 'STAFF')
-        })
-      : []
-    const ownerCount = staffLogins.filter((row) => (row.role || '').toUpperCase() === 'OWNER').length
-    const staffCount = staffLogins.filter((row) => (row.role || '').toUpperCase() === 'STAFF').length
-    const routeCount = routes.length
-    const routeOperatorCount = routeUsage.length
     return (
       <>
-        {isMatatu ? (
-          <section className="card">
-            <div className="topline">
-              <h3 style={{ margin: 0 }}>Matatu data hub</h3>
-              <span className="muted small">Quick sections for data capture & analysis</span>
-            </div>
-            <div className="row" style={{ marginTop: 8 }}>
-              {moduleSections.map((module) => (
-                <button
-                  key={module.key}
-                  className="btn ghost"
-                  type="button"
-                  onClick={() => {
-                    const target = document.getElementById(sectionId(module.key))
-                    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                  }}
-                  style={{ borderRadius: 999 }}
-                >
-                  {module.label}
-                </button>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        {isMatatu ? (
-          <section className="card" id={sectionId('overview')}>
-            <div className="topline">
-              <h3 style={{ margin: 0 }}>Overview</h3>
-              <span className="muted small">Live coverage and data quality</span>
-            </div>
-            <div className="grid metrics" style={{ marginTop: 10 }}>
-              <div className="metric">
-                <div className="k">Total matatus</div>
-                <div className="v">{totalRows}</div>
-              </div>
-              <div className="metric">
-                <div className="k">With owner name</div>
-                <div className="v">{withOwner}</div>
-              </div>
-              <div className="metric">
-                <div className="k">With owner phone</div>
-                <div className="v">{withPhone}</div>
-              </div>
-              <div className="metric">
-                <div className="k">With till number</div>
-                <div className="v">{withTill}</div>
-              </div>
-              <div className="metric">
-                <div className="k">With TLB number</div>
-                <div className="v">{withTLB}</div>
-              </div>
-              <div className="metric">
-                <div className="k">Linked to operator</div>
-                <div className="v">{withOperator}</div>
-              </div>
-            </div>
-
-            <div className="grid g2" style={{ marginTop: 12 }}>
-              <div className="card" style={{ margin: 0 }}>
-                <div className="topline">
-                  <h4 style={{ margin: 0 }}>Data completeness</h4>
-                  <span className="muted small">Missing fields reduce analytics</span>
-                </div>
-                <div className="table-wrap" style={{ marginTop: 8 }}>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Field</th>
-                        <th>Available</th>
-                        <th>Missing</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {completenessRows.map((row) => (
-                        <tr key={row.label}>
-                          <td>{row.label}</td>
-                          <td>{row.have}</td>
-                          <td>{Math.max(totalRows - row.have, 0)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="card" style={{ margin: 0 }}>
-                <div className="topline">
-                  <h4 style={{ margin: 0 }}>Top operators</h4>
-                  <button className="btn ghost" type="button" onClick={() => setActiveTab('saccos')}>
-                    Open Operators
-                  </button>
-                </div>
-                <div className="table-wrap" style={{ marginTop: 8 }}>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Operator</th>
-                        <th>Matatus</th>
-                        <th>Share</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {topOperators.length === 0 ? (
-                        <tr>
-                          <td colSpan={3} className="muted">
-                            No operator assignments yet.
-                          </td>
-                        </tr>
-                      ) : (
-                        topOperators.map((op) => (
-                          <tr key={op.label}>
-                            <td>{op.label}</td>
-                            <td>{op.count}</td>
-                            <td>{totalRows ? `${Math.round((op.count / totalRows) * 100)}%` : '-'}</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          </section>
-        ) : null}
-
-        <section className="card" id={isMatatu ? sectionId('matatus') : undefined}>
+        <section className="card">
           <h3 style={{ marginTop: 0 }}>Register {meta.label}</h3>
           <div className="row">
             <input
@@ -2234,14 +2058,6 @@ const SystemDashboard = () => {
               value={matatuForm.phone}
               onChange={(e) => setMatatuForm((f) => ({ ...f, phone: e.target.value }))}
             />
-            {isMatatu ? (
-              <input
-                className="input"
-                placeholder="TLB number"
-                value={matatuForm.tlb}
-                onChange={(e) => setMatatuForm((f) => ({ ...f, tlb: e.target.value }))}
-              />
-            ) : null}
             <input
               className="input"
               placeholder="Till number"
@@ -2253,7 +2069,7 @@ const SystemDashboard = () => {
               onChange={(e) => setMatatuForm((f) => ({ ...f, sacco: e.target.value }))}
               style={{ padding: 10 }}
             >
-              <option value="">Select {operatorLabel.toLowerCase()}</option>
+              <option value="">Select SACCO</option>
               {saccos.map((s) => (
                 <option key={s.id || s.sacco_id} value={s.id || s.sacco_id || ''}>
                   {s.display_name || s.name || s.sacco_name || s.sacco_id}
@@ -2273,13 +2089,12 @@ const SystemDashboard = () => {
                     number_plate: matatuForm.plate.trim(),
                     owner_name: matatuForm.owner.trim(),
                     owner_phone: matatuForm.phone.trim(),
-                    tlb_number: matatuForm.tlb.trim() || null,
-                    till_number: matatuForm.till.trim() || null,
+                    till_number: matatuForm.till.trim(),
                     sacco_id: matatuForm.sacco || null,
                     vehicle_type: matatuForm.body || null,
                   })
                   setMatatuMsg(`${meta.label} registered`)
-                  setMatatuForm({ plate: '', owner: '', phone: '', tlb: '', till: '', sacco: '', body: meta.type })
+                  setMatatuForm({ plate: '', owner: '', phone: '', till: '', sacco: '', body: meta.type })
                   await fetchList<VehicleRow>('/api/admin/matatus')
                     .then((rows) => setMatatus(rows))
                     .catch((err) => setVehiclesError(err instanceof Error ? err.message : String(err)))
@@ -2287,7 +2102,7 @@ const SystemDashboard = () => {
                   const msg = err instanceof Error ? err.message : 'Create failed'
                   if (/created but wallet failed/i.test(msg)) {
                     setMatatuMsg(msg)
-                    setMatatuForm({ plate: '', owner: '', phone: '', tlb: '', till: '', sacco: '', body: meta.type })
+                    setMatatuForm({ plate: '', owner: '', phone: '', till: '', sacco: '', body: meta.type })
                     await fetchList<VehicleRow>('/api/admin/matatus')
                       .then((rows) => setMatatus(rows))
                       .catch((loadErr) => setVehiclesError(loadErr instanceof Error ? loadErr.message : String(loadErr)))
@@ -2318,9 +2133,7 @@ const SystemDashboard = () => {
                   <th>Plate</th>
                   <th>Owner</th>
                   <th>Phone</th>
-                  {isMatatu ? <th>TLB</th> : null}
-                  {isMatatu ? <th>Till</th> : null}
-                  <th>{operatorLabel}</th>
+                  <th>SACCO</th>
                   <th>Type</th>
                   <th>Actions</th>
                 </tr>
@@ -2328,7 +2141,7 @@ const SystemDashboard = () => {
               <tbody>
                 {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={tableColSpan} className="muted">
+                    <td colSpan={6} className="muted">
                       No vehicles yet.
                     </td>
                   </tr>
@@ -2341,8 +2154,6 @@ const SystemDashboard = () => {
                           <td>{v.plate || v.number_plate || v.registration || '-'}</td>
                           <td>{v.owner_name || '-'}</td>
                           <td>{v.owner_phone || '-'}</td>
-                          {isMatatu ? <td>{v.tlb_number || '-'}</td> : null}
-                          {isMatatu ? <td>{v.till_number || '-'}</td> : null}
                           <td>{v.sacco_name || v.sacco || '-'}</td>
                           <td>{normalizeVehicleType(v.vehicle_type || v.body_type || v.type) || '-'}</td>
                           <td>
@@ -2353,7 +2164,7 @@ const SystemDashboard = () => {
                         </tr>
                         {isEditing ? (
                           <tr>
-                            <td colSpan={tableColSpan}>
+                            <td colSpan={6}>
                               <div className="card" style={{ margin: '6px 0' }}>
                                 <div className="topline">
                                   <h3 style={{ margin: 0 }}>Edit {meta.label}</h3>
@@ -2388,13 +2199,13 @@ const SystemDashboard = () => {
                                     />
                                   </label>
                                   <label className="muted small">
-                                    {meta.type === 'MATATU' ? operatorLabel : `${operatorLabel} (optional)`}
+                                    {meta.type === 'MATATU' ? 'SACCO' : 'SACCO (optional)'}
                                     <select
                                       value={vehicleEditForm.sacco_id}
                                       onChange={(e) => setVehicleEditForm((f) => ({ ...f, sacco_id: e.target.value }))}
                                       style={{ padding: 10 }}
                                     >
-                                      <option value="">Select {operatorLabel.toLowerCase()}</option>
+                                      <option value="">Select SACCO</option>
                                       {saccos.map((s) => (
                                         <option key={s.id || s.sacco_id} value={s.id || s.sacco_id || ''}>
                                           {s.display_name || s.name || s.sacco_name || s.sacco_id}
@@ -2402,18 +2213,14 @@ const SystemDashboard = () => {
                                       ))}
                                     </select>
                                   </label>
-                                  {meta.type === 'MATATU' ? (
-                                    <label className="muted small">
-                                      TLB number
-                                      <input
-                                        className="input"
-                                        value={vehicleEditForm.tlb_number}
-                                        onChange={(e) =>
-                                          setVehicleEditForm((f) => ({ ...f, tlb_number: e.target.value }))
-                                        }
-                                      />
-                                    </label>
-                                  ) : null}
+                                  <label className="muted small">
+                                    TLB number
+                                    <input
+                                      className="input"
+                                      value={vehicleEditForm.tlb_number}
+                                      onChange={(e) => setVehicleEditForm((f) => ({ ...f, tlb_number: e.target.value }))}
+                                    />
+                                  </label>
                                   <label className="muted small">
                                     Till number
                                     <input
@@ -2453,74 +2260,6 @@ const SystemDashboard = () => {
             </table>
           </div>
         </section>
-
-        {isMatatu ? (
-          <section className="card" id={sectionId('staff')}>
-            <div className="topline">
-              <h3 style={{ margin: 0 }}>Staff</h3>
-              <button className="btn ghost" type="button" onClick={() => setActiveTab('logins')}>
-                Open Logins
-              </button>
-            </div>
-            <div className="row" style={{ marginTop: 8 }}>
-              <span className="sys-pill-lite">Staff accounts: {staffCount}</span>
-              <span className="sys-pill-lite">Owner logins: {ownerCount}</span>
-            </div>
-            <div className="muted small">Assign staff access for matatu operations and collections.</div>
-          </section>
-        ) : null}
-
-        {isMatatu ? (
-          <section className="card" id={sectionId('routes')}>
-            <div className="topline">
-              <h3 style={{ margin: 0 }}>Routes</h3>
-              <button className="btn ghost" type="button" onClick={() => setActiveTab('routes')}>
-                Open Routes
-              </button>
-            </div>
-            <div className="row" style={{ marginTop: 8 }}>
-              <span className="sys-pill-lite">Routes mapped: {routeCount}</span>
-              <span className="sys-pill-lite">Operators with routes: {routeOperatorCount}</span>
-            </div>
-            <div className="muted small">Map matatu routes to improve live tracking and analytics.</div>
-          </section>
-        ) : null}
-
-        {isMatatu ? (
-          <section className="card" id={sectionId('daily_fee')}>
-            <div className="topline">
-              <h3 style={{ margin: 0 }}>Daily Fee</h3>
-              <button className="btn ghost" type="button" onClick={() => setActiveTab('finance')}>
-                Open Finance
-              </button>
-            </div>
-            <div className="muted small">Review fee collections and reconcile operator income in finance.</div>
-          </section>
-        ) : null}
-
-        {isMatatu ? (
-          <section className="card" id={sectionId('savings')}>
-            <div className="topline">
-              <h3 style={{ margin: 0 }}>Savings</h3>
-              <button className="btn ghost" type="button" onClick={() => setActiveTab('c2b')}>
-                Open Payments
-              </button>
-            </div>
-            <div className="muted small">Track savings deposits through C2B payments.</div>
-          </section>
-        ) : null}
-
-        {isMatatu ? (
-          <section className="card" id={sectionId('loans')}>
-            <div className="topline">
-              <h3 style={{ margin: 0 }}>Loans</h3>
-              <button className="btn ghost" type="button" onClick={() => setActiveTab('payouts')}>
-                Open Payouts
-              </button>
-            </div>
-            <div className="muted small">Review loan disbursement activity in payouts.</div>
-          </section>
-        ) : null}
       </>
     )
   }
@@ -2681,6 +2420,15 @@ const SystemDashboard = () => {
                 />
               </label>
               <label className="muted small">
+                Contact account number (optional)
+                <input
+                  className="input"
+                  value={saccoForm.contact_account_number}
+                  onChange={(e) => setSaccoForm((f) => ({ ...f, contact_account_number: e.target.value }))}
+                  placeholder="Account number"
+                />
+              </label>
+              <label className="muted small">
                 Settlement till / paybill
                 <input
                   className="input"
@@ -2798,6 +2546,7 @@ const SystemDashboard = () => {
                   const contactName = saccoForm.contact_name.trim()
                   const contactPhone = normalizePhoneInput(saccoForm.contact_phone)
                   const contactEmail = saccoForm.contact_email.trim()
+                  const contactAccountNumber = saccoForm.contact_account_number.trim()
                   const defaultTill = saccoForm.default_till.trim()
                   const settlementMethod = saccoForm.settlement_method
                   const settlementBankName = saccoForm.settlement_bank_name.trim()
@@ -2839,6 +2588,7 @@ const SystemDashboard = () => {
                       contact_name: contactName || null,
                       contact_phone: contactPhone || null,
                       contact_email: contactEmail || null,
+                      contact_account_number: contactAccountNumber || null,
                       default_till: defaultTill,
                       fee_label: feeLabel,
                       savings_enabled: saccoForm.savings_enabled,
