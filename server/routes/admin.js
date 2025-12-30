@@ -586,7 +586,6 @@ router.post('/register-sacco', async (req,res)=>{
     registration_no: String(req.body?.registration_no || '').trim() || null,
     status: statusRaw === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE',
     contact_name: String(req.body?.contact_name || '').trim() || null,
-    contact_account_number: String(req.body?.contact_account_number || '').trim() || null,
     contact_phone: String(req.body?.contact_phone || '').trim() || null,
     contact_email: String(req.body?.contact_email || '').trim() || null,
     default_till: String(req.body?.default_till || '').trim() || null,
@@ -916,7 +915,275 @@ router.post('/update-shuttle', async (req,res)=>{
 
   const { data, error } = await supabaseAdmin
     .from('shuttles')
-    .select('*, owner:owner_id(*), operator:operator_id(id, display_name, name, sacco_name)')
+    .select('*, owner:owner_id(*), operator:operator_id(id, display_name, name)')
+    .eq('id', id)
+    .single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// Taxis
+router.get('/taxis', async (req,res)=>{
+  let q = supabaseAdmin
+    .from('taxis')
+    .select('*, owner:owner_id(*), operator:operator_id(id, display_name, name)')
+    .order('created_at',{ascending:false});
+  if (req.query.operator_id) q = q.eq('operator_id', req.query.operator_id);
+  const { data, error } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ items: data||[] });
+});
+router.post('/register-taxi', async (req,res)=>{
+  const owner = req.body?.owner || {};
+  const taxi = req.body?.taxi || {};
+  const ownerRow = {
+    full_name: String(owner.full_name || '').trim(),
+    id_number: String(owner.id_number || '').trim(),
+    phone: owner.phone ? String(owner.phone).trim() : '',
+    email: owner.email ? String(owner.email).trim() : null,
+    address: owner.address ? String(owner.address).trim() : null,
+    license_no: owner.license_no ? String(owner.license_no).trim() : null,
+    date_of_birth: owner.date_of_birth || null,
+  };
+  if (!ownerRow.full_name) return res.status(400).json({ error: 'owner full_name required' });
+  if (!ownerRow.id_number) return res.status(400).json({ error: 'owner id_number required' });
+  if (!ownerRow.phone) return res.status(400).json({ error: 'owner phone required' });
+
+  const plate = String(taxi.plate || '').trim().toUpperCase();
+  const operatorId = taxi.operator_id || null;
+  const category = String(taxi.category || '').trim().toUpperCase();
+  const categoryOther = category === 'OTHER' ? String(taxi.category_other || '').trim() : '';
+  if (!plate) return res.status(400).json({ error: 'plate required' });
+  if (!operatorId) return res.status(400).json({ error: 'operator_id required' });
+  if (!category) return res.status(400).json({ error: 'category required' });
+
+  const parsePositiveInt = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+    const num = Number(value);
+    if (!Number.isFinite(num)) return null;
+    const intVal = Math.trunc(num);
+    if (intVal <= 0) return null;
+    return intVal;
+  };
+  const seatCapacityRaw = taxi.seat_capacity;
+  const seatCapacityProvided = seatCapacityRaw !== null && seatCapacityRaw !== undefined && String(seatCapacityRaw).trim() !== '';
+  const seatCapacity = parsePositiveInt(seatCapacityRaw);
+  if (seatCapacityProvided && !seatCapacity) {
+    return res.status(400).json({ error: 'seat_capacity must be positive integer' });
+  }
+
+  const rawYear = taxi.year ? Number(taxi.year) : null;
+  const year = Number.isFinite(rawYear) ? Math.trunc(rawYear) : null;
+
+  const { data: ownerData, error: ownerError } = await supabaseAdmin
+    .from('taxi_owners')
+    .insert(ownerRow)
+    .select()
+    .single();
+  if (ownerError) return res.status(500).json({ error: ownerError.message });
+
+  const taxiRow = {
+    plate,
+    make: taxi.make ? String(taxi.make).trim() : null,
+    model: taxi.model ? String(taxi.model).trim() : null,
+    year,
+    operator_id: operatorId,
+    till_number: taxi.till_number ? String(taxi.till_number).trim() : null,
+    seat_capacity: seatCapacity || null,
+    category,
+    category_other: category === 'OTHER' && categoryOther ? categoryOther : null,
+    owner_id: ownerData.id,
+  };
+  const { data, error } = await supabaseAdmin.from('taxis').insert(taxiRow).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ...data, owner: ownerData });
+});
+router.post('/update-taxi', async (req,res)=>{
+  const { id, owner_id, owner, taxi } = req.body||{};
+  if (!id) return res.status(400).json({ error: 'id required' });
+  if (!owner_id) return res.status(400).json({ error: 'owner_id required' });
+
+  const ownerPayload = owner || {};
+  const ownerUpdate = {
+    full_name: String(ownerPayload.full_name || '').trim(),
+    id_number: String(ownerPayload.id_number || '').trim(),
+    phone: ownerPayload.phone ? String(ownerPayload.phone).trim() : '',
+    email: ownerPayload.email ? String(ownerPayload.email).trim() : null,
+    address: ownerPayload.address ? String(ownerPayload.address).trim() : null,
+    license_no: ownerPayload.license_no ? String(ownerPayload.license_no).trim() : null,
+    date_of_birth: ownerPayload.date_of_birth || null,
+  };
+  if (!ownerUpdate.full_name) return res.status(400).json({ error: 'owner full_name required' });
+  if (!ownerUpdate.id_number) return res.status(400).json({ error: 'owner id_number required' });
+  if (!ownerUpdate.phone) return res.status(400).json({ error: 'owner phone required' });
+
+  const taxiPayload = taxi || {};
+  const plate = String(taxiPayload.plate || '').trim().toUpperCase();
+  const operatorId = taxiPayload.operator_id || null;
+  const category = String(taxiPayload.category || '').trim().toUpperCase();
+  const categoryOther = category === 'OTHER' ? String(taxiPayload.category_other || '').trim() : '';
+  if (!plate) return res.status(400).json({ error: 'plate required' });
+  if (!operatorId) return res.status(400).json({ error: 'operator_id required' });
+  if (!category) return res.status(400).json({ error: 'category required' });
+
+  const parsePositiveInt = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+    const num = Number(value);
+    if (!Number.isFinite(num)) return null;
+    const intVal = Math.trunc(num);
+    if (intVal <= 0) return null;
+    return intVal;
+  };
+  const seatCapacityRaw = taxiPayload.seat_capacity;
+  const seatCapacityProvided = seatCapacityRaw !== null && seatCapacityRaw !== undefined && String(seatCapacityRaw).trim() !== '';
+  const seatCapacity = parsePositiveInt(seatCapacityRaw);
+  if (seatCapacityProvided && !seatCapacity) {
+    return res.status(400).json({ error: 'seat_capacity must be positive integer' });
+  }
+
+  const rawYear = taxiPayload.year ? Number(taxiPayload.year) : null;
+  const year = Number.isFinite(rawYear) ? Math.trunc(rawYear) : null;
+
+  const { error: ownerError } = await supabaseAdmin
+    .from('taxi_owners')
+    .update(ownerUpdate)
+    .eq('id', owner_id);
+  if (ownerError) return res.status(500).json({ error: ownerError.message });
+
+  const taxiUpdate = {
+    plate,
+    make: taxiPayload.make ? String(taxiPayload.make).trim() : null,
+    model: taxiPayload.model ? String(taxiPayload.model).trim() : null,
+    year,
+    operator_id: operatorId,
+    till_number: taxiPayload.till_number ? String(taxiPayload.till_number).trim() : null,
+    seat_capacity: seatCapacity || null,
+    category,
+    category_other: category === 'OTHER' && categoryOther ? categoryOther : null,
+  };
+  const { error: taxiError } = await supabaseAdmin.from('taxis').update(taxiUpdate).eq('id', id);
+  if (taxiError) return res.status(500).json({ error: taxiError.message });
+
+  const { data, error } = await supabaseAdmin
+    .from('taxis')
+    .select('*, owner:owner_id(*), operator:operator_id(id, display_name, name)')
+    .eq('id', id)
+    .single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// Boda Bodas
+router.get('/boda-bikes', async (req,res)=>{
+  let q = supabaseAdmin
+    .from('boda_bikes')
+    .select('*, rider:rider_id(*), operator:operator_id(id, display_name, name)')
+    .order('created_at',{ascending:false});
+  if (req.query.operator_id) q = q.eq('operator_id', req.query.operator_id);
+  const { data, error } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ items: data||[] });
+});
+router.post('/register-boda', async (req,res)=>{
+  const rider = req.body?.rider || {};
+  const bike = req.body?.bike || {};
+  const riderRow = {
+    full_name: String(rider.full_name || '').trim(),
+    id_number: String(rider.id_number || '').trim(),
+    phone: rider.phone ? String(rider.phone).trim() : '',
+    email: rider.email ? String(rider.email).trim() : null,
+    address: rider.address ? String(rider.address).trim() : null,
+    stage: rider.stage ? String(rider.stage).trim() : null,
+    town: rider.town ? String(rider.town).trim() : null,
+    date_of_birth: rider.date_of_birth || null,
+  };
+  if (!riderRow.full_name) return res.status(400).json({ error: 'rider full_name required' });
+  if (!riderRow.id_number) return res.status(400).json({ error: 'rider id_number required' });
+  if (!riderRow.phone) return res.status(400).json({ error: 'rider phone required' });
+
+  const identifier = String(bike.identifier || '').trim();
+  const operatorId = bike.operator_id || null;
+  if (!identifier) return res.status(400).json({ error: 'identifier required' });
+  if (!operatorId) return res.status(400).json({ error: 'operator_id required' });
+
+  const rawYear = bike.year ? Number(bike.year) : null;
+  const year = Number.isFinite(rawYear) ? Math.trunc(rawYear) : null;
+
+  const { data: riderData, error: riderError } = await supabaseAdmin
+    .from('boda_riders')
+    .insert(riderRow)
+    .select()
+    .single();
+  if (riderError) return res.status(500).json({ error: riderError.message });
+
+  const bikeRow = {
+    identifier,
+    make: bike.make ? String(bike.make).trim() : null,
+    model: bike.model ? String(bike.model).trim() : null,
+    year,
+    operator_id: operatorId,
+    till_number: bike.till_number ? String(bike.till_number).trim() : null,
+    license_no: bike.license_no ? String(bike.license_no).trim() : null,
+    has_helmet: Boolean(bike.has_helmet),
+    has_reflector: Boolean(bike.has_reflector),
+    rider_id: riderData.id,
+  };
+  const { data, error } = await supabaseAdmin.from('boda_bikes').insert(bikeRow).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ...data, rider: riderData });
+});
+router.post('/update-boda', async (req,res)=>{
+  const { id, rider_id, rider, bike } = req.body||{};
+  if (!id) return res.status(400).json({ error: 'id required' });
+  if (!rider_id) return res.status(400).json({ error: 'rider_id required' });
+
+  const riderPayload = rider || {};
+  const riderUpdate = {
+    full_name: String(riderPayload.full_name || '').trim(),
+    id_number: String(riderPayload.id_number || '').trim(),
+    phone: riderPayload.phone ? String(riderPayload.phone).trim() : '',
+    email: riderPayload.email ? String(riderPayload.email).trim() : null,
+    address: riderPayload.address ? String(riderPayload.address).trim() : null,
+    stage: riderPayload.stage ? String(riderPayload.stage).trim() : null,
+    town: riderPayload.town ? String(riderPayload.town).trim() : null,
+    date_of_birth: riderPayload.date_of_birth || null,
+  };
+  if (!riderUpdate.full_name) return res.status(400).json({ error: 'rider full_name required' });
+  if (!riderUpdate.id_number) return res.status(400).json({ error: 'rider id_number required' });
+  if (!riderUpdate.phone) return res.status(400).json({ error: 'rider phone required' });
+
+  const bikePayload = bike || {};
+  const identifier = String(bikePayload.identifier || '').trim();
+  const operatorId = bikePayload.operator_id || null;
+  if (!identifier) return res.status(400).json({ error: 'identifier required' });
+  if (!operatorId) return res.status(400).json({ error: 'operator_id required' });
+
+  const rawYear = bikePayload.year ? Number(bikePayload.year) : null;
+  const year = Number.isFinite(rawYear) ? Math.trunc(rawYear) : null;
+
+  const { error: riderError } = await supabaseAdmin
+    .from('boda_riders')
+    .update(riderUpdate)
+    .eq('id', rider_id);
+  if (riderError) return res.status(500).json({ error: riderError.message });
+
+  const bikeUpdate = {
+    identifier,
+    make: bikePayload.make ? String(bikePayload.make).trim() : null,
+    model: bikePayload.model ? String(bikePayload.model).trim() : null,
+    year,
+    operator_id: operatorId,
+    till_number: bikePayload.till_number ? String(bikePayload.till_number).trim() : null,
+    license_no: bikePayload.license_no ? String(bikePayload.license_no).trim() : null,
+    has_helmet: Boolean(bikePayload.has_helmet),
+    has_reflector: Boolean(bikePayload.has_reflector),
+  };
+  const { error: bikeError } = await supabaseAdmin.from('boda_bikes').update(bikeUpdate).eq('id', id);
+  if (bikeError) return res.status(500).json({ error: bikeError.message });
+
+  const { data, error } = await supabaseAdmin
+    .from('boda_bikes')
+    .select('*, rider:rider_id(*), operator:operator_id(id, display_name, name)')
     .eq('id', id)
     .single();
   if (error) return res.status(500).json({ error: error.message });

@@ -218,7 +218,6 @@ type SaccoRow = {
   loans_enabled?: boolean | null
   routes_enabled?: boolean | null
   status?: string | null
-  contact_account_number?: string | null
   settlement_bank_name?: string | null
   settlement_bank_account_number?: string | null
   contact_name?: string
@@ -283,6 +282,65 @@ type ShuttleRow = {
   owner_id?: string | null
   created_at?: string
   owner?: ShuttleOwnerRow | null
+  operator?: ShuttleOperatorRow | null
+}
+
+type TaxiOwnerRow = {
+  id?: string
+  full_name?: string
+  id_number?: string
+  phone?: string
+  email?: string | null
+  address?: string | null
+  license_no?: string | null
+  date_of_birth?: string | null
+  created_at?: string
+}
+
+type TaxiRow = {
+  id?: string
+  plate?: string
+  make?: string | null
+  model?: string | null
+  year?: number | null
+  operator_id?: string | null
+  till_number?: string | null
+  seat_capacity?: number | null
+  category?: string | null
+  category_other?: string | null
+  owner_id?: string | null
+  created_at?: string
+  owner?: TaxiOwnerRow | null
+  operator?: ShuttleOperatorRow | null
+}
+
+type BodaRiderRow = {
+  id?: string
+  full_name?: string
+  id_number?: string
+  phone?: string
+  email?: string | null
+  address?: string | null
+  stage?: string | null
+  town?: string | null
+  date_of_birth?: string | null
+  created_at?: string
+}
+
+type BodaBikeRow = {
+  id?: string
+  identifier?: string
+  make?: string | null
+  model?: string | null
+  year?: number | null
+  operator_id?: string | null
+  till_number?: string | null
+  license_no?: string | null
+  has_helmet?: boolean | null
+  has_reflector?: boolean | null
+  rider_id?: string | null
+  created_at?: string
+  rider?: BodaRiderRow | null
   operator?: ShuttleOperatorRow | null
 }
 
@@ -385,7 +443,6 @@ function createOperatorForm(operatorType?: string | null) {
     contact_name: '',
     contact_phone: '',
     contact_email: '',
-    contact_account_number: '',
     default_till: '',
     settlement_method: 'MPESA',
     settlement_bank_name: '',
@@ -452,6 +509,71 @@ function createShuttleForm() {
     operator_id: '',
     tlb_license: '',
     till_number: '',
+  }
+}
+
+const TAXI_CATEGORY_OPTIONS = [
+  { value: 'STANDARD', label: 'STANDARD' },
+  { value: 'EXECUTIVE', label: 'EXECUTIVE' },
+  { value: 'SUV', label: 'SUV' },
+  { value: 'VAN_TAXI', label: 'VAN_TAXI' },
+  { value: 'OTHER', label: 'OTHER' },
+]
+
+function normalizeTaxiCategory(value?: string | null) {
+  return String(value || '').trim().toUpperCase()
+}
+
+function createTaxiOwnerForm() {
+  return {
+    full_name: '',
+    id_number: '',
+    phone: '',
+    email: '',
+    address: '',
+    license_no: '',
+    date_of_birth: '',
+  }
+}
+
+function createTaxiForm() {
+  return {
+    plate: '',
+    make: '',
+    model: '',
+    year: '',
+    operator_id: '',
+    till_number: '',
+    seat_capacity: '4',
+    category: '',
+    category_other: '',
+  }
+}
+
+function createBodaRiderForm() {
+  return {
+    full_name: '',
+    id_number: '',
+    phone: '',
+    email: '',
+    address: '',
+    stage: '',
+    town: '',
+    date_of_birth: '',
+  }
+}
+
+function createBodaBikeForm() {
+  return {
+    identifier: '',
+    make: '',
+    model: '',
+    year: '',
+    operator_id: '',
+    till_number: '',
+    license_no: '',
+    has_helmet: false,
+    has_reflector: false,
   }
 }
 
@@ -721,6 +843,8 @@ const SystemDashboard = () => {
   const mapInstance = useRef<any>(null)
   const mapLayers = useRef<{ polyline?: any; markers?: any[] }>({})
   const shuttlesTableRef = useRef<HTMLDivElement | null>(null)
+  const taxiTableRef = useRef<HTMLDivElement | null>(null)
+  const bodaTableRef = useRef<HTMLDivElement | null>(null)
 
   const [saccoForm, setSaccoForm] = useState(() => createOperatorForm(defaultOperatorType))
   const [saccoMsg, setSaccoMsg] = useState('')
@@ -747,6 +871,32 @@ const SystemDashboard = () => {
   const [shuttleEditForm, setShuttleEditForm] = useState(() => createShuttleForm())
   const [shuttleEditMsg, setShuttleEditMsg] = useState('')
   const [shuttleEditError, setShuttleEditError] = useState<string | null>(null)
+
+  const [taxis, setTaxis] = useState<TaxiRow[]>([])
+  const [taxisError, setTaxisError] = useState<string | null>(null)
+  const [taxiOwnerForm, setTaxiOwnerForm] = useState(() => createTaxiOwnerForm())
+  const [taxiForm, setTaxiForm] = useState(() => createTaxiForm())
+  const [taxiMsg, setTaxiMsg] = useState('')
+  const [taxiOperatorFilter, setTaxiOperatorFilter] = useState('')
+  const [taxiEditId, setTaxiEditId] = useState('')
+  const [taxiEditOwnerId, setTaxiEditOwnerId] = useState('')
+  const [taxiEditOwnerForm, setTaxiEditOwnerForm] = useState(() => createTaxiOwnerForm())
+  const [taxiEditForm, setTaxiEditForm] = useState(() => createTaxiForm())
+  const [taxiEditMsg, setTaxiEditMsg] = useState('')
+  const [taxiEditError, setTaxiEditError] = useState<string | null>(null)
+
+  const [bodaBikes, setBodaBikes] = useState<BodaBikeRow[]>([])
+  const [bodaError, setBodaError] = useState<string | null>(null)
+  const [bodaRiderForm, setBodaRiderForm] = useState(() => createBodaRiderForm())
+  const [bodaBikeForm, setBodaBikeForm] = useState(() => createBodaBikeForm())
+  const [bodaMsg, setBodaMsg] = useState('')
+  const [bodaOperatorFilter, setBodaOperatorFilter] = useState('')
+  const [bodaEditId, setBodaEditId] = useState('')
+  const [bodaEditRiderId, setBodaEditRiderId] = useState('')
+  const [bodaEditRiderForm, setBodaEditRiderForm] = useState(() => createBodaRiderForm())
+  const [bodaEditForm, setBodaEditForm] = useState(() => createBodaBikeForm())
+  const [bodaEditMsg, setBodaEditMsg] = useState('')
+  const [bodaEditError, setBodaEditError] = useState<string | null>(null)
 
   const [matatuForm, setMatatuForm] = useState({
     plate: '',
@@ -928,6 +1078,58 @@ const SystemDashboard = () => {
     if (!shuttleOperatorFilter) return shuttles
     return shuttles.filter((row) => (row.operator_id || row.operator?.id || '') === shuttleOperatorFilter)
   }, [shuttles, shuttleOperatorFilter])
+
+  const taxiOperatorSummary = useMemo(() => {
+    const map = new Map<string, { id: string; label: string; count: number }>()
+    taxis.forEach((row) => {
+      const id = row.operator_id || row.operator?.id || ''
+      if (!id) return
+      const operatorRow = saccoById.get(id)
+      const label =
+        row.operator?.display_name ||
+        row.operator?.name ||
+        row.operator?.sacco_name ||
+        operatorRow?.display_name ||
+        operatorRow?.name ||
+        id
+      const existing = map.get(id) || { id, label, count: 0 }
+      existing.count += 1
+      if (label && existing.label !== label) existing.label = label
+      map.set(id, existing)
+    })
+    return [...map.values()].sort((a, b) => b.count - a.count)
+  }, [taxis, saccoById])
+
+  const filteredTaxis = useMemo(() => {
+    if (!taxiOperatorFilter) return taxis
+    return taxis.filter((row) => (row.operator_id || row.operator?.id || '') === taxiOperatorFilter)
+  }, [taxis, taxiOperatorFilter])
+
+  const bodaOperatorSummary = useMemo(() => {
+    const map = new Map<string, { id: string; label: string; count: number }>()
+    bodaBikes.forEach((row) => {
+      const id = row.operator_id || row.operator?.id || ''
+      if (!id) return
+      const operatorRow = saccoById.get(id)
+      const label =
+        row.operator?.display_name ||
+        row.operator?.name ||
+        row.operator?.sacco_name ||
+        operatorRow?.display_name ||
+        operatorRow?.name ||
+        id
+      const existing = map.get(id) || { id, label, count: 0 }
+      existing.count += 1
+      if (label && existing.label !== label) existing.label = label
+      map.set(id, existing)
+    })
+    return [...map.values()].sort((a, b) => b.count - a.count)
+  }, [bodaBikes, saccoById])
+
+  const filteredBodaBikes = useMemo(() => {
+    if (!bodaOperatorFilter) return bodaBikes
+    return bodaBikes.filter((row) => (row.operator_id || row.operator?.id || '') === bodaOperatorFilter)
+  }, [bodaBikes, bodaOperatorFilter])
 
   const ussdByMatatuId = useMemo(() => {
     const map = new Map<string, UssdPoolRow>()
@@ -1250,19 +1452,23 @@ const SystemDashboard = () => {
     setShuttleEditError(null)
   }
 
-  function operatorLabelFor(row?: ShuttleRow | null) {
-    if (!row) return '-'
-    const operatorId = row.operator_id || row.operator?.id || ''
-    const operatorRow = operatorId ? saccoById.get(operatorId) : null
+  function operatorLabelFromParts(operatorId?: string | null, operator?: ShuttleOperatorRow | null) {
+    const id = operatorId || ''
+    const operatorRow = id ? saccoById.get(id) : null
     return (
-      row.operator?.display_name ||
-      row.operator?.name ||
-      row.operator?.sacco_name ||
+      operator?.display_name ||
+      operator?.name ||
+      operator?.sacco_name ||
       operatorRow?.display_name ||
       operatorRow?.name ||
-      row.operator_id ||
+      id ||
       '-'
     )
+  }
+
+  function operatorLabelFor(row?: ShuttleRow | null) {
+    if (!row) return '-'
+    return operatorLabelFromParts(row.operator_id || row.operator?.id || '', row.operator || null)
   }
 
   function startShuttleEdit(row: ShuttleRow) {
@@ -1493,6 +1699,373 @@ const SystemDashboard = () => {
     } catch (err) {
       setShuttleEditMsg('')
       setShuttleEditError(err instanceof Error ? err.message : 'Update failed')
+    }
+  }
+
+  function resetTaxiFormState() {
+    setTaxiOwnerForm(createTaxiOwnerForm())
+    setTaxiForm(createTaxiForm())
+  }
+
+  function resetTaxiEditState() {
+    setTaxiEditId('')
+    setTaxiEditOwnerId('')
+    setTaxiEditOwnerForm(createTaxiOwnerForm())
+    setTaxiEditForm(createTaxiForm())
+    setTaxiEditMsg('')
+    setTaxiEditError(null)
+  }
+
+  function startTaxiEdit(row: TaxiRow) {
+    const id = row.id
+    if (!id) return
+    if (taxiEditId === id) {
+      resetTaxiEditState()
+      return
+    }
+    const owner = row.owner || {}
+    setTaxiEditId(id)
+    setTaxiEditOwnerId(row.owner_id || row.owner?.id || '')
+    setTaxiEditOwnerForm({
+      full_name: owner.full_name || '',
+      id_number: owner.id_number || '',
+      phone: owner.phone || '',
+      email: owner.email || '',
+      address: owner.address || '',
+      license_no: owner.license_no || '',
+      date_of_birth: formatDateInput(owner.date_of_birth),
+    })
+    setTaxiEditForm({
+      plate: row.plate || '',
+      make: row.make || '',
+      model: row.model || '',
+      year: row.year ? String(row.year) : '',
+      operator_id: row.operator_id || row.operator?.id || '',
+      till_number: row.till_number || '',
+      seat_capacity: row.seat_capacity ? String(row.seat_capacity) : '',
+      category: normalizeTaxiCategory(row.category) || '',
+      category_other: row.category_other || '',
+    })
+    setTaxiEditMsg('')
+    setTaxiEditError(null)
+  }
+
+  async function submitTaxi() {
+    const ownerPayload = {
+      full_name: taxiOwnerForm.full_name.trim(),
+      id_number: taxiOwnerForm.id_number.trim(),
+      phone: normalizePhoneInput(taxiOwnerForm.phone),
+      email: taxiOwnerForm.email.trim() || null,
+      address: taxiOwnerForm.address.trim() || null,
+      license_no: taxiOwnerForm.license_no.trim() || null,
+      date_of_birth: taxiOwnerForm.date_of_birth || null,
+    }
+    const category = normalizeTaxiCategory(taxiForm.category)
+    const seatCapacityInput = taxiForm.seat_capacity.trim()
+    const seatCapacity = parsePositiveIntInput(seatCapacityInput)
+    const taxiPayload = {
+      plate: taxiForm.plate.trim().toUpperCase(),
+      make: taxiForm.make.trim() || null,
+      model: taxiForm.model.trim() || null,
+      year: parseYearInput(taxiForm.year),
+      operator_id: taxiForm.operator_id || null,
+      till_number: taxiForm.till_number.trim() || null,
+      seat_capacity: seatCapacityInput ? seatCapacity : null,
+      category: category || null,
+      category_other: category === 'OTHER' ? taxiForm.category_other.trim() || null : null,
+    }
+    if (!ownerPayload.full_name) {
+      setTaxiMsg('Driver/owner full name is required')
+      return
+    }
+    if (!ownerPayload.id_number) {
+      setTaxiMsg('Driver/owner ID number is required')
+      return
+    }
+    if (!ownerPayload.phone) {
+      setTaxiMsg('Driver/owner phone number is required')
+      return
+    }
+    if (!isValidKenyanPhone(ownerPayload.phone)) {
+      setTaxiMsg('Enter a valid Kenyan phone number')
+      return
+    }
+    if (!taxiPayload.plate) {
+      setTaxiMsg('Taxi plate/identifier is required')
+      return
+    }
+    if (!taxiPayload.operator_id) {
+      setTaxiMsg('Operator is required')
+      return
+    }
+    if (!category) {
+      setTaxiMsg('Taxi category is required')
+      return
+    }
+    if (seatCapacityInput && !seatCapacity) {
+      setTaxiMsg('Seat capacity must be a positive integer')
+      return
+    }
+    setTaxiMsg('Saving...')
+    try {
+      await sendJson('/api/admin/register-taxi', 'POST', {
+        owner: ownerPayload,
+        taxi: taxiPayload,
+      })
+      setTaxiMsg('Taxi registered')
+      resetTaxiFormState()
+      await loadTaxis()
+    } catch (err) {
+      setTaxiMsg(err instanceof Error ? err.message : 'Create failed')
+    }
+  }
+
+  async function saveTaxiEdit() {
+    if (!taxiEditId) return
+    const ownerPayload = {
+      full_name: taxiEditOwnerForm.full_name.trim(),
+      id_number: taxiEditOwnerForm.id_number.trim(),
+      phone: normalizePhoneInput(taxiEditOwnerForm.phone),
+      email: taxiEditOwnerForm.email.trim() || null,
+      address: taxiEditOwnerForm.address.trim() || null,
+      license_no: taxiEditOwnerForm.license_no.trim() || null,
+      date_of_birth: taxiEditOwnerForm.date_of_birth || null,
+    }
+    const category = normalizeTaxiCategory(taxiEditForm.category)
+    const seatCapacityInput = taxiEditForm.seat_capacity.trim()
+    const seatCapacity = parsePositiveIntInput(seatCapacityInput)
+    const taxiPayload = {
+      plate: taxiEditForm.plate.trim().toUpperCase(),
+      make: taxiEditForm.make.trim() || null,
+      model: taxiEditForm.model.trim() || null,
+      year: parseYearInput(taxiEditForm.year),
+      operator_id: taxiEditForm.operator_id || null,
+      till_number: taxiEditForm.till_number.trim() || null,
+      seat_capacity: seatCapacityInput ? seatCapacity : null,
+      category: category || null,
+      category_other: category === 'OTHER' ? taxiEditForm.category_other.trim() || null : null,
+    }
+    if (!ownerPayload.full_name) {
+      setTaxiEditMsg('Driver/owner full name is required')
+      return
+    }
+    if (!ownerPayload.id_number) {
+      setTaxiEditMsg('Driver/owner ID number is required')
+      return
+    }
+    if (!ownerPayload.phone) {
+      setTaxiEditMsg('Driver/owner phone number is required')
+      return
+    }
+    if (!isValidKenyanPhone(ownerPayload.phone)) {
+      setTaxiEditMsg('Enter a valid Kenyan phone number')
+      return
+    }
+    if (!taxiPayload.plate) {
+      setTaxiEditMsg('Taxi plate/identifier is required')
+      return
+    }
+    if (!taxiPayload.operator_id) {
+      setTaxiEditMsg('Operator is required')
+      return
+    }
+    if (!category) {
+      setTaxiEditMsg('Taxi category is required')
+      return
+    }
+    if (seatCapacityInput && !seatCapacity) {
+      setTaxiEditMsg('Seat capacity must be a positive integer')
+      return
+    }
+    setTaxiEditMsg('Saving...')
+    setTaxiEditError(null)
+    try {
+      await sendJson('/api/admin/update-taxi', 'POST', {
+        id: taxiEditId,
+        owner_id: taxiEditOwnerId || null,
+        owner: ownerPayload,
+        taxi: taxiPayload,
+      })
+      setTaxiEditMsg('Taxi updated')
+      resetTaxiEditState()
+      await loadTaxis()
+    } catch (err) {
+      setTaxiEditMsg('')
+      setTaxiEditError(err instanceof Error ? err.message : 'Update failed')
+    }
+  }
+
+  function resetBodaFormState() {
+    setBodaRiderForm(createBodaRiderForm())
+    setBodaBikeForm(createBodaBikeForm())
+  }
+
+  function resetBodaEditState() {
+    setBodaEditId('')
+    setBodaEditRiderId('')
+    setBodaEditRiderForm(createBodaRiderForm())
+    setBodaEditForm(createBodaBikeForm())
+    setBodaEditMsg('')
+    setBodaEditError(null)
+  }
+
+  function startBodaEdit(row: BodaBikeRow) {
+    const id = row.id
+    if (!id) return
+    if (bodaEditId === id) {
+      resetBodaEditState()
+      return
+    }
+    const rider = row.rider || {}
+    setBodaEditId(id)
+    setBodaEditRiderId(row.rider_id || row.rider?.id || '')
+    setBodaEditRiderForm({
+      full_name: rider.full_name || '',
+      id_number: rider.id_number || '',
+      phone: rider.phone || '',
+      email: rider.email || '',
+      address: rider.address || '',
+      stage: rider.stage || '',
+      town: rider.town || '',
+      date_of_birth: formatDateInput(rider.date_of_birth),
+    })
+    setBodaEditForm({
+      identifier: row.identifier || '',
+      make: row.make || '',
+      model: row.model || '',
+      year: row.year ? String(row.year) : '',
+      operator_id: row.operator_id || row.operator?.id || '',
+      till_number: row.till_number || '',
+      license_no: row.license_no || '',
+      has_helmet: Boolean(row.has_helmet),
+      has_reflector: Boolean(row.has_reflector),
+    })
+    setBodaEditMsg('')
+    setBodaEditError(null)
+  }
+
+  async function submitBoda() {
+    const riderPayload = {
+      full_name: bodaRiderForm.full_name.trim(),
+      id_number: bodaRiderForm.id_number.trim(),
+      phone: normalizePhoneInput(bodaRiderForm.phone),
+      email: bodaRiderForm.email.trim() || null,
+      address: bodaRiderForm.address.trim() || null,
+      stage: bodaRiderForm.stage.trim() || null,
+      town: bodaRiderForm.town.trim() || null,
+      date_of_birth: bodaRiderForm.date_of_birth || null,
+    }
+    const bikePayload = {
+      identifier: bodaBikeForm.identifier.trim(),
+      make: bodaBikeForm.make.trim() || null,
+      model: bodaBikeForm.model.trim() || null,
+      year: parseYearInput(bodaBikeForm.year),
+      operator_id: bodaBikeForm.operator_id || null,
+      till_number: bodaBikeForm.till_number.trim() || null,
+      license_no: bodaBikeForm.license_no.trim() || null,
+      has_helmet: Boolean(bodaBikeForm.has_helmet),
+      has_reflector: Boolean(bodaBikeForm.has_reflector),
+    }
+    if (!riderPayload.full_name) {
+      setBodaMsg('Rider full name is required')
+      return
+    }
+    if (!riderPayload.id_number) {
+      setBodaMsg('Rider ID number is required')
+      return
+    }
+    if (!riderPayload.phone) {
+      setBodaMsg('Rider phone number is required')
+      return
+    }
+    if (!isValidKenyanPhone(riderPayload.phone)) {
+      setBodaMsg('Enter a valid Kenyan phone number')
+      return
+    }
+    if (!bikePayload.identifier) {
+      setBodaMsg('Bike identifier is required')
+      return
+    }
+    if (!bikePayload.operator_id) {
+      setBodaMsg('Operator is required')
+      return
+    }
+    setBodaMsg('Saving...')
+    try {
+      await sendJson('/api/admin/register-boda', 'POST', {
+        rider: riderPayload,
+        bike: bikePayload,
+      })
+      setBodaMsg('Boda registered')
+      resetBodaFormState()
+      await loadBodaBikes()
+    } catch (err) {
+      setBodaMsg(err instanceof Error ? err.message : 'Create failed')
+    }
+  }
+
+  async function saveBodaEdit() {
+    if (!bodaEditId) return
+    const riderPayload = {
+      full_name: bodaEditRiderForm.full_name.trim(),
+      id_number: bodaEditRiderForm.id_number.trim(),
+      phone: normalizePhoneInput(bodaEditRiderForm.phone),
+      email: bodaEditRiderForm.email.trim() || null,
+      address: bodaEditRiderForm.address.trim() || null,
+      stage: bodaEditRiderForm.stage.trim() || null,
+      town: bodaEditRiderForm.town.trim() || null,
+      date_of_birth: bodaEditRiderForm.date_of_birth || null,
+    }
+    const bikePayload = {
+      identifier: bodaEditForm.identifier.trim(),
+      make: bodaEditForm.make.trim() || null,
+      model: bodaEditForm.model.trim() || null,
+      year: parseYearInput(bodaEditForm.year),
+      operator_id: bodaEditForm.operator_id || null,
+      till_number: bodaEditForm.till_number.trim() || null,
+      license_no: bodaEditForm.license_no.trim() || null,
+      has_helmet: Boolean(bodaEditForm.has_helmet),
+      has_reflector: Boolean(bodaEditForm.has_reflector),
+    }
+    if (!riderPayload.full_name) {
+      setBodaEditMsg('Rider full name is required')
+      return
+    }
+    if (!riderPayload.id_number) {
+      setBodaEditMsg('Rider ID number is required')
+      return
+    }
+    if (!riderPayload.phone) {
+      setBodaEditMsg('Rider phone number is required')
+      return
+    }
+    if (!isValidKenyanPhone(riderPayload.phone)) {
+      setBodaEditMsg('Enter a valid Kenyan phone number')
+      return
+    }
+    if (!bikePayload.identifier) {
+      setBodaEditMsg('Bike identifier is required')
+      return
+    }
+    if (!bikePayload.operator_id) {
+      setBodaEditMsg('Operator is required')
+      return
+    }
+    setBodaEditMsg('Saving...')
+    setBodaEditError(null)
+    try {
+      await sendJson('/api/admin/update-boda', 'POST', {
+        id: bodaEditId,
+        rider_id: bodaEditRiderId || null,
+        rider: riderPayload,
+        bike: bikePayload,
+      })
+      setBodaEditMsg('Boda updated')
+      resetBodaEditState()
+      await loadBodaBikes()
+    } catch (err) {
+      setBodaEditMsg('')
+      setBodaEditError(err instanceof Error ? err.message : 'Update failed')
     }
   }
 
@@ -2411,6 +2984,28 @@ const SystemDashboard = () => {
     }
   }
 
+  async function loadTaxis() {
+    try {
+      const rows = await fetchList<TaxiRow>('/api/admin/taxis')
+      setTaxis(rows)
+      setTaxisError(null)
+    } catch (err) {
+      setTaxis([])
+      setTaxisError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function loadBodaBikes() {
+    try {
+      const rows = await fetchList<BodaBikeRow>('/api/admin/boda-bikes')
+      setBodaBikes(rows)
+      setBodaError(null)
+    } catch (err) {
+      setBodaBikes([])
+      setBodaError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   async function loadLogins() {
     try {
       const rows = await fetchList<AdminLogin>('/api/admin/user-roles/logins')
@@ -2467,6 +3062,8 @@ const SystemDashboard = () => {
       await loadRouteUsage()
       await loadRoutes()
       await loadShuttles()
+      await loadTaxis()
+      await loadBodaBikes()
       await loadLogins()
     }
     void bootstrap()
@@ -2785,7 +3382,7 @@ const SystemDashboard = () => {
 
         <section className="card" ref={shuttlesTableRef}>
           <div className="topline">
-            <h3 style={{ margin: 0 }}>{shuttleOperatorFilter ? `Shuttles • ${selectedOperatorLabel}` : 'Shuttles'}</h3>
+            <h3 style={{ margin: 0 }}>{shuttleOperatorFilter ? `Shuttles - ${selectedOperatorLabel}` : 'Shuttles'}</h3>
             <span className="muted small">
               Showing {filteredShuttles.length} record{filteredShuttles.length === 1 ? '' : 's'}
             </span>
@@ -3126,6 +3723,1060 @@ const SystemDashboard = () => {
                                     Close
                                   </button>
                                   <span className="muted small">{shuttleEditMsg}</span>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </>
+    )
+  }
+
+  const renderTaxiTab = () => {
+    const selectedOperatorLabel = taxiOperatorFilter
+      ? taxiOperatorSummary.find((row) => row.id === taxiOperatorFilter)?.label ||
+        operatorOptions.find((row) => row.id === taxiOperatorFilter)?.label ||
+        taxiOperatorFilter
+      : 'All operators'
+    const taxiCategory = normalizeTaxiCategory(taxiForm.category)
+    const taxiTableColSpan = 11
+    return (
+      <>
+        <section className="card">
+          <h3 style={{ marginTop: 0 }}>Register Taxi</h3>
+          <div className="grid g2">
+            <div className="card" style={{ margin: 0, boxShadow: 'none' }}>
+              <h4 style={{ margin: '0 0 8px' }}>Driver / Owner Information</h4>
+              <div className="grid g2">
+                <label className="muted small">
+                  Full name *
+                  <input
+                    className="input"
+                    value={taxiOwnerForm.full_name}
+                    onChange={(e) => setTaxiOwnerForm((f) => ({ ...f, full_name: e.target.value }))}
+                    placeholder="Driver/owner full name"
+                  />
+                </label>
+                <label className="muted small">
+                  ID number *
+                  <input
+                    className="input"
+                    value={taxiOwnerForm.id_number}
+                    onChange={(e) => setTaxiOwnerForm((f) => ({ ...f, id_number: e.target.value }))}
+                  />
+                </label>
+                <label className="muted small">
+                  Phone number *
+                  <input
+                    className="input"
+                    value={taxiOwnerForm.phone}
+                    onChange={(e) => setTaxiOwnerForm((f) => ({ ...f, phone: e.target.value }))}
+                    placeholder="07xx..."
+                  />
+                </label>
+                <label className="muted small">
+                  Email address
+                  <input
+                    className="input"
+                    value={taxiOwnerForm.email}
+                    onChange={(e) => setTaxiOwnerForm((f) => ({ ...f, email: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="muted small">
+                  Physical address
+                  <input
+                    className="input"
+                    value={taxiOwnerForm.address}
+                    onChange={(e) => setTaxiOwnerForm((f) => ({ ...f, address: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="muted small">
+                  Driving license no
+                  <input
+                    className="input"
+                    value={taxiOwnerForm.license_no}
+                    onChange={(e) => setTaxiOwnerForm((f) => ({ ...f, license_no: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="muted small">
+                  Date of birth
+                  <input
+                    className="input"
+                    type="date"
+                    value={taxiOwnerForm.date_of_birth}
+                    onChange={(e) => setTaxiOwnerForm((f) => ({ ...f, date_of_birth: e.target.value }))}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="card" style={{ margin: 0, boxShadow: 'none' }}>
+              <h4 style={{ margin: '0 0 8px' }}>Taxi Information</h4>
+              <div className="grid g2">
+                <label className="muted small">
+                  Plate number / identifier *
+                  <input
+                    className="input"
+                    value={taxiForm.plate}
+                    onChange={(e) => setTaxiForm((f) => ({ ...f, plate: e.target.value }))}
+                  />
+                </label>
+                <label className="muted small">
+                  Make
+                  <input
+                    className="input"
+                    value={taxiForm.make}
+                    onChange={(e) => setTaxiForm((f) => ({ ...f, make: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="muted small">
+                  Model
+                  <input
+                    className="input"
+                    value={taxiForm.model}
+                    onChange={(e) => setTaxiForm((f) => ({ ...f, model: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="muted small">
+                  Year of manufacture
+                  <input
+                    className="input"
+                    type="number"
+                    value={taxiForm.year}
+                    onChange={(e) => setTaxiForm((f) => ({ ...f, year: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="muted small">
+                  Operator *
+                  <select
+                    value={taxiForm.operator_id}
+                    onChange={(e) => setTaxiForm((f) => ({ ...f, operator_id: e.target.value }))}
+                    style={{ padding: 10 }}
+                  >
+                    <option value="">Select operator</option>
+                    {operatorOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="muted small">
+                  Taxi category *
+                  <select
+                    value={taxiForm.category}
+                    onChange={(e) => {
+                      const nextCategory = e.target.value
+                      const normalized = normalizeTaxiCategory(nextCategory)
+                      setTaxiForm((f) => ({
+                        ...f,
+                        category: nextCategory,
+                        category_other: normalized === 'OTHER' ? f.category_other : '',
+                      }))
+                    }}
+                    style={{ padding: 10 }}
+                  >
+                    <option value="">Select category</option>
+                    {TAXI_CATEGORY_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {taxiCategory === 'OTHER' ? (
+                  <label className="muted small">
+                    Other category (optional)
+                    <input
+                      className="input"
+                      value={taxiForm.category_other}
+                      onChange={(e) => setTaxiForm((f) => ({ ...f, category_other: e.target.value }))}
+                    />
+                  </label>
+                ) : null}
+                <label className="muted small">
+                  Seat capacity
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    value={taxiForm.seat_capacity}
+                    onChange={(e) => setTaxiForm((f) => ({ ...f, seat_capacity: e.target.value }))}
+                    placeholder="4 or 5"
+                  />
+                </label>
+                <label className="muted small">
+                  Till number
+                  <input
+                    className="input"
+                    value={taxiForm.till_number}
+                    onChange={(e) => setTaxiForm((f) => ({ ...f, till_number: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div className="row" style={{ marginTop: 12 }}>
+            <button className="btn" type="button" onClick={submitTaxi}>
+              Register Taxi
+            </button>
+            <span className="muted small">{taxiMsg}</span>
+          </div>
+        </section>
+
+        <section className="card">
+          <div className="topline">
+            <h3 style={{ margin: 0 }}>Taxis</h3>
+            {taxiOperatorFilter ? (
+              <button className="btn ghost" type="button" onClick={() => setTaxiOperatorFilter('')}>
+                Clear filter
+              </button>
+            ) : null}
+          </div>
+          {taxisError ? <div className="err">Taxi load error: {taxisError}</div> : null}
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Operator</th>
+                  <th>Number of taxis</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {taxiOperatorSummary.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="muted">
+                      No taxis registered yet.
+                    </td>
+                  </tr>
+                ) : (
+                  taxiOperatorSummary.map((row) => (
+                    <tr key={row.id}>
+                      <td>{row.label}</td>
+                      <td>{row.count}</td>
+                      <td>
+                        <button
+                          className="btn ghost"
+                          type="button"
+                          onClick={() => {
+                            setTaxiOperatorFilter(row.id)
+                            requestAnimationFrame(() => {
+                              taxiTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                            })
+                          }}
+                          disabled={taxiOperatorFilter === row.id}
+                        >
+                          {taxiOperatorFilter === row.id ? 'Viewing' : 'View'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="card" ref={taxiTableRef}>
+          <div className="topline">
+            <h3 style={{ margin: 0 }}>{taxiOperatorFilter ? `Taxis - ${selectedOperatorLabel}` : 'Taxis'}</h3>
+            <span className="muted small">
+              Showing {filteredTaxis.length} record{filteredTaxis.length === 1 ? '' : 's'}
+            </span>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Plate</th>
+                  <th>Driver/Owner</th>
+                  <th>Phone</th>
+                  <th>Category</th>
+                  <th>Seats</th>
+                  <th>Make</th>
+                  <th>Model</th>
+                  <th>Year</th>
+                  <th>Operator</th>
+                  <th>Till</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredTaxis.length === 0 ? (
+                  <tr>
+                    <td colSpan={taxiTableColSpan} className="muted">
+                      No taxis found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredTaxis.map((row) => {
+                    const isEditing = taxiEditId && row.id === taxiEditId
+                    const rowCategory = normalizeTaxiCategory(row.category)
+                    const categoryLabel =
+                      rowCategory === 'OTHER' ? `OTHER${row.category_other ? ` (${row.category_other})` : ''}` : rowCategory || '-'
+                    // TODO: Use seat capacity for fleet analysis, revenue per seat, utilization, and operator comparisons.
+                    const seatLabel = row.seat_capacity ? String(row.seat_capacity) : '-'
+                    return (
+                      <Fragment key={row.id || row.plate}>
+                        <tr>
+                          <td>{row.plate || '-'}</td>
+                          <td>{row.owner?.full_name || '-'}</td>
+                          <td>{row.owner?.phone || '-'}</td>
+                          <td>{categoryLabel}</td>
+                          <td>{seatLabel}</td>
+                          <td>{row.make || '-'}</td>
+                          <td>{row.model || '-'}</td>
+                          <td>{row.year || '-'}</td>
+                          <td>{operatorLabelFromParts(row.operator_id || row.operator?.id || '', row.operator || null)}</td>
+                          <td>{row.till_number || '-'}</td>
+                          <td>
+                            <button className="btn ghost" type="button" onClick={() => startTaxiEdit(row)}>
+                              {isEditing ? 'Close' : 'Edit'}
+                            </button>
+                          </td>
+                        </tr>
+                        {isEditing ? (
+                          <tr>
+                            <td colSpan={taxiTableColSpan}>
+                              <div className="card" style={{ margin: '6px 0' }}>
+                                <div className="topline">
+                                  <h3 style={{ margin: 0 }}>Edit taxi</h3>
+                                  <span className="muted small">{row.plate || row.id}</span>
+                                </div>
+                                {taxiEditError ? <div className="err">Update error: {taxiEditError}</div> : null}
+                                <div className="grid g2">
+                                  <div>
+                                    <h4 style={{ margin: '6px 0' }}>Driver / Owner Information</h4>
+                                    <div className="grid g2">
+                                      <label className="muted small">
+                                        Full name *
+                                        <input
+                                          className="input"
+                                          value={taxiEditOwnerForm.full_name}
+                                          onChange={(e) =>
+                                            setTaxiEditOwnerForm((f) => ({ ...f, full_name: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        ID number *
+                                        <input
+                                          className="input"
+                                          value={taxiEditOwnerForm.id_number}
+                                          onChange={(e) =>
+                                            setTaxiEditOwnerForm((f) => ({ ...f, id_number: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Phone number *
+                                        <input
+                                          className="input"
+                                          value={taxiEditOwnerForm.phone}
+                                          onChange={(e) =>
+                                            setTaxiEditOwnerForm((f) => ({ ...f, phone: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Email address
+                                        <input
+                                          className="input"
+                                          value={taxiEditOwnerForm.email}
+                                          onChange={(e) =>
+                                            setTaxiEditOwnerForm((f) => ({ ...f, email: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Physical address
+                                        <input
+                                          className="input"
+                                          value={taxiEditOwnerForm.address}
+                                          onChange={(e) =>
+                                            setTaxiEditOwnerForm((f) => ({ ...f, address: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Driving license no
+                                        <input
+                                          className="input"
+                                          value={taxiEditOwnerForm.license_no}
+                                          onChange={(e) =>
+                                            setTaxiEditOwnerForm((f) => ({ ...f, license_no: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Date of birth
+                                        <input
+                                          className="input"
+                                          type="date"
+                                          value={taxiEditOwnerForm.date_of_birth}
+                                          onChange={(e) =>
+                                            setTaxiEditOwnerForm((f) => ({ ...f, date_of_birth: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <h4 style={{ margin: '6px 0' }}>Taxi Information</h4>
+                                    <div className="grid g2">
+                                      <label className="muted small">
+                                        Plate *
+                                        <input
+                                          className="input"
+                                          value={taxiEditForm.plate}
+                                          onChange={(e) => setTaxiEditForm((f) => ({ ...f, plate: e.target.value }))}
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Make
+                                        <input
+                                          className="input"
+                                          value={taxiEditForm.make}
+                                          onChange={(e) => setTaxiEditForm((f) => ({ ...f, make: e.target.value }))}
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Model
+                                        <input
+                                          className="input"
+                                          value={taxiEditForm.model}
+                                          onChange={(e) => setTaxiEditForm((f) => ({ ...f, model: e.target.value }))}
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Year
+                                        <input
+                                          className="input"
+                                          type="number"
+                                          value={taxiEditForm.year}
+                                          onChange={(e) => setTaxiEditForm((f) => ({ ...f, year: e.target.value }))}
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Operator *
+                                        <select
+                                          value={taxiEditForm.operator_id}
+                                          onChange={(e) =>
+                                            setTaxiEditForm((f) => ({ ...f, operator_id: e.target.value }))
+                                          }
+                                          style={{ padding: 10 }}
+                                        >
+                                          <option value="">Select operator</option>
+                                          {operatorOptions.map((option) => (
+                                            <option key={option.id} value={option.id}>
+                                              {option.label}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </label>
+                                      <label className="muted small">
+                                        Taxi category *
+                                        <select
+                                          value={taxiEditForm.category}
+                                          onChange={(e) => {
+                                            const nextCategory = e.target.value
+                                            const normalized = normalizeTaxiCategory(nextCategory)
+                                            setTaxiEditForm((f) => ({
+                                              ...f,
+                                              category: nextCategory,
+                                              category_other: normalized === 'OTHER' ? f.category_other : '',
+                                            }))
+                                          }}
+                                          style={{ padding: 10 }}
+                                        >
+                                          <option value="">Select category</option>
+                                          {TAXI_CATEGORY_OPTIONS.map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                              {option.label}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </label>
+                                      {normalizeTaxiCategory(taxiEditForm.category) === 'OTHER' ? (
+                                        <label className="muted small">
+                                          Other category (optional)
+                                          <input
+                                            className="input"
+                                            value={taxiEditForm.category_other}
+                                            onChange={(e) =>
+                                              setTaxiEditForm((f) => ({ ...f, category_other: e.target.value }))
+                                            }
+                                          />
+                                        </label>
+                                      ) : null}
+                                      <label className="muted small">
+                                        Seat capacity
+                                        <input
+                                          className="input"
+                                          type="number"
+                                          min={1}
+                                          value={taxiEditForm.seat_capacity}
+                                          onChange={(e) =>
+                                            setTaxiEditForm((f) => ({ ...f, seat_capacity: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Till number
+                                        <input
+                                          className="input"
+                                          value={taxiEditForm.till_number}
+                                          onChange={(e) => setTaxiEditForm((f) => ({ ...f, till_number: e.target.value }))}
+                                        />
+                                      </label>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="row" style={{ marginTop: 8 }}>
+                                  <button className="btn" type="button" onClick={saveTaxiEdit}>
+                                    Save changes
+                                  </button>
+                                  <button className="btn ghost" type="button" onClick={resetTaxiEditState}>
+                                    Close
+                                  </button>
+                                  <span className="muted small">{taxiEditMsg}</span>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </>
+    )
+  }
+
+  const renderBodaTab = () => {
+    const selectedOperatorLabel = bodaOperatorFilter
+      ? bodaOperatorSummary.find((row) => row.id === bodaOperatorFilter)?.label ||
+        operatorOptions.find((row) => row.id === bodaOperatorFilter)?.label ||
+        bodaOperatorFilter
+      : 'All operators'
+    const bodaTableColSpan = 12
+    return (
+      <>
+        <section className="card">
+          <h3 style={{ marginTop: 0 }}>Register Boda</h3>
+          <div className="grid g2">
+            <div className="card" style={{ margin: 0, boxShadow: 'none' }}>
+              <h4 style={{ margin: '0 0 8px' }}>Rider Information</h4>
+              <div className="grid g2">
+                <label className="muted small">
+                  Full name *
+                  <input
+                    className="input"
+                    value={bodaRiderForm.full_name}
+                    onChange={(e) => setBodaRiderForm((f) => ({ ...f, full_name: e.target.value }))}
+                  />
+                </label>
+                <label className="muted small">
+                  ID number *
+                  <input
+                    className="input"
+                    value={bodaRiderForm.id_number}
+                    onChange={(e) => setBodaRiderForm((f) => ({ ...f, id_number: e.target.value }))}
+                  />
+                </label>
+                <label className="muted small">
+                  Phone number *
+                  <input
+                    className="input"
+                    value={bodaRiderForm.phone}
+                    onChange={(e) => setBodaRiderForm((f) => ({ ...f, phone: e.target.value }))}
+                    placeholder="07xx..."
+                  />
+                </label>
+                <label className="muted small">
+                  Email address
+                  <input
+                    className="input"
+                    value={bodaRiderForm.email}
+                    onChange={(e) => setBodaRiderForm((f) => ({ ...f, email: e.target.value }))}
+                  />
+                </label>
+                <label className="muted small">
+                  Physical address
+                  <input
+                    className="input"
+                    value={bodaRiderForm.address}
+                    onChange={(e) => setBodaRiderForm((f) => ({ ...f, address: e.target.value }))}
+                  />
+                </label>
+                <label className="muted small">
+                  Stage/Base
+                  <input
+                    className="input"
+                    value={bodaRiderForm.stage}
+                    onChange={(e) => setBodaRiderForm((f) => ({ ...f, stage: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="muted small">
+                  County/Town
+                  <input
+                    className="input"
+                    value={bodaRiderForm.town}
+                    onChange={(e) => setBodaRiderForm((f) => ({ ...f, town: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="muted small">
+                  Date of birth
+                  <input
+                    className="input"
+                    type="date"
+                    value={bodaRiderForm.date_of_birth}
+                    onChange={(e) => setBodaRiderForm((f) => ({ ...f, date_of_birth: e.target.value }))}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="card" style={{ margin: 0, boxShadow: 'none' }}>
+              <h4 style={{ margin: '0 0 8px' }}>Bike Information</h4>
+              <div className="grid g2">
+                <label className="muted small">
+                  Identifier *
+                  <input
+                    className="input"
+                    value={bodaBikeForm.identifier}
+                    onChange={(e) => setBodaBikeForm((f) => ({ ...f, identifier: e.target.value }))}
+                    placeholder="Plate / sticker / bike number"
+                  />
+                </label>
+                <label className="muted small">
+                  Bike make
+                  <input
+                    className="input"
+                    value={bodaBikeForm.make}
+                    onChange={(e) => setBodaBikeForm((f) => ({ ...f, make: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="muted small">
+                  Bike model
+                  <input
+                    className="input"
+                    value={bodaBikeForm.model}
+                    onChange={(e) => setBodaBikeForm((f) => ({ ...f, model: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="muted small">
+                  Year of manufacture
+                  <input
+                    className="input"
+                    type="number"
+                    value={bodaBikeForm.year}
+                    onChange={(e) => setBodaBikeForm((f) => ({ ...f, year: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="muted small">
+                  Operator *
+                  <select
+                    value={bodaBikeForm.operator_id}
+                    onChange={(e) => setBodaBikeForm((f) => ({ ...f, operator_id: e.target.value }))}
+                    style={{ padding: 10 }}
+                  >
+                    <option value="">Select operator</option>
+                    {operatorOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="muted small">
+                  Till number
+                  <input
+                    className="input"
+                    value={bodaBikeForm.till_number}
+                    onChange={(e) => setBodaBikeForm((f) => ({ ...f, till_number: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="muted small">
+                  Rider license number
+                  <input
+                    className="input"
+                    value={bodaBikeForm.license_no}
+                    onChange={(e) => setBodaBikeForm((f) => ({ ...f, license_no: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <div className="row" style={{ alignItems: 'center', marginTop: 4 }}>
+                  <label className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <input
+                      type="checkbox"
+                      checked={bodaBikeForm.has_helmet}
+                      onChange={(e) => setBodaBikeForm((f) => ({ ...f, has_helmet: e.target.checked }))}
+                    />
+                    Has helmet
+                  </label>
+                  <label className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <input
+                      type="checkbox"
+                      checked={bodaBikeForm.has_reflector}
+                      onChange={(e) => setBodaBikeForm((f) => ({ ...f, has_reflector: e.target.checked }))}
+                    />
+                    Has reflector
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="row" style={{ marginTop: 12 }}>
+            <button className="btn" type="button" onClick={submitBoda}>
+              Register Boda
+            </button>
+            <span className="muted small">{bodaMsg}</span>
+          </div>
+        </section>
+
+        <section className="card">
+          <div className="topline">
+            <h3 style={{ margin: 0 }}>Boda Bodas</h3>
+            {bodaOperatorFilter ? (
+              <button className="btn ghost" type="button" onClick={() => setBodaOperatorFilter('')}>
+                Clear filter
+              </button>
+            ) : null}
+          </div>
+          {bodaError ? <div className="err">Boda load error: {bodaError}</div> : null}
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Operator</th>
+                  <th>Number of bikes</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bodaOperatorSummary.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="muted">
+                      No boda records yet.
+                    </td>
+                  </tr>
+                ) : (
+                  bodaOperatorSummary.map((row) => (
+                    <tr key={row.id}>
+                      <td>{row.label}</td>
+                      <td>{row.count}</td>
+                      <td>
+                        <button
+                          className="btn ghost"
+                          type="button"
+                          onClick={() => {
+                            setBodaOperatorFilter(row.id)
+                            requestAnimationFrame(() => {
+                              bodaTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                            })
+                          }}
+                          disabled={bodaOperatorFilter === row.id}
+                        >
+                          {bodaOperatorFilter === row.id ? 'Viewing' : 'View'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="card" ref={bodaTableRef}>
+          <div className="topline">
+            <h3 style={{ margin: 0 }}>{bodaOperatorFilter ? `Boda Bodas - ${selectedOperatorLabel}` : 'Boda Bodas'}</h3>
+            <span className="muted small">
+              Showing {filteredBodaBikes.length} record{filteredBodaBikes.length === 1 ? '' : 's'}
+            </span>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Identifier</th>
+                  <th>Rider name</th>
+                  <th>Phone</th>
+                  <th>Stage</th>
+                  <th>Make</th>
+                  <th>Model</th>
+                  <th>Year</th>
+                  <th>Operator</th>
+                  <th>Till</th>
+                  <th>License</th>
+                  <th>Compliance</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredBodaBikes.length === 0 ? (
+                  <tr>
+                    <td colSpan={bodaTableColSpan} className="muted">
+                      No boda bikes found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredBodaBikes.map((row) => {
+                    const isEditing = bodaEditId && row.id === bodaEditId
+                    const compliance = [row.has_helmet ? 'Helmet' : '', row.has_reflector ? 'Reflector' : '']
+                      .filter(Boolean)
+                      .join(', ')
+                    return (
+                      <Fragment key={row.id || row.identifier}>
+                        <tr>
+                          <td>{row.identifier || '-'}</td>
+                          <td>{row.rider?.full_name || '-'}</td>
+                          <td>{row.rider?.phone || '-'}</td>
+                          <td>{row.rider?.stage || '-'}</td>
+                          <td>{row.make || '-'}</td>
+                          <td>{row.model || '-'}</td>
+                          <td>{row.year || '-'}</td>
+                          <td>{operatorLabelFromParts(row.operator_id || row.operator?.id || '', row.operator || null)}</td>
+                          <td>{row.till_number || '-'}</td>
+                          <td>{row.license_no || '-'}</td>
+                          <td>{compliance || '-'}</td>
+                          <td>
+                            <button className="btn ghost" type="button" onClick={() => startBodaEdit(row)}>
+                              {isEditing ? 'Close' : 'Edit'}
+                            </button>
+                          </td>
+                        </tr>
+                        {isEditing ? (
+                          <tr>
+                            <td colSpan={bodaTableColSpan}>
+                              <div className="card" style={{ margin: '6px 0' }}>
+                                <div className="topline">
+                                  <h3 style={{ margin: 0 }}>Edit boda</h3>
+                                  <span className="muted small">{row.identifier || row.id}</span>
+                                </div>
+                                {bodaEditError ? <div className="err">Update error: {bodaEditError}</div> : null}
+                                <div className="grid g2">
+                                  <div>
+                                    <h4 style={{ margin: '6px 0' }}>Rider Information</h4>
+                                    <div className="grid g2">
+                                      <label className="muted small">
+                                        Full name *
+                                        <input
+                                          className="input"
+                                          value={bodaEditRiderForm.full_name}
+                                          onChange={(e) =>
+                                            setBodaEditRiderForm((f) => ({ ...f, full_name: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        ID number *
+                                        <input
+                                          className="input"
+                                          value={bodaEditRiderForm.id_number}
+                                          onChange={(e) =>
+                                            setBodaEditRiderForm((f) => ({ ...f, id_number: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Phone number *
+                                        <input
+                                          className="input"
+                                          value={bodaEditRiderForm.phone}
+                                          onChange={(e) =>
+                                            setBodaEditRiderForm((f) => ({ ...f, phone: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Email address
+                                        <input
+                                          className="input"
+                                          value={bodaEditRiderForm.email}
+                                          onChange={(e) =>
+                                            setBodaEditRiderForm((f) => ({ ...f, email: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Physical address
+                                        <input
+                                          className="input"
+                                          value={bodaEditRiderForm.address}
+                                          onChange={(e) =>
+                                            setBodaEditRiderForm((f) => ({ ...f, address: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Stage/Base
+                                        <input
+                                          className="input"
+                                          value={bodaEditRiderForm.stage}
+                                          onChange={(e) =>
+                                            setBodaEditRiderForm((f) => ({ ...f, stage: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        County/Town
+                                        <input
+                                          className="input"
+                                          value={bodaEditRiderForm.town}
+                                          onChange={(e) =>
+                                            setBodaEditRiderForm((f) => ({ ...f, town: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Date of birth
+                                        <input
+                                          className="input"
+                                          type="date"
+                                          value={bodaEditRiderForm.date_of_birth}
+                                          onChange={(e) =>
+                                            setBodaEditRiderForm((f) => ({ ...f, date_of_birth: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <h4 style={{ margin: '6px 0' }}>Bike Information</h4>
+                                    <div className="grid g2">
+                                      <label className="muted small">
+                                        Identifier *
+                                        <input
+                                          className="input"
+                                          value={bodaEditForm.identifier}
+                                          onChange={(e) =>
+                                            setBodaEditForm((f) => ({ ...f, identifier: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Bike make
+                                        <input
+                                          className="input"
+                                          value={bodaEditForm.make}
+                                          onChange={(e) => setBodaEditForm((f) => ({ ...f, make: e.target.value }))}
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Bike model
+                                        <input
+                                          className="input"
+                                          value={bodaEditForm.model}
+                                          onChange={(e) => setBodaEditForm((f) => ({ ...f, model: e.target.value }))}
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Year
+                                        <input
+                                          className="input"
+                                          type="number"
+                                          value={bodaEditForm.year}
+                                          onChange={(e) => setBodaEditForm((f) => ({ ...f, year: e.target.value }))}
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Operator *
+                                        <select
+                                          value={bodaEditForm.operator_id}
+                                          onChange={(e) =>
+                                            setBodaEditForm((f) => ({ ...f, operator_id: e.target.value }))
+                                          }
+                                          style={{ padding: 10 }}
+                                        >
+                                          <option value="">Select operator</option>
+                                          {operatorOptions.map((option) => (
+                                            <option key={option.id} value={option.id}>
+                                              {option.label}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </label>
+                                      <label className="muted small">
+                                        Till number
+                                        <input
+                                          className="input"
+                                          value={bodaEditForm.till_number}
+                                          onChange={(e) => setBodaEditForm((f) => ({ ...f, till_number: e.target.value }))}
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Rider license number
+                                        <input
+                                          className="input"
+                                          value={bodaEditForm.license_no}
+                                          onChange={(e) => setBodaEditForm((f) => ({ ...f, license_no: e.target.value }))}
+                                        />
+                                      </label>
+                                      <div className="row" style={{ alignItems: 'center', marginTop: 4 }}>
+                                        <label className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                          <input
+                                            type="checkbox"
+                                            checked={bodaEditForm.has_helmet}
+                                            onChange={(e) =>
+                                              setBodaEditForm((f) => ({ ...f, has_helmet: e.target.checked }))
+                                            }
+                                          />
+                                          Has helmet
+                                        </label>
+                                        <label className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                          <input
+                                            type="checkbox"
+                                            checked={bodaEditForm.has_reflector}
+                                            onChange={(e) =>
+                                              setBodaEditForm((f) => ({ ...f, has_reflector: e.target.checked }))
+                                            }
+                                          />
+                                          Has reflector
+                                        </label>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="row" style={{ marginTop: 8 }}>
+                                  <button className="btn" type="button" onClick={saveBodaEdit}>
+                                    Save changes
+                                  </button>
+                                  <button className="btn ghost" type="button" onClick={resetBodaEditState}>
+                                    Close
+                                  </button>
+                                  <span className="muted small">{bodaEditMsg}</span>
                                 </div>
                               </div>
                             </td>
@@ -3531,15 +5182,6 @@ const SystemDashboard = () => {
                 />
               </label>
               <label className="muted small">
-                Contact account number (optional)
-                <input
-                  className="input"
-                  value={saccoForm.contact_account_number}
-                  onChange={(e) => setSaccoForm((f) => ({ ...f, contact_account_number: e.target.value }))}
-                  placeholder="Account number"
-                />
-              </label>
-              <label className="muted small">
                 Settlement till / paybill
                 <input
                   className="input"
@@ -3657,7 +5299,6 @@ const SystemDashboard = () => {
                   const contactName = saccoForm.contact_name.trim()
                   const contactPhone = normalizePhoneInput(saccoForm.contact_phone)
                   const contactEmail = saccoForm.contact_email.trim()
-                  const contactAccountNumber = saccoForm.contact_account_number.trim()
                   const defaultTill = saccoForm.default_till.trim()
                   const settlementMethod = saccoForm.settlement_method
                   const settlementBankName = saccoForm.settlement_bank_name.trim()
@@ -3699,7 +5340,6 @@ const SystemDashboard = () => {
                       contact_name: contactName || null,
                       contact_phone: contactPhone || null,
                       contact_email: contactEmail || null,
-                      contact_account_number: contactAccountNumber || null,
                       default_till: defaultTill,
                       fee_label: feeLabel,
                       savings_enabled: saccoForm.savings_enabled,
@@ -3880,8 +5520,8 @@ const SystemDashboard = () => {
       ) : null}
 
       {activeTab === 'matatu' ? renderShuttlesTab() : null}
-      {activeTab === 'taxis' ? renderVehicleTab(vehicleTabMeta.taxis) : null}
-      {activeTab === 'bodabodas' ? renderVehicleTab(vehicleTabMeta.bodabodas) : null}
+      {activeTab === 'taxis' ? renderTaxiTab() : null}
+      {activeTab === 'bodabodas' ? renderBodaTab() : null}
 
       {activeTab === 'finance' ? (
         <>
