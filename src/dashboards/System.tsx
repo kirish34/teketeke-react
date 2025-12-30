@@ -246,6 +246,42 @@ type VehicleRow = {
   till_number?: string
 }
 
+type ShuttleOwnerRow = {
+  id?: string
+  full_name?: string
+  id_number?: string
+  kra_pin?: string | null
+  phone?: string
+  email?: string | null
+  address?: string | null
+  occupation?: string | null
+  location?: string | null
+  date_of_birth?: string | null
+  created_at?: string
+}
+
+type ShuttleOperatorRow = {
+  id?: string
+  display_name?: string | null
+  name?: string | null
+  sacco_name?: string | null
+}
+
+type ShuttleRow = {
+  id?: string
+  plate?: string
+  make?: string | null
+  model?: string | null
+  year?: number | null
+  operator_id?: string | null
+  tlb_license?: string | null
+  till_number?: string | null
+  owner_id?: string | null
+  created_at?: string
+  owner?: ShuttleOwnerRow | null
+  operator?: ShuttleOperatorRow | null
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await authFetch(url, { headers: { Accept: 'application/json' } })
   if (!res.ok) {
@@ -359,6 +395,32 @@ function createOperatorForm(operatorType?: string | null) {
   }
 }
 
+function createShuttleOwnerForm() {
+  return {
+    full_name: '',
+    id_number: '',
+    kra_pin: '',
+    phone: '',
+    email: '',
+    address: '',
+    occupation: '',
+    location: '',
+    date_of_birth: '',
+  }
+}
+
+function createShuttleForm() {
+  return {
+    plate: '',
+    make: '',
+    model: '',
+    year: '',
+    operator_id: '',
+    tlb_license: '',
+    till_number: '',
+  }
+}
+
 function normalizePhoneInput(value: string) {
   return String(value || '').replace(/\s+/g, '')
 }
@@ -372,6 +434,19 @@ function isValidKenyanPhone(value: string) {
   if (!value) return false
   const cleaned = normalizePhoneInput(value)
   return /^(?:\+?254|0)(7\d{8}|1\d{8})$/.test(cleaned)
+}
+
+function parseYearInput(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  const num = Number(trimmed)
+  if (!Number.isFinite(num)) return null
+  return Math.trunc(num)
+}
+
+function formatDateInput(value?: string | null) {
+  if (!value) return ''
+  return String(value).slice(0, 10)
 }
 
 function formatOperatorTypeLabel(value?: string | null) {
@@ -601,6 +676,7 @@ const SystemDashboard = () => {
   const mapRef = useRef<HTMLDivElement | null>(null)
   const mapInstance = useRef<any>(null)
   const mapLayers = useRef<{ polyline?: any; markers?: any[] }>({})
+  const shuttlesTableRef = useRef<HTMLDivElement | null>(null)
 
   const [saccoForm, setSaccoForm] = useState(() => createOperatorForm(defaultOperatorType))
   const [saccoMsg, setSaccoMsg] = useState('')
@@ -614,6 +690,19 @@ const SystemDashboard = () => {
   })
   const [saccoEditMsg, setSaccoEditMsg] = useState('')
   const [saccoEditError, setSaccoEditError] = useState<string | null>(null)
+
+  const [shuttles, setShuttles] = useState<ShuttleRow[]>([])
+  const [shuttlesError, setShuttlesError] = useState<string | null>(null)
+  const [shuttleOwnerForm, setShuttleOwnerForm] = useState(() => createShuttleOwnerForm())
+  const [shuttleForm, setShuttleForm] = useState(() => createShuttleForm())
+  const [shuttleMsg, setShuttleMsg] = useState('')
+  const [shuttleOperatorFilter, setShuttleOperatorFilter] = useState('')
+  const [shuttleEditId, setShuttleEditId] = useState('')
+  const [shuttleEditOwnerId, setShuttleEditOwnerId] = useState('')
+  const [shuttleEditOwnerForm, setShuttleEditOwnerForm] = useState(() => createShuttleOwnerForm())
+  const [shuttleEditForm, setShuttleEditForm] = useState(() => createShuttleForm())
+  const [shuttleEditMsg, setShuttleEditMsg] = useState('')
+  const [shuttleEditError, setShuttleEditError] = useState<string | null>(null)
 
   const [matatuForm, setMatatuForm] = useState({
     plate: '',
@@ -694,7 +783,7 @@ const SystemDashboard = () => {
     { id: 'payouts', label: 'B2C Payouts' },
     { id: 'worker_monitor', label: 'Worker Monitor' },
     { id: 'saccos', label: 'Operators' },
-    { id: 'matatu', label: 'Matatu' },
+    { id: 'matatu', label: 'Shuttles' },
     { id: 'taxis', label: 'Taxis' },
     { id: 'bodabodas', label: 'BodaBodas' },
     { id: 'ussd', label: 'USSD' },
@@ -757,6 +846,44 @@ const SystemDashboard = () => {
     })
     return map
   }, [saccos])
+
+  const operatorOptions = useMemo(() => {
+    return saccos
+      .map((row) => {
+        const id = row.id || row.sacco_id || ''
+        if (!id) return null
+        const label = row.display_name || row.name || row.sacco_name || row.sacco_id || row.id || id
+        return { id, label }
+      })
+      .filter((option): option is { id: string; label: string } => Boolean(option))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }, [saccos])
+
+  const shuttleOperatorSummary = useMemo(() => {
+    const map = new Map<string, { id: string; label: string; count: number }>()
+    shuttles.forEach((row) => {
+      const id = row.operator_id || row.operator?.id || ''
+      if (!id) return
+      const operatorRow = saccoById.get(id)
+      const label =
+        row.operator?.display_name ||
+        row.operator?.name ||
+        row.operator?.sacco_name ||
+        operatorRow?.display_name ||
+        operatorRow?.name ||
+        id
+      const existing = map.get(id) || { id, label, count: 0 }
+      existing.count += 1
+      if (label && existing.label !== label) existing.label = label
+      map.set(id, existing)
+    })
+    return [...map.values()].sort((a, b) => b.count - a.count)
+  }, [shuttles, saccoById])
+
+  const filteredShuttles = useMemo(() => {
+    if (!shuttleOperatorFilter) return shuttles
+    return shuttles.filter((row) => (row.operator_id || row.operator?.id || '') === shuttleOperatorFilter)
+  }, [shuttles, shuttleOperatorFilter])
 
   const ussdByMatatuId = useMemo(() => {
     const map = new Map<string, UssdPoolRow>()
@@ -1062,6 +1189,200 @@ const SystemDashboard = () => {
     } catch (err) {
       setVehicleEditMsg('')
       setVehicleEditError(err instanceof Error ? err.message : 'Update failed')
+    }
+  }
+
+  function resetShuttleFormState() {
+    setShuttleOwnerForm(createShuttleOwnerForm())
+    setShuttleForm(createShuttleForm())
+  }
+
+  function resetShuttleEditState() {
+    setShuttleEditId('')
+    setShuttleEditOwnerId('')
+    setShuttleEditOwnerForm(createShuttleOwnerForm())
+    setShuttleEditForm(createShuttleForm())
+    setShuttleEditMsg('')
+    setShuttleEditError(null)
+  }
+
+  function operatorLabelFor(row?: ShuttleRow | null) {
+    if (!row) return '-'
+    const operatorId = row.operator_id || row.operator?.id || ''
+    const operatorRow = operatorId ? saccoById.get(operatorId) : null
+    return (
+      row.operator?.display_name ||
+      row.operator?.name ||
+      row.operator?.sacco_name ||
+      operatorRow?.display_name ||
+      operatorRow?.name ||
+      row.operator_id ||
+      '-'
+    )
+  }
+
+  function startShuttleEdit(row: ShuttleRow) {
+    const id = row.id
+    if (!id) return
+    if (shuttleEditId === id) {
+      resetShuttleEditState()
+      return
+    }
+    const owner = row.owner || {}
+    setShuttleEditId(id)
+    setShuttleEditOwnerId(row.owner_id || row.owner?.id || '')
+    setShuttleEditOwnerForm({
+      full_name: owner.full_name || '',
+      id_number: owner.id_number || '',
+      kra_pin: owner.kra_pin || '',
+      phone: owner.phone || '',
+      email: owner.email || '',
+      address: owner.address || '',
+      occupation: owner.occupation || '',
+      location: owner.location || '',
+      date_of_birth: formatDateInput(owner.date_of_birth),
+    })
+    setShuttleEditForm({
+      plate: row.plate || '',
+      make: row.make || '',
+      model: row.model || '',
+      year: row.year ? String(row.year) : '',
+      operator_id: row.operator_id || row.operator?.id || '',
+      tlb_license: row.tlb_license || '',
+      till_number: row.till_number || '',
+    })
+    setShuttleEditMsg('')
+    setShuttleEditError(null)
+  }
+
+  async function submitShuttle() {
+    const ownerPayload = {
+      full_name: shuttleOwnerForm.full_name.trim(),
+      id_number: shuttleOwnerForm.id_number.trim(),
+      kra_pin: shuttleOwnerForm.kra_pin.trim() || null,
+      phone: normalizePhoneInput(shuttleOwnerForm.phone),
+      email: shuttleOwnerForm.email.trim() || null,
+      address: shuttleOwnerForm.address.trim() || null,
+      occupation: shuttleOwnerForm.occupation.trim() || null,
+      location: shuttleOwnerForm.location.trim() || null,
+      date_of_birth: shuttleOwnerForm.date_of_birth || null,
+    }
+    const shuttlePayload = {
+      plate: shuttleForm.plate.trim().toUpperCase(),
+      make: shuttleForm.make.trim() || null,
+      model: shuttleForm.model.trim() || null,
+      year: parseYearInput(shuttleForm.year),
+      operator_id: shuttleForm.operator_id || null,
+      tlb_license: shuttleForm.tlb_license.trim() || null,
+      till_number: shuttleForm.till_number.trim(),
+    }
+    if (!ownerPayload.full_name) {
+      setShuttleMsg('Owner full name is required')
+      return
+    }
+    if (!ownerPayload.id_number) {
+      setShuttleMsg('Owner ID number is required')
+      return
+    }
+    if (!ownerPayload.phone) {
+      setShuttleMsg('Owner phone number is required')
+      return
+    }
+    if (!isValidKenyanPhone(ownerPayload.phone)) {
+      setShuttleMsg('Enter a valid Kenyan phone number')
+      return
+    }
+    if (!shuttlePayload.plate) {
+      setShuttleMsg('Shuttle plate/identifier is required')
+      return
+    }
+    if (!shuttlePayload.operator_id) {
+      setShuttleMsg('Operator is required')
+      return
+    }
+    if (!shuttlePayload.till_number) {
+      setShuttleMsg('Till number is required')
+      return
+    }
+    setShuttleMsg('Saving...')
+    try {
+      await sendJson('/api/admin/register-shuttle', 'POST', {
+        owner: ownerPayload,
+        shuttle: shuttlePayload,
+      })
+      setShuttleMsg('Shuttle registered')
+      resetShuttleFormState()
+      await loadShuttles()
+    } catch (err) {
+      setShuttleMsg(err instanceof Error ? err.message : 'Create failed')
+    }
+  }
+
+  async function saveShuttleEdit() {
+    if (!shuttleEditId) return
+    const ownerPayload = {
+      full_name: shuttleEditOwnerForm.full_name.trim(),
+      id_number: shuttleEditOwnerForm.id_number.trim(),
+      kra_pin: shuttleEditOwnerForm.kra_pin.trim() || null,
+      phone: normalizePhoneInput(shuttleEditOwnerForm.phone),
+      email: shuttleEditOwnerForm.email.trim() || null,
+      address: shuttleEditOwnerForm.address.trim() || null,
+      occupation: shuttleEditOwnerForm.occupation.trim() || null,
+      location: shuttleEditOwnerForm.location.trim() || null,
+      date_of_birth: shuttleEditOwnerForm.date_of_birth || null,
+    }
+    const shuttlePayload = {
+      plate: shuttleEditForm.plate.trim().toUpperCase(),
+      make: shuttleEditForm.make.trim() || null,
+      model: shuttleEditForm.model.trim() || null,
+      year: parseYearInput(shuttleEditForm.year),
+      operator_id: shuttleEditForm.operator_id || null,
+      tlb_license: shuttleEditForm.tlb_license.trim() || null,
+      till_number: shuttleEditForm.till_number.trim(),
+    }
+    if (!ownerPayload.full_name) {
+      setShuttleEditMsg('Owner full name is required')
+      return
+    }
+    if (!ownerPayload.id_number) {
+      setShuttleEditMsg('Owner ID number is required')
+      return
+    }
+    if (!ownerPayload.phone) {
+      setShuttleEditMsg('Owner phone number is required')
+      return
+    }
+    if (!isValidKenyanPhone(ownerPayload.phone)) {
+      setShuttleEditMsg('Enter a valid Kenyan phone number')
+      return
+    }
+    if (!shuttlePayload.plate) {
+      setShuttleEditMsg('Shuttle plate/identifier is required')
+      return
+    }
+    if (!shuttlePayload.operator_id) {
+      setShuttleEditMsg('Operator is required')
+      return
+    }
+    if (!shuttlePayload.till_number) {
+      setShuttleEditMsg('Till number is required')
+      return
+    }
+    setShuttleEditMsg('Saving...')
+    setShuttleEditError(null)
+    try {
+      await sendJson('/api/admin/update-shuttle', 'POST', {
+        id: shuttleEditId,
+        owner_id: shuttleEditOwnerId || null,
+        owner: ownerPayload,
+        shuttle: shuttlePayload,
+      })
+      setShuttleEditMsg('Shuttle updated')
+      resetShuttleEditState()
+      await loadShuttles()
+    } catch (err) {
+      setShuttleEditMsg('')
+      setShuttleEditError(err instanceof Error ? err.message : 'Update failed')
     }
   }
 
@@ -1969,6 +2290,17 @@ const SystemDashboard = () => {
     }
   }
 
+  async function loadShuttles() {
+    try {
+      const rows = await fetchList<ShuttleRow>('/api/admin/shuttles')
+      setShuttles(rows)
+      setShuttlesError(null)
+    } catch (err) {
+      setShuttles([])
+      setShuttlesError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   async function loadLogins() {
     try {
       const rows = await fetchList<AdminLogin>('/api/admin/user-roles/logins')
@@ -2024,6 +2356,7 @@ const SystemDashboard = () => {
       await loadSmsTemplates()
       await loadRouteUsage()
       await loadRoutes()
+      await loadShuttles()
       await loadLogins()
     }
     void bootstrap()
@@ -2031,6 +2364,518 @@ const SystemDashboard = () => {
 
   const counts = overview?.counts || {}
   const pool = overview?.ussd_pool || {}
+
+  const renderShuttlesTab = () => {
+    const selectedOperatorLabel = shuttleOperatorFilter
+      ? shuttleOperatorSummary.find((row) => row.id === shuttleOperatorFilter)?.label ||
+        operatorOptions.find((row) => row.id === shuttleOperatorFilter)?.label ||
+        shuttleOperatorFilter
+      : 'All operators'
+    const shuttlesTableColSpan = 10
+    return (
+      <>
+        <section className="card">
+          <h3 style={{ marginTop: 0 }}>Register Shuttle</h3>
+          <div className="grid g2">
+            <div className="card" style={{ margin: 0, boxShadow: 'none' }}>
+              <h4 style={{ margin: '0 0 8px' }}>Owner Information</h4>
+              <div className="grid g2">
+                <label className="muted small">
+                  Full name *
+                  <input
+                    className="input"
+                    value={shuttleOwnerForm.full_name}
+                    onChange={(e) => setShuttleOwnerForm((f) => ({ ...f, full_name: e.target.value }))}
+                    placeholder="Owner full name"
+                  />
+                </label>
+                <label className="muted small">
+                  ID number *
+                  <input
+                    className="input"
+                    value={shuttleOwnerForm.id_number}
+                    onChange={(e) => setShuttleOwnerForm((f) => ({ ...f, id_number: e.target.value }))}
+                    placeholder="National ID"
+                  />
+                </label>
+                <label className="muted small">
+                  KRA PIN
+                  <input
+                    className="input"
+                    value={shuttleOwnerForm.kra_pin}
+                    onChange={(e) => setShuttleOwnerForm((f) => ({ ...f, kra_pin: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="muted small">
+                  Phone number *
+                  <input
+                    className="input"
+                    value={shuttleOwnerForm.phone}
+                    onChange={(e) => setShuttleOwnerForm((f) => ({ ...f, phone: e.target.value }))}
+                    placeholder="07xx..."
+                  />
+                </label>
+                <label className="muted small">
+                  Email address
+                  <input
+                    className="input"
+                    value={shuttleOwnerForm.email}
+                    onChange={(e) => setShuttleOwnerForm((f) => ({ ...f, email: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="muted small">
+                  Physical address
+                  <input
+                    className="input"
+                    value={shuttleOwnerForm.address}
+                    onChange={(e) => setShuttleOwnerForm((f) => ({ ...f, address: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="muted small">
+                  Occupation
+                  <input
+                    className="input"
+                    value={shuttleOwnerForm.occupation}
+                    onChange={(e) => setShuttleOwnerForm((f) => ({ ...f, occupation: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="muted small">
+                  Location (town/area)
+                  <input
+                    className="input"
+                    value={shuttleOwnerForm.location}
+                    onChange={(e) => setShuttleOwnerForm((f) => ({ ...f, location: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="muted small">
+                  Date of birth
+                  <input
+                    className="input"
+                    type="date"
+                    value={shuttleOwnerForm.date_of_birth}
+                    onChange={(e) => setShuttleOwnerForm((f) => ({ ...f, date_of_birth: e.target.value }))}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="card" style={{ margin: 0, boxShadow: 'none' }}>
+              <h4 style={{ margin: '0 0 8px' }}>Shuttle Information</h4>
+              <div className="grid g2">
+                <label className="muted small">
+                  Plate number / identifier *
+                  <input
+                    className="input"
+                    value={shuttleForm.plate}
+                    onChange={(e) => setShuttleForm((f) => ({ ...f, plate: e.target.value }))}
+                    placeholder="KDA123A"
+                  />
+                </label>
+                <label className="muted small">
+                  Make
+                  <input
+                    className="input"
+                    value={shuttleForm.make}
+                    onChange={(e) => setShuttleForm((f) => ({ ...f, make: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="muted small">
+                  Model
+                  <input
+                    className="input"
+                    value={shuttleForm.model}
+                    onChange={(e) => setShuttleForm((f) => ({ ...f, model: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="muted small">
+                  Year of manufacture
+                  <input
+                    className="input"
+                    type="number"
+                    value={shuttleForm.year}
+                    onChange={(e) => setShuttleForm((f) => ({ ...f, year: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="muted small">
+                  Operator *
+                  <select
+                    value={shuttleForm.operator_id}
+                    onChange={(e) => setShuttleForm((f) => ({ ...f, operator_id: e.target.value }))}
+                    style={{ padding: 10 }}
+                  >
+                    <option value="">Select operator</option>
+                    {operatorOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="muted small">
+                  TLB / License number
+                  <input
+                    className="input"
+                    value={shuttleForm.tlb_license}
+                    onChange={(e) => setShuttleForm((f) => ({ ...f, tlb_license: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="muted small">
+                  Till number *
+                  <input
+                    className="input"
+                    value={shuttleForm.till_number}
+                    onChange={(e) => setShuttleForm((f) => ({ ...f, till_number: e.target.value }))}
+                    placeholder="Till or paybill"
+                  />
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div className="row" style={{ marginTop: 12 }}>
+            <button className="btn" type="button" onClick={submitShuttle}>
+              Register Shuttle
+            </button>
+            <span className="muted small">{shuttleMsg}</span>
+          </div>
+        </section>
+
+        <section className="card">
+          <div className="topline">
+            <h3 style={{ margin: 0 }}>Shuttles</h3>
+            {shuttleOperatorFilter ? (
+              <button
+                className="btn ghost"
+                type="button"
+                onClick={() => setShuttleOperatorFilter('')}
+              >
+                Clear filter
+              </button>
+            ) : null}
+          </div>
+          {shuttlesError ? <div className="err">Shuttles load error: {shuttlesError}</div> : null}
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Operator</th>
+                  <th>Number of shuttles</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shuttleOperatorSummary.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="muted">
+                      No shuttles registered yet.
+                    </td>
+                  </tr>
+                ) : (
+                  shuttleOperatorSummary.map((row) => (
+                    <tr key={row.id}>
+                      <td>{row.label}</td>
+                      <td>{row.count}</td>
+                      <td>
+                        <button
+                          className="btn ghost"
+                          type="button"
+                          onClick={() => {
+                            setShuttleOperatorFilter(row.id)
+                            requestAnimationFrame(() => {
+                              shuttlesTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                            })
+                          }}
+                          disabled={shuttleOperatorFilter === row.id}
+                        >
+                          {shuttleOperatorFilter === row.id ? 'Viewing' : 'View'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="card" ref={shuttlesTableRef}>
+          <div className="topline">
+            <h3 style={{ margin: 0 }}>{shuttleOperatorFilter ? `Shuttles • ${selectedOperatorLabel}` : 'Shuttles'}</h3>
+            <span className="muted small">
+              Showing {filteredShuttles.length} record{filteredShuttles.length === 1 ? '' : 's'}
+            </span>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Plate</th>
+                  <th>Owner name</th>
+                  <th>Owner phone</th>
+                  <th>Make</th>
+                  <th>Model</th>
+                  <th>Year</th>
+                  <th>Operator</th>
+                  <th>TLB/License</th>
+                  <th>Till</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredShuttles.length === 0 ? (
+                  <tr>
+                    <td colSpan={shuttlesTableColSpan} className="muted">
+                      No shuttles found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredShuttles.map((row) => {
+                    const isEditing = shuttleEditId && row.id === shuttleEditId
+                    return (
+                      <Fragment key={row.id || row.plate}>
+                        <tr>
+                          <td>{row.plate || '-'}</td>
+                          <td>{row.owner?.full_name || '-'}</td>
+                          <td>{row.owner?.phone || '-'}</td>
+                          <td>{row.make || '-'}</td>
+                          <td>{row.model || '-'}</td>
+                          <td>{row.year || '-'}</td>
+                          <td>{operatorLabelFor(row)}</td>
+                          <td>{row.tlb_license || '-'}</td>
+                          <td>{row.till_number || '-'}</td>
+                          <td>
+                            <button className="btn ghost" type="button" onClick={() => startShuttleEdit(row)}>
+                              {isEditing ? 'Close' : 'Edit'}
+                            </button>
+                          </td>
+                        </tr>
+                        {isEditing ? (
+                          <tr>
+                            <td colSpan={shuttlesTableColSpan}>
+                              <div className="card" style={{ margin: '6px 0' }}>
+                                <div className="topline">
+                                  <h3 style={{ margin: 0 }}>Edit shuttle</h3>
+                                  <span className="muted small">{row.plate || row.id}</span>
+                                </div>
+                                {shuttleEditError ? <div className="err">Update error: {shuttleEditError}</div> : null}
+                                <div className="grid g2">
+                                  <div>
+                                    <h4 style={{ margin: '6px 0' }}>Owner Information</h4>
+                                    <div className="grid g2">
+                                      <label className="muted small">
+                                        Full name *
+                                        <input
+                                          className="input"
+                                          value={shuttleEditOwnerForm.full_name}
+                                          onChange={(e) =>
+                                            setShuttleEditOwnerForm((f) => ({ ...f, full_name: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        ID number *
+                                        <input
+                                          className="input"
+                                          value={shuttleEditOwnerForm.id_number}
+                                          onChange={(e) =>
+                                            setShuttleEditOwnerForm((f) => ({ ...f, id_number: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        KRA PIN
+                                        <input
+                                          className="input"
+                                          value={shuttleEditOwnerForm.kra_pin}
+                                          onChange={(e) =>
+                                            setShuttleEditOwnerForm((f) => ({ ...f, kra_pin: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Phone number *
+                                        <input
+                                          className="input"
+                                          value={shuttleEditOwnerForm.phone}
+                                          onChange={(e) =>
+                                            setShuttleEditOwnerForm((f) => ({ ...f, phone: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Email address
+                                        <input
+                                          className="input"
+                                          value={shuttleEditOwnerForm.email}
+                                          onChange={(e) =>
+                                            setShuttleEditOwnerForm((f) => ({ ...f, email: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Physical address
+                                        <input
+                                          className="input"
+                                          value={shuttleEditOwnerForm.address}
+                                          onChange={(e) =>
+                                            setShuttleEditOwnerForm((f) => ({ ...f, address: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Occupation
+                                        <input
+                                          className="input"
+                                          value={shuttleEditOwnerForm.occupation}
+                                          onChange={(e) =>
+                                            setShuttleEditOwnerForm((f) => ({ ...f, occupation: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Location
+                                        <input
+                                          className="input"
+                                          value={shuttleEditOwnerForm.location}
+                                          onChange={(e) =>
+                                            setShuttleEditOwnerForm((f) => ({ ...f, location: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Date of birth
+                                        <input
+                                          className="input"
+                                          type="date"
+                                          value={shuttleEditOwnerForm.date_of_birth}
+                                          onChange={(e) =>
+                                            setShuttleEditOwnerForm((f) => ({
+                                              ...f,
+                                              date_of_birth: e.target.value,
+                                            }))
+                                          }
+                                        />
+                                      </label>
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <h4 style={{ margin: '6px 0' }}>Shuttle Information</h4>
+                                    <div className="grid g2">
+                                      <label className="muted small">
+                                        Plate *
+                                        <input
+                                          className="input"
+                                          value={shuttleEditForm.plate}
+                                          onChange={(e) =>
+                                            setShuttleEditForm((f) => ({ ...f, plate: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Make
+                                        <input
+                                          className="input"
+                                          value={shuttleEditForm.make}
+                                          onChange={(e) =>
+                                            setShuttleEditForm((f) => ({ ...f, make: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Model
+                                        <input
+                                          className="input"
+                                          value={shuttleEditForm.model}
+                                          onChange={(e) =>
+                                            setShuttleEditForm((f) => ({ ...f, model: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Year
+                                        <input
+                                          className="input"
+                                          type="number"
+                                          value={shuttleEditForm.year}
+                                          onChange={(e) =>
+                                            setShuttleEditForm((f) => ({ ...f, year: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Operator *
+                                        <select
+                                          value={shuttleEditForm.operator_id}
+                                          onChange={(e) =>
+                                            setShuttleEditForm((f) => ({ ...f, operator_id: e.target.value }))
+                                          }
+                                          style={{ padding: 10 }}
+                                        >
+                                          <option value="">Select operator</option>
+                                          {operatorOptions.map((option) => (
+                                            <option key={option.id} value={option.id}>
+                                              {option.label}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </label>
+                                      <label className="muted small">
+                                        TLB / License number
+                                        <input
+                                          className="input"
+                                          value={shuttleEditForm.tlb_license}
+                                          onChange={(e) =>
+                                            setShuttleEditForm((f) => ({ ...f, tlb_license: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="muted small">
+                                        Till number *
+                                        <input
+                                          className="input"
+                                          value={shuttleEditForm.till_number}
+                                          onChange={(e) =>
+                                            setShuttleEditForm((f) => ({ ...f, till_number: e.target.value }))
+                                          }
+                                        />
+                                      </label>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="row" style={{ marginTop: 8 }}>
+                                  <button className="btn" type="button" onClick={saveShuttleEdit}>
+                                    Save changes
+                                  </button>
+                                  <button className="btn ghost" type="button" onClick={resetShuttleEditState}>
+                                    Close
+                                  </button>
+                                  <span className="muted small">{shuttleEditMsg}</span>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </>
+    )
+  }
 
   const renderVehicleTab = (meta: { label: string; plural: string; type: VehicleKind }) => {
     const rows = vehiclesFor(meta.type)
@@ -2768,7 +3613,7 @@ const SystemDashboard = () => {
         </>
       ) : null}
 
-      {activeTab === 'matatu' ? renderVehicleTab(vehicleTabMeta.matatu) : null}
+      {activeTab === 'matatu' ? renderShuttlesTab() : null}
       {activeTab === 'taxis' ? renderVehicleTab(vehicleTabMeta.taxis) : null}
       {activeTab === 'bodabodas' ? renderVehicleTab(vehicleTabMeta.bodabodas) : null}
 

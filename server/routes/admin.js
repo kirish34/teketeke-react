@@ -737,6 +737,126 @@ router.delete('/delete-matatu/:id', async (req,res)=>{
   res.json({ deleted: 1 });
 });
 
+// Shuttles
+router.get('/shuttles', async (req,res)=>{
+  // TODO: Switch operator join to an operators table if/when it replaces saccos.
+  let q = supabaseAdmin
+    .from('shuttles')
+    .select('*, owner:owner_id(*), operator:operator_id(id, display_name, name, sacco_name)')
+    .order('created_at',{ascending:false});
+  if (req.query.operator_id) q = q.eq('operator_id', req.query.operator_id);
+  const { data, error } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ items: data||[] });
+});
+router.post('/register-shuttle', async (req,res)=>{
+  const owner = req.body?.owner || {};
+  const shuttle = req.body?.shuttle || {};
+  const ownerRow = {
+    full_name: String(owner.full_name || '').trim(),
+    id_number: String(owner.id_number || '').trim(),
+    kra_pin: owner.kra_pin ? String(owner.kra_pin).trim() : null,
+    phone: owner.phone ? String(owner.phone).trim() : '',
+    email: owner.email ? String(owner.email).trim() : null,
+    address: owner.address ? String(owner.address).trim() : null,
+    occupation: owner.occupation ? String(owner.occupation).trim() : null,
+    location: owner.location ? String(owner.location).trim() : null,
+    date_of_birth: owner.date_of_birth || null,
+  };
+  if (!ownerRow.full_name) return res.status(400).json({ error: 'owner full_name required' });
+  if (!ownerRow.id_number) return res.status(400).json({ error: 'owner id_number required' });
+  if (!ownerRow.phone) return res.status(400).json({ error: 'owner phone required' });
+
+  const plate = String(shuttle.plate || '').trim().toUpperCase();
+  const operatorId = shuttle.operator_id || null;
+  const tillNumber = String(shuttle.till_number || '').trim();
+  if (!plate) return res.status(400).json({ error: 'plate required' });
+  if (!operatorId) return res.status(400).json({ error: 'operator_id required' });
+  if (!tillNumber) return res.status(400).json({ error: 'till_number required' });
+
+  const rawYear = shuttle.year ? Number(shuttle.year) : null;
+  const year = Number.isFinite(rawYear) ? Math.trunc(rawYear) : null;
+
+  const { data: ownerData, error: ownerError } = await supabaseAdmin
+    .from('shuttle_owners')
+    .insert(ownerRow)
+    .select()
+    .single();
+  if (ownerError) return res.status(500).json({ error: ownerError.message });
+
+  const shuttleRow = {
+    plate,
+    make: shuttle.make ? String(shuttle.make).trim() : null,
+    model: shuttle.model ? String(shuttle.model).trim() : null,
+    year,
+    operator_id: operatorId,
+    tlb_license: shuttle.tlb_license ? String(shuttle.tlb_license).trim() : null,
+    till_number: tillNumber,
+    owner_id: ownerData.id,
+  };
+  const { data, error } = await supabaseAdmin.from('shuttles').insert(shuttleRow).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ...data, owner: ownerData });
+});
+router.post('/update-shuttle', async (req,res)=>{
+  const { id, owner_id, owner, shuttle } = req.body||{};
+  if (!id) return res.status(400).json({ error: 'id required' });
+  if (!owner_id) return res.status(400).json({ error: 'owner_id required' });
+
+  const ownerPayload = owner || {};
+  const ownerUpdate = {
+    full_name: String(ownerPayload.full_name || '').trim(),
+    id_number: String(ownerPayload.id_number || '').trim(),
+    kra_pin: ownerPayload.kra_pin ? String(ownerPayload.kra_pin).trim() : null,
+    phone: ownerPayload.phone ? String(ownerPayload.phone).trim() : '',
+    email: ownerPayload.email ? String(ownerPayload.email).trim() : null,
+    address: ownerPayload.address ? String(ownerPayload.address).trim() : null,
+    occupation: ownerPayload.occupation ? String(ownerPayload.occupation).trim() : null,
+    location: ownerPayload.location ? String(ownerPayload.location).trim() : null,
+    date_of_birth: ownerPayload.date_of_birth || null,
+  };
+  if (!ownerUpdate.full_name) return res.status(400).json({ error: 'owner full_name required' });
+  if (!ownerUpdate.id_number) return res.status(400).json({ error: 'owner id_number required' });
+  if (!ownerUpdate.phone) return res.status(400).json({ error: 'owner phone required' });
+
+  const shuttlePayload = shuttle || {};
+  const plate = String(shuttlePayload.plate || '').trim().toUpperCase();
+  const operatorId = shuttlePayload.operator_id || null;
+  const tillNumber = String(shuttlePayload.till_number || '').trim();
+  if (!plate) return res.status(400).json({ error: 'plate required' });
+  if (!operatorId) return res.status(400).json({ error: 'operator_id required' });
+  if (!tillNumber) return res.status(400).json({ error: 'till_number required' });
+
+  const rawYear = shuttlePayload.year ? Number(shuttlePayload.year) : null;
+  const year = Number.isFinite(rawYear) ? Math.trunc(rawYear) : null;
+
+  const { error: ownerError } = await supabaseAdmin
+    .from('shuttle_owners')
+    .update(ownerUpdate)
+    .eq('id', owner_id);
+  if (ownerError) return res.status(500).json({ error: ownerError.message });
+
+  const shuttleUpdate = {
+    plate,
+    make: shuttlePayload.make ? String(shuttlePayload.make).trim() : null,
+    model: shuttlePayload.model ? String(shuttlePayload.model).trim() : null,
+    year,
+    operator_id: operatorId,
+    tlb_license: shuttlePayload.tlb_license ? String(shuttlePayload.tlb_license).trim() : null,
+    till_number: tillNumber,
+  };
+  const { error: shuttleError } = await supabaseAdmin.from('shuttles').update(shuttleUpdate).eq('id', id);
+  if (shuttleError) return res.status(500).json({ error: shuttleError.message });
+
+  const { data, error } = await supabaseAdmin
+    .from('shuttles')
+    .select('*, owner:owner_id(*), operator:operator_id(id, display_name, name, sacco_name)')
+    .eq('id', id)
+    .single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
 router.post('/user-roles/create-user', async (req,res)=>{
   const email = (req.body?.email || '').trim();
   const password = req.body?.password || '';
