@@ -945,6 +945,11 @@ router.post('/update-shuttle', async (req,res)=>{
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
 });
+router.delete('/delete-shuttle/:id', async (req,res)=>{
+  const { error } = await supabaseAdmin.from('shuttles').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ deleted: 1 });
+});
 
 // Taxis
 router.get('/taxis', async (req,res)=>{
@@ -1096,6 +1101,11 @@ router.post('/update-taxi', async (req,res)=>{
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
 });
+router.delete('/delete-taxi/:id', async (req,res)=>{
+  const { error } = await supabaseAdmin.from('taxis').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ deleted: 1 });
+});
 
 // Boda Bodas
 router.get('/boda-bikes', async (req,res)=>{
@@ -1212,6 +1222,11 @@ router.post('/update-boda', async (req,res)=>{
     .single();
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
+});
+router.delete('/delete-boda/:id', async (req,res)=>{
+  const { error } = await supabaseAdmin.from('boda_bikes').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ deleted: 1 });
 });
 
 // Shuttle Care - Maintenance Logs

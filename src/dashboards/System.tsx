@@ -1902,6 +1902,26 @@ const SystemDashboard = () => {
     }
   }
 
+  async function deleteSacco(row: SaccoRow) {
+    const id = row.id || row.sacco_id
+    if (!id) return
+    const label = row.display_name || row.name || row.sacco_name || row.sacco_id || row.id || id
+    if (!confirm(`Delete operator ${label}? This cannot be undone.`)) return
+    setSaccosError(null)
+    try {
+      await deleteJson(`/api/admin/delete-sacco/${encodeURIComponent(id)}`)
+      if (saccoEditId === id) {
+        setSaccoEditId('')
+        setSaccoEditMsg('')
+        setSaccoEditError(null)
+      }
+      const rows = await fetchList<SaccoRow>('/api/admin/saccos')
+      setSaccos(rows)
+    } catch (err) {
+      setSaccosError(err instanceof Error ? err.message : 'Delete failed')
+    }
+  }
+
   function resetShuttleFormState() {
     setShuttleOwnerForm(createShuttleOwnerForm())
     setShuttleForm(createShuttleForm())
@@ -2175,6 +2195,23 @@ const SystemDashboard = () => {
     }
   }
 
+  async function deleteShuttle(row: ShuttleRow) {
+    const id = row.id
+    if (!id) return
+    const label = row.plate || id
+    if (!confirm(`Delete shuttle ${label}? This cannot be undone.`)) return
+    setShuttlesError(null)
+    try {
+      await deleteJson(`/api/admin/delete-shuttle/${encodeURIComponent(id)}`)
+      if (shuttleEditId === id) {
+        resetShuttleEditState()
+      }
+      await loadShuttles()
+    } catch (err) {
+      setShuttlesError(err instanceof Error ? err.message : 'Delete failed')
+    }
+  }
+
   function resetTaxiFormState() {
     setTaxiOwnerForm(createTaxiOwnerForm())
     setTaxiForm(createTaxiForm())
@@ -2368,6 +2405,23 @@ const SystemDashboard = () => {
     }
   }
 
+  async function deleteTaxi(row: TaxiRow) {
+    const id = row.id
+    if (!id) return
+    const label = row.plate || id
+    if (!confirm(`Delete taxi ${label}? This cannot be undone.`)) return
+    setTaxisError(null)
+    try {
+      await deleteJson(`/api/admin/delete-taxi/${encodeURIComponent(id)}`)
+      if (taxiEditId === id) {
+        resetTaxiEditState()
+      }
+      await loadTaxis()
+    } catch (err) {
+      setTaxisError(err instanceof Error ? err.message : 'Delete failed')
+    }
+  }
+
   function resetBodaFormState() {
     setBodaRiderForm(createBodaRiderForm())
     setBodaBikeForm(createBodaBikeForm())
@@ -2539,6 +2593,23 @@ const SystemDashboard = () => {
     } catch (err) {
       setBodaEditMsg('')
       setBodaEditError(err instanceof Error ? err.message : 'Update failed')
+    }
+  }
+
+  async function deleteBoda(row: BodaBikeRow) {
+    const id = row.id
+    if (!id) return
+    const label = row.identifier || id
+    if (!confirm(`Delete boda bike ${label}? This cannot be undone.`)) return
+    setBodaError(null)
+    try {
+      await deleteJson(`/api/admin/delete-boda/${encodeURIComponent(id)}`)
+      if (bodaEditId === id) {
+        resetBodaEditState()
+      }
+      await loadBodaBikes()
+    } catch (err) {
+      setBodaError(err instanceof Error ? err.message : 'Delete failed')
     }
   }
 
@@ -4602,6 +4673,14 @@ const SystemDashboard = () => {
                               <button className="btn ghost" type="button" onClick={() => startShuttleEdit(row)}>
                                 {isEditing ? 'Close' : 'Edit'}
                               </button>
+                              <button
+                                className="btn bad ghost"
+                                type="button"
+                                onClick={() => deleteShuttle(row)}
+                                disabled={!row.id}
+                              >
+                                Delete
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -5239,9 +5318,19 @@ const SystemDashboard = () => {
                           <td>{operatorLabelFromParts(row.operator_id || row.operator?.id || '', row.operator || null)}</td>
                           <td>{row.till_number || '-'}</td>
                           <td>
-                            <button className="btn ghost" type="button" onClick={() => startTaxiEdit(row)}>
-                              {isEditing ? 'Close' : 'Edit'}
-                            </button>
+                            <div className="row" style={{ gap: 6 }}>
+                              <button className="btn ghost" type="button" onClick={() => startTaxiEdit(row)}>
+                                {isEditing ? 'Close' : 'Edit'}
+                              </button>
+                              <button
+                                className="btn bad ghost"
+                                type="button"
+                                onClick={() => deleteTaxi(row)}
+                                disabled={!row.id}
+                              >
+                                Delete
+                              </button>
+                            </div>
                           </td>
                         </tr>
                         {isEditing ? (
@@ -5764,9 +5853,19 @@ const SystemDashboard = () => {
                           <td>{row.license_no || '-'}</td>
                           <td>{compliance || '-'}</td>
                           <td>
-                            <button className="btn ghost" type="button" onClick={() => startBodaEdit(row)}>
-                              {isEditing ? 'Close' : 'Edit'}
-                            </button>
+                            <div className="row" style={{ gap: 6 }}>
+                              <button className="btn ghost" type="button" onClick={() => startBodaEdit(row)}>
+                                {isEditing ? 'Close' : 'Edit'}
+                              </button>
+                              <button
+                                className="btn bad ghost"
+                                type="button"
+                                onClick={() => deleteBoda(row)}
+                                disabled={!row.id}
+                              >
+                                Delete
+                              </button>
+                            </div>
                           </td>
                         </tr>
                         {isEditing ? (
@@ -6463,9 +6562,19 @@ const SystemDashboard = () => {
                             <td>{sacco.status || 'ACTIVE'}</td>
                             <td>{saccoId || '-'}</td>
                             <td>
-                              <button className="btn ghost" type="button" onClick={() => startSaccoEdit(sacco)}>
-                                {isEditing ? 'Close' : 'Edit'}
-                              </button>
+                              <div className="row" style={{ gap: 6 }}>
+                                <button className="btn ghost" type="button" onClick={() => startSaccoEdit(sacco)}>
+                                  {isEditing ? 'Close' : 'Edit'}
+                                </button>
+                                <button
+                                  className="btn bad ghost"
+                                  type="button"
+                                  onClick={() => deleteSacco(sacco)}
+                                  disabled={!saccoId}
+                                >
+                                  Delete
+                                </button>
+                              </div>
                             </td>
                           </tr>
                           {isEditing ? (
