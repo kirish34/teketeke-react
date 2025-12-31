@@ -1159,27 +1159,59 @@ const SystemDashboard = () => {
       .sort((a, b) => a.label.localeCompare(b.label))
   }, [saccos])
 
-  const matatuOptions = useMemo(() => {
-    return matatus
-      .map((row) => {
-        const id = row.id || ''
-        if (!id) return null
-        const plate = row.number_plate || row.plate || row.registration || row.id || id
-        const saccoRow = row.sacco_id ? saccoById.get(row.sacco_id) : null
-        const saccoLabel =
-          row.sacco_name ||
-          row.sacco ||
-          saccoRow?.display_name ||
-          saccoRow?.name ||
-          saccoRow?.sacco_name ||
-          row.sacco_id ||
-          ''
-        const label = saccoLabel ? `${plate} - ${saccoLabel}` : plate
-        return { id, label }
-      })
-      .filter((option): option is { id: string; label: string } => Boolean(option))
-      .sort((a, b) => a.label.localeCompare(b.label))
-  }, [matatus, saccoById])
+  const vehicleOptions = useMemo(() => {
+    const options: Array<{ id: string; label: string }> = []
+    const labelType = (value?: string | null) => {
+      const raw = String(value || '').trim().toUpperCase()
+      if (raw === 'BODA' || raw === 'BODABODA') return 'BodaBoda'
+      if (raw === 'TAXI') return 'Taxi'
+      if (raw === 'MATATU') return 'Matatu'
+      if (!raw) return 'Vehicle'
+      return raw
+    }
+    const pushOption = (id: string, type: string, plate: string, operatorLabel?: string | null) => {
+      if (!id || !plate) return
+      const trimmedPlate = String(plate).trim()
+      if (!trimmedPlate) return
+      const label = operatorLabel ? `${type}: ${trimmedPlate} - ${operatorLabel}` : `${type}: ${trimmedPlate}`
+      options.push({ id, label })
+    }
+
+    matatus.forEach((row) => {
+      const id = row.id || ''
+      if (!id) return
+      const plate = row.number_plate || row.plate || row.registration || row.id || id
+      const saccoRow = row.sacco_id ? saccoById.get(row.sacco_id) : null
+      const operatorLabel =
+        row.sacco_name ||
+        row.sacco ||
+        saccoRow?.display_name ||
+        saccoRow?.name ||
+        saccoRow?.sacco_name ||
+        row.sacco_id ||
+        null
+      const typeLabel = labelType(row.vehicle_type || row.body_type || row.type)
+      pushOption(id, typeLabel, plate, operatorLabel)
+    })
+
+    taxis.forEach((row) => {
+      const id = row.id || ''
+      if (!id) return
+      const plate = row.plate || row.id || id
+      const operatorLabel = operatorLabelFromParts(row.operator_id || row.operator?.id || '', row.operator || null)
+      pushOption(id, 'Taxi', plate, operatorLabel === '-' ? null : operatorLabel)
+    })
+
+    bodaBikes.forEach((row) => {
+      const id = row.id || ''
+      if (!id) return
+      const plate = row.identifier || row.id || id
+      const operatorLabel = operatorLabelFromParts(row.operator_id || row.operator?.id || '', row.operator || null)
+      pushOption(id, 'BodaBoda', plate, operatorLabel === '-' ? null : operatorLabel)
+    })
+
+    return options.sort((a, b) => a.label.localeCompare(b.label))
+  }, [matatus, taxis, bodaBikes, saccoById])
 
   const shuttlesById = useMemo(() => {
     const map = new Map<string, ShuttleRow>()
@@ -8500,8 +8532,8 @@ const SystemDashboard = () => {
             onChange={(e) => setLoginForm((f) => ({ ...f, matatu_id: e.target.value }))}
             style={{ padding: 10 }}
           >
-            <option value="">Matatu (optional)</option>
-            {matatuOptions.map((option) => (
+            <option value="">Vehicle (optional)</option>
+            {vehicleOptions.map((option) => (
               <option key={option.id} value={option.id}>
                 {option.label}
               </option>
@@ -8539,7 +8571,7 @@ const SystemDashboard = () => {
                 <th>Email</th>
                 <th>Role</th>
                 <th>SACCO</th>
-                <th>Matatu</th>
+                <th>Vehicle</th>
                 <th>ID</th>
                 <th>Actions</th>
               </tr>
