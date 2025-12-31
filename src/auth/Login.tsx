@@ -5,6 +5,7 @@ import { env } from "../lib/env";
 import { useAuth } from "../state/auth";
 
 type Tone = "muted" | "ok" | "err";
+const LOGIN_PREFILL_KEY = "tt_login_prefill";
 
 export function sanitizeNext(raw: string | null) {
   if (raw && raw.startsWith("/")) return raw;
@@ -66,6 +67,25 @@ export function Login() {
   useEffect(() => {
     refreshSessionState();
   }, [refreshSessionState]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.sessionStorage.getItem(LOGIN_PREFILL_KEY);
+      if (!raw) return;
+      window.sessionStorage.removeItem(LOGIN_PREFILL_KEY);
+      const parsed = JSON.parse(raw) as { email?: string; password?: string } | null;
+      const nextEmail = typeof parsed?.email === "string" ? parsed.email : "";
+      const nextPassword = typeof parsed?.password === "string" ? parsed.password : "";
+      if (nextEmail) setEmail(nextEmail);
+      if (nextPassword) setPassword(nextPassword);
+      if (nextEmail || nextPassword) {
+        setMessage({ text: "Login details prefilled from operator registration.", tone: "muted" });
+      }
+    } catch {
+      // ignore storage failures or invalid payloads
+    }
+  }, []);
 
   useEffect(() => {
     if (!supabase) return;

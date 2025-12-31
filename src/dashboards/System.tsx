@@ -6493,8 +6493,17 @@ const SystemDashboard = () => {
                       .then((rows) => setSaccos(rows))
                       .catch((err) => setSaccosError(err instanceof Error ? err.message : String(err)))
                     if (createdUser?.temp_password) {
+                      const loginEmail = createdUser.email || adminEmail
+                      try {
+                        window.sessionStorage.setItem(
+                          'tt_login_prefill',
+                          JSON.stringify({ email: loginEmail, password: createdUser.temp_password }),
+                        )
+                      } catch {
+                        // ignore storage failures (private mode, permissions)
+                      }
                       window.alert(
-                        `Operator created.\nAdmin login: ${createdUser.email || adminEmail}\nTemp password: ${createdUser.temp_password}`,
+                        `Operator created.\nAdmin login: ${loginEmail}\nTemp password: ${createdUser.temp_password}\nLogin page will be prefilled in this tab.`,
                       )
                     }
                     navigate('/sacco')
