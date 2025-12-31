@@ -1072,7 +1072,7 @@ const SystemDashboard = () => {
     password: '',
     role: 'SACCO',
     sacco_id: '',
-    matatu_id: '',
+    vehicle_ref: '',
   })
   const [loginMsg, setLoginMsg] = useState('')
 
@@ -1160,7 +1160,7 @@ const SystemDashboard = () => {
   }, [saccos])
 
   const vehicleOptions = useMemo(() => {
-    const options: Array<{ id: string; label: string }> = []
+    const options: Array<{ id: string; label: string; type: string }> = []
     const labelType = (value?: string | null) => {
       const raw = String(value || '').trim().toUpperCase()
       if (raw === 'BODA' || raw === 'BODABODA') return 'BodaBoda'
@@ -1169,12 +1169,18 @@ const SystemDashboard = () => {
       if (!raw) return 'Vehicle'
       return raw
     }
-    const pushOption = (id: string, type: string, plate: string, operatorLabel?: string | null) => {
+    const pushOption = (
+      id: string,
+      typeKey: string,
+      typeLabel: string,
+      plate: string,
+      operatorLabel?: string | null,
+    ) => {
       if (!id || !plate) return
       const trimmedPlate = String(plate).trim()
       if (!trimmedPlate) return
-      const label = operatorLabel ? `${type}: ${trimmedPlate} - ${operatorLabel}` : `${type}: ${trimmedPlate}`
-      options.push({ id, label })
+      const label = operatorLabel ? `${typeLabel}: ${trimmedPlate} - ${operatorLabel}` : `${typeLabel}: ${trimmedPlate}`
+      options.push({ id, label, type: typeKey })
     }
 
     matatus.forEach((row) => {
@@ -1191,7 +1197,7 @@ const SystemDashboard = () => {
         row.sacco_id ||
         null
       const typeLabel = labelType(row.vehicle_type || row.body_type || row.type)
-      pushOption(id, typeLabel, plate, operatorLabel)
+      pushOption(id, 'MATATU', typeLabel, plate, operatorLabel)
     })
 
     taxis.forEach((row) => {
@@ -1199,7 +1205,7 @@ const SystemDashboard = () => {
       if (!id) return
       const plate = row.plate || row.id || id
       const operatorLabel = operatorLabelFromParts(row.operator_id || row.operator?.id || '', row.operator || null)
-      pushOption(id, 'Taxi', plate, operatorLabel === '-' ? null : operatorLabel)
+      pushOption(id, 'TAXI', 'Taxi', plate, operatorLabel === '-' ? null : operatorLabel)
     })
 
     bodaBikes.forEach((row) => {
@@ -1207,7 +1213,7 @@ const SystemDashboard = () => {
       if (!id) return
       const plate = row.identifier || row.id || id
       const operatorLabel = operatorLabelFromParts(row.operator_id || row.operator?.id || '', row.operator || null)
-      pushOption(id, 'BodaBoda', plate, operatorLabel === '-' ? null : operatorLabel)
+      pushOption(id, 'BODA', 'BodaBoda', plate, operatorLabel === '-' ? null : operatorLabel)
     })
 
     return options.sort((a, b) => a.label.localeCompare(b.label))
@@ -8528,13 +8534,13 @@ const SystemDashboard = () => {
             ))}
           </select>
           <select
-            value={loginForm.matatu_id}
-            onChange={(e) => setLoginForm((f) => ({ ...f, matatu_id: e.target.value }))}
+            value={loginForm.vehicle_ref}
+            onChange={(e) => setLoginForm((f) => ({ ...f, vehicle_ref: e.target.value }))}
             style={{ padding: 10 }}
           >
             <option value="">Vehicle (optional)</option>
             {vehicleOptions.map((option) => (
-              <option key={option.id} value={option.id}>
+              <option key={`${option.type}:${option.id}`} value={`${option.type}:${option.id}`}>
                 {option.label}
               </option>
             ))}
@@ -8545,15 +8551,33 @@ const SystemDashboard = () => {
             onClick={async () => {
               setLoginMsg('Saving...')
               try {
+                const vehicleRef = loginForm.vehicle_ref.trim()
+                let vehicleType: string | null = null
+                let vehicleId: string | null = null
+                let matatuId: string | null = null
+                if (vehicleRef) {
+                  const [rawType, rawId] = vehicleRef.split(':')
+                  if (rawId) {
+                    vehicleType = rawType.toUpperCase()
+                    vehicleId = rawId
+                    if (vehicleType === 'MATATU') matatuId = rawId
+                  } else {
+                    vehicleType = 'MATATU'
+                    vehicleId = vehicleRef
+                    matatuId = vehicleRef
+                  }
+                }
                 await sendJson('/api/admin/user-roles/create-user', 'POST', {
                   email: loginForm.email.trim(),
                   password: loginForm.password,
                   role: loginForm.role,
                   sacco_id: loginForm.sacco_id || null,
-                  matatu_id: loginForm.matatu_id || null,
+                  matatu_id: matatuId,
+                  vehicle_id: vehicleId,
+                  vehicle_type: vehicleType,
                 })
                 setLoginMsg('Login created')
-                setLoginForm({ email: '', password: '', role: 'SACCO', sacco_id: '', matatu_id: '' })
+                setLoginForm({ email: '', password: '', role: 'SACCO', sacco_id: '', vehicle_ref: '' })
                 await loadLogins()
               } catch (err) {
                 setLoginMsg(err instanceof Error ? err.message : 'Create failed')

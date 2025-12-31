@@ -557,6 +557,112 @@ function generateTempPassword(){
   return `OP${crypto.randomBytes(6).toString('hex')}`;
 }
 
+async function ensureMatatuForVehicle({ plate, vehicleType, saccoId = null, ownerName = null, ownerPhone = null }) {
+  const numberPlate = String(plate || '').trim().toUpperCase();
+  if (!numberPlate) throw new Error('vehicle identifier required');
+  const normalizedType = String(vehicleType || '').trim().toUpperCase();
+  if (!normalizedType) throw new Error('vehicle_type required');
+
+  const { data: existing, error: existingErr } = await supabaseAdmin
+    .from('matatus')
+    .select('id, vehicle_type')
+    .eq('number_plate', numberPlate)
+    .maybeSingle();
+  if (existingErr) throw existingErr;
+
+  if (existing) {
+    const existingType = String(existing.vehicle_type || '').trim().toUpperCase();
+    if (existingType && existingType !== normalizedType) {
+      throw new Error('Vehicle plate already registered as ' + existingType);
+    }
+    return existing.id;
+  }
+
+  const row = {
+    sacco_id: saccoId || null,
+    number_plate: numberPlate,
+    owner_name: ownerName || null,
+    owner_phone: ownerPhone || null,
+    vehicle_type: normalizedType,
+    tlb_number: null,
+    till_number: null,
+  };
+  const { data, error } = await supabaseAdmin.from('matatus').insert(row).select('id').single();
+  if (error) throw error;
+  return data.id;
+}
+
+async function resolveMatatuIdFromVehicle({ matatuId, vehicleId, vehicleType }) {
+  if (matatuId) return matatuId;
+  if (!vehicleId || !vehicleType) return null;
+  const normalizedType = String(vehicleType || '').trim().toUpperCase();
+  if (!normalizedType) return null;
+
+  if (normalizedType === 'MATATU') return vehicleId;
+  if (normalizedType === 'TAXI') {
+    const { data: taxi, error } = await supabaseAdmin
+      .from('taxis')
+      .select('id, plate, operator_id, owner_id')
+      .eq('id', vehicleId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!taxi) throw new Error('Taxi not found');
+
+    let ownerName = null;
+    let ownerPhone = null;
+    if (taxi.owner_id) {
+      const { data: owner, error: ownerErr } = await supabaseAdmin
+        .from('taxi_owners')
+        .select('full_name, phone')
+        .eq('id', taxi.owner_id)
+        .maybeSingle();
+      if (ownerErr) throw ownerErr;
+      ownerName = owner?.full_name || null;
+      ownerPhone = owner?.phone || null;
+    }
+
+    return await ensureMatatuForVehicle({
+      plate: taxi.plate,
+      vehicleType: 'TAXI',
+      saccoId: taxi.operator_id || null,
+      ownerName,
+      ownerPhone,
+    });
+  }
+  if (normalizedType === 'BODA' || normalizedType === 'BODABODA') {
+    const { data: bike, error } = await supabaseAdmin
+      .from('boda_bikes')
+      .select('id, identifier, operator_id, rider_id')
+      .eq('id', vehicleId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!bike) throw new Error('Boda bike not found');
+
+    let riderName = null;
+    let riderPhone = null;
+    if (bike.rider_id) {
+      const { data: rider, error: riderErr } = await supabaseAdmin
+        .from('boda_riders')
+        .select('full_name, phone')
+        .eq('id', bike.rider_id)
+        .maybeSingle();
+      if (riderErr) throw riderErr;
+      riderName = rider?.full_name || null;
+      riderPhone = rider?.phone || null;
+    }
+
+    return await ensureMatatuForVehicle({
+      plate: bike.identifier,
+      vehicleType: 'BODABODA',
+      saccoId: bike.operator_id || null,
+      ownerName: riderName,
+      ownerPhone: riderPhone,
+    });
+  }
+
+  return null;
+}
+
 async function upsertUserRole({ user_id, role, sacco_id = null, matatu_id = null }){
   const normalizeRole = (r) => {
     const upper = String(r || '').trim().toUpperCase();
@@ -1428,6 +1534,8 @@ router.post('/user-roles/create-user', async (req,res)=>{
   const role = (req.body?.role || '').toUpperCase();
   const saccoId = req.body?.sacco_id || null;
   const matatuId = req.body?.matatu_id || null;
+  const vehicleId = req.body?.vehicle_id || null;
+  const vehicleType = req.body?.vehicle_type || null;
 
   if (!email) return res.status(400).json({ error:'email required' });
   if (!password) return res.status(400).json({ error:'password required' });
@@ -1436,12 +1544,22 @@ router.post('/user-roles/create-user', async (req,res)=>{
   const needsSacco = ['SACCO','SACCO_STAFF'].includes(role);
   const needsMatatu = ['OWNER','STAFF','TAXI','BODA'].includes(role);
   if (needsSacco && !saccoId) return res.status(400).json({ error:'sacco_id required for role ' + role });
-  if (needsMatatu && !matatuId) return res.status(400).json({ error:'matatu_id required for role ' + role });
 
   try{
+    let resolvedMatatuId = matatuId;
+    if (needsMatatu) {
+      resolvedMatatuId = await resolveMatatuIdFromVehicle({
+        matatuId,
+        vehicleId,
+        vehicleType,
+      });
+      if (!resolvedMatatuId) {
+        return res.status(400).json({ error:'vehicle_id required for role ' + role });
+      }
+    }
     const { userId } = await ensureAuthUser(email, password);
-    await upsertUserRole({ user_id: userId, role, sacco_id: saccoId, matatu_id: matatuId });
-    res.json({ user_id: userId, role, sacco_id: saccoId, matatu_id: matatuId });
+    await upsertUserRole({ user_id: userId, role, sacco_id: saccoId, matatu_id: resolvedMatatuId });
+    res.json({ user_id: userId, role, sacco_id: saccoId, matatu_id: resolvedMatatuId });
   }catch(e){
     res.status(500).json({ error: e.message || 'Failed to create role user' });
   }
@@ -1481,17 +1599,29 @@ router.post('/user-roles/update', async (req,res)=>{
   const nextRole = req.body?.role ? String(req.body.role).toUpperCase() : null;
   const saccoId = req.body?.sacco_id ?? null;
   const matatuId = req.body?.matatu_id ?? null;
+  const vehicleId = req.body?.vehicle_id ?? null;
+  const vehicleType = req.body?.vehicle_type ?? null;
 
   if (nextRole){
     update.role = nextRole;
   }
   if ('sacco_id' in req.body) update.sacco_id = saccoId;
-  if ('matatu_id' in req.body) update.matatu_id = matatuId;
+  if ('matatu_id' in req.body || vehicleId || vehicleType) {
+    try {
+      update.matatu_id = await resolveMatatuIdFromVehicle({
+        matatuId,
+        vehicleId,
+        vehicleType,
+      });
+    } catch (err) {
+      return res.status(500).json({ error: err.message || 'Failed to resolve vehicle' });
+    }
+  }
 
   const needsSacco = ['SACCO'].includes(nextRole || '');
   const needsMatatu = ['OWNER','STAFF','TAXI','BODA'].includes(nextRole || '');
   if (needsSacco && !saccoId) return res.status(400).json({ error:'sacco_id required for role ' + nextRole });
-  if (needsMatatu && !matatuId) return res.status(400).json({ error:'matatu_id required for role ' + nextRole });
+  if (needsMatatu && !update.matatu_id) return res.status(400).json({ error:'vehicle_id required for role ' + nextRole });
 
   try{
     if (Object.keys(update).length){
