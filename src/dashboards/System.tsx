@@ -182,6 +182,11 @@ type AdminLogin = {
   matatu_id?: string | null
 }
 
+type LoginInlineEdit = {
+  email?: string
+  password?: string
+}
+
 type SystemTabId =
   | 'overview'
   | 'analytics'
@@ -1067,6 +1072,7 @@ const SystemDashboard = () => {
 
   const [logins, setLogins] = useState<AdminLogin[]>([])
   const [loginError, setLoginError] = useState<string | null>(null)
+  const [loginInlineEdits, setLoginInlineEdits] = useState<Record<string, LoginInlineEdit>>({})
   const [loginForm, setLoginForm] = useState({
     email: '',
     password: '',
@@ -8596,6 +8602,7 @@ const SystemDashboard = () => {
                 <th>Role</th>
                 <th>SACCO</th>
                 <th>Vehicle</th>
+                <th>Password</th>
                 <th>ID</th>
                 <th>Actions</th>
               </tr>
@@ -8603,59 +8610,100 @@ const SystemDashboard = () => {
             <tbody>
               {logins.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="muted">
+                  <td colSpan={7} className="muted">
                     No logins.
                   </td>
                 </tr>
               ) : (
-                logins.map((row) => (
-                  <tr key={row.user_id || row.email}>
-                    <td>{row.email || ''}</td>
-                    <td>{row.role || ''}</td>
-                    <td>{row.sacco_id || ''}</td>
-                    <td>{row.matatu_id || ''}</td>
-                    <td className="mono">{row.user_id || ''}</td>
-                    <td className="row" style={{ gap: 6 }}>
-                      <button
-                        className="btn ghost"
-                        type="button"
-                        onClick={async () => {
-                          if (!row.user_id) return
-                          try {
-                            await sendJson('/api/admin/user-roles/update', 'POST', {
-                              user_id: row.user_id,
-                              role: row.role,
-                              email: row.email,
-                              sacco_id: row.sacco_id || null,
-                              matatu_id: row.matatu_id || null,
-                            })
-                            await loadLogins()
-                          } catch (err) {
-                            setLoginError(err instanceof Error ? err.message : 'Update failed')
-                          }
-                        }}
-                      >
-                        Save
-                      </button>
-                      <button
-                        className="btn ghost"
-                        type="button"
-                        onClick={async () => {
-                          if (!row.user_id) return
-                          if (!confirm('Remove this login?')) return
-                          try {
-                            await deleteJson(`/api/admin/user-roles/${row.user_id}?remove_user=true`)
-                            await loadLogins()
-                          } catch (err) {
-                            setLoginError(err instanceof Error ? err.message : 'Delete failed')
-                          }
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                logins.map((row) => {
+                  const rowId = row.user_id || ''
+                  const inline = rowId ? loginInlineEdits[rowId] : null
+                  const emailValue = (inline?.email ?? row.email ?? '').toString()
+                  const passwordValue = (inline?.password ?? '').toString()
+                  return (
+                    <tr key={row.user_id || row.email}>
+                      <td>
+                        <input
+                          className="input"
+                          value={emailValue}
+                          onChange={(e) => {
+                            if (!rowId) return
+                            setLoginInlineEdits((prev) => ({
+                              ...prev,
+                              [rowId]: { ...prev[rowId], email: e.target.value },
+                            }))
+                          }}
+                        />
+                      </td>
+                      <td>{row.role || ''}</td>
+                      <td>{row.sacco_id || ''}</td>
+                      <td>{row.matatu_id || ''}</td>
+                      <td>
+                        <input
+                          className="input"
+                          type="password"
+                          placeholder="New password"
+                          value={passwordValue}
+                          onChange={(e) => {
+                            if (!rowId) return
+                            setLoginInlineEdits((prev) => ({
+                              ...prev,
+                              [rowId]: { ...prev[rowId], password: e.target.value },
+                            }))
+                          }}
+                        />
+                      </td>
+                      <td className="mono">{row.user_id || ''}</td>
+                      <td className="row" style={{ gap: 6 }}>
+                        <button
+                          className="btn ghost"
+                          type="button"
+                          onClick={async () => {
+                            if (!row.user_id) return
+                            try {
+                              const nextEmail = (emailValue || '').trim()
+                              const nextPassword = passwordValue
+                              const payload: Record<string, unknown> = {
+                                user_id: row.user_id,
+                                role: row.role,
+                                sacco_id: row.sacco_id || null,
+                                matatu_id: row.matatu_id || null,
+                              }
+                              if (nextEmail) payload.email = nextEmail
+                              if (nextPassword) payload.password = nextPassword
+                              await sendJson('/api/admin/user-roles/update', 'POST', payload)
+                              await loadLogins()
+                              setLoginInlineEdits((prev) => ({
+                                ...prev,
+                                [row.user_id || '']: { email: nextEmail, password: '' },
+                              }))
+                            } catch (err) {
+                              setLoginError(err instanceof Error ? err.message : 'Update failed')
+                            }
+                          }}
+                        >
+                          Save
+                        </button>
+                        <button
+                          className="btn ghost"
+                          type="button"
+                          onClick={async () => {
+                            if (!row.user_id) return
+                            if (!confirm('Remove this login?')) return
+                            try {
+                              await deleteJson(`/api/admin/user-roles/${row.user_id}?remove_user=true`)
+                              await loadLogins()
+                            } catch (err) {
+                              setLoginError(err instanceof Error ? err.message : 'Delete failed')
+                            }
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })
               )}
             </tbody>
           </table>
