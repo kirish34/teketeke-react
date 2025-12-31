@@ -1159,6 +1159,28 @@ const SystemDashboard = () => {
       .sort((a, b) => a.label.localeCompare(b.label))
   }, [saccos])
 
+  const matatuOptions = useMemo(() => {
+    return matatus
+      .map((row) => {
+        const id = row.id || ''
+        if (!id) return null
+        const plate = row.number_plate || row.plate || row.registration || row.id || id
+        const saccoRow = row.sacco_id ? saccoById.get(row.sacco_id) : null
+        const saccoLabel =
+          row.sacco_name ||
+          row.sacco ||
+          saccoRow?.display_name ||
+          saccoRow?.name ||
+          saccoRow?.sacco_name ||
+          row.sacco_id ||
+          ''
+        const label = saccoLabel ? `${plate} - ${saccoLabel}` : plate
+        return { id, label }
+      })
+      .filter((option): option is { id: string; label: string } => Boolean(option))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }, [matatus, saccoById])
+
   const shuttlesById = useMemo(() => {
     const map = new Map<string, ShuttleRow>()
     shuttles.forEach((row) => {
@@ -8461,18 +8483,30 @@ const SystemDashboard = () => {
             <option value="BODA">BODA</option>
             <option value="OPS">OPS</option>
           </select>
-          <input
-            className="input"
-            placeholder="SACCO ID (optional)"
+          <select
             value={loginForm.sacco_id}
             onChange={(e) => setLoginForm((f) => ({ ...f, sacco_id: e.target.value }))}
-          />
-          <input
-            className="input"
-            placeholder="Matatu ID (optional)"
+            style={{ padding: 10 }}
+          >
+            <option value="">SACCO (optional)</option>
+            {operatorOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <select
             value={loginForm.matatu_id}
             onChange={(e) => setLoginForm((f) => ({ ...f, matatu_id: e.target.value }))}
-          />
+            style={{ padding: 10 }}
+          >
+            <option value="">Matatu (optional)</option>
+            {matatuOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
           <button
             className="btn"
             type="button"
