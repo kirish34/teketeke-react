@@ -105,17 +105,14 @@ router.get('/system-overview', async (_req, res) => {
   try {
     const [
       { count: saccos },
-      { count: matatus },
+      { count: shuttles },
       { count: taxis },
       { count: bodas },
       { count: staff },
       { data: txTodayRows },
     ] = await Promise.all([
       supabaseAdmin.from('saccos').select('*', { count: 'exact', head: true }),
-      supabaseAdmin
-        .from('matatus')
-        .select('*', { count: 'exact', head: true })
-        .or('vehicle_type.eq.MATATU,vehicle_type.is.null'),
+      supabaseAdmin.from('shuttles').select('*', { count: 'exact', head: true }),
       supabaseAdmin
         .from('matatus')
         .select('*', { count: 'exact', head: true })
@@ -132,7 +129,7 @@ router.get('/system-overview', async (_req, res) => {
     res.json({
       counts: {
         saccos: saccos || 0,
-        matatus: matatus || 0,
+        matatus: shuttles || 0,
         taxis: taxis || 0,
         bodas: bodas || 0,
         cashiers: staff || 0,
