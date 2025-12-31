@@ -596,6 +596,36 @@ async function resolveMatatuIdFromVehicle({ matatuId, vehicleId, vehicleType }) 
   if (!normalizedType) return null;
 
   if (normalizedType === 'MATATU') return vehicleId;
+  if (normalizedType === 'SHUTTLE') {
+    const { data: shuttle, error } = await supabaseAdmin
+      .from('shuttles')
+      .select('id, plate, operator_id, owner_id')
+      .eq('id', vehicleId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!shuttle) throw new Error('Shuttle not found');
+
+    let ownerName = null;
+    let ownerPhone = null;
+    if (shuttle.owner_id) {
+      const { data: owner, error: ownerErr } = await supabaseAdmin
+        .from('shuttle_owners')
+        .select('full_name, phone')
+        .eq('id', shuttle.owner_id)
+        .maybeSingle();
+      if (ownerErr) throw ownerErr;
+      ownerName = owner?.full_name || null;
+      ownerPhone = owner?.phone || null;
+    }
+
+    return await ensureMatatuForVehicle({
+      plate: shuttle.plate,
+      vehicleType: 'SHUTTLE',
+      saccoId: shuttle.operator_id || null,
+      ownerName,
+      ownerPhone,
+    });
+  }
   if (normalizedType === 'TAXI') {
     const { data: taxi, error } = await supabaseAdmin
       .from('taxis')

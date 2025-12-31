@@ -1169,6 +1169,7 @@ const SystemDashboard = () => {
     const options: Array<{ id: string; label: string; type: string }> = []
     const labelType = (value?: string | null) => {
       const raw = String(value || '').trim().toUpperCase()
+      if (raw === 'SHUTTLE') return 'Shuttle'
       if (raw === 'BODA' || raw === 'BODABODA') return 'BodaBoda'
       if (raw === 'TAXI') return 'Taxi'
       if (raw === 'MATATU') return 'Matatu'
@@ -1222,8 +1223,16 @@ const SystemDashboard = () => {
       pushOption(id, 'BODA', 'BodaBoda', plate, operatorLabel === '-' ? null : operatorLabel)
     })
 
+    shuttles.forEach((row) => {
+      const id = row.id || ''
+      if (!id) return
+      const plate = row.plate || row.id || id
+      const operatorLabel = operatorLabelFromParts(row.operator_id || row.operator?.id || '', row.operator || null)
+      pushOption(id, 'SHUTTLE', 'Shuttle', plate, operatorLabel === '-' ? null : operatorLabel)
+    })
+
     return options.sort((a, b) => a.label.localeCompare(b.label))
-  }, [matatus, taxis, bodaBikes, saccoById])
+  }, [matatus, taxis, bodaBikes, shuttles, saccoById])
 
   const shuttlesById = useMemo(() => {
     const map = new Map<string, ShuttleRow>()
