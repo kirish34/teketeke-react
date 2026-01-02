@@ -1050,7 +1050,7 @@ router.get('/sacco/:id/staff', async (req,res)=>{
   try{
     const { allowed } = await ensureSaccoAccess(req.user.id, saccoId);
     if (!allowed) return res.status(403).json({ error:'Forbidden' });
-    const saccoRoles = ['SACCO_STAFF', 'SACCO_ADMIN', 'SACCO'];
+    const saccoRoles = ['SACCO_STAFF', 'SACCO_ADMIN'];
     const { data, error } = await supabaseAdmin
       .from('staff_profiles')
       .select('*')
@@ -1075,8 +1075,9 @@ router.post('/sacco/:id/staff', async (req,res)=>{
 
     const email = (req.body?.email || '').trim() || null;
     const phone = (req.body?.phone || '').trim() || null;
-    const roleReq = (req.body?.role || 'SACCO_STAFF').toString().toUpperCase();
-    if (!['SACCO_STAFF', 'SACCO_ADMIN', 'SACCO'].includes(roleReq)) {
+    let roleReq = (req.body?.role || 'SACCO_STAFF').toString().toUpperCase();
+    if (roleReq === 'SACCO') roleReq = 'SACCO_ADMIN';
+    if (!['SACCO_STAFF', 'SACCO_ADMIN'].includes(roleReq)) {
       return res.status(400).json({ error:'Invalid role' });
     }
     const password = (req.body?.password || '').toString().trim();
@@ -1162,7 +1163,8 @@ router.patch('/sacco/:id/staff/:staffId', async (req,res)=>{
     if ('role' in req.body){
       roleReq = (req.body?.role || '').toString().toUpperCase().trim();
       if (!roleReq) return res.status(400).json({ error:'role required' });
-      if (!['SACCO_STAFF','SACCO_ADMIN','SACCO'].includes(roleReq)) {
+      if (roleReq === 'SACCO') roleReq = 'SACCO_ADMIN';
+      if (!['SACCO_STAFF','SACCO_ADMIN'].includes(roleReq)) {
         return res.status(400).json({ error:'Invalid role' });
       }
       updates.role = roleReq;
