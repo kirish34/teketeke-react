@@ -399,20 +399,18 @@ export default function SaccoDashboard() {
 
   const staffLabel = useMemo(() => {
     if (!user?.id) return ''
-    const byId = staff.find((s) => s.user_id === user.id) || null
-    const byEmail =
-      user.email &&
-      staff.find(
-        (s) => s.email && s.email.toString().trim().toLowerCase() === user.email?.toString().trim().toLowerCase(),
-      )
-    return byId?.name || byEmail?.name || ''
+    const email = user.email ? user.email.toString().trim().toLowerCase() : ''
+    const match =
+      staff.find((s) => s.user_id === user.id) ||
+      (email ? staff.find((s) => (s.email || '').toString().trim().toLowerCase() === email) : null)
+    return match?.name || ''
   }, [staff, user?.email, user?.id])
 
   const helloLabel =
     staffLabel || (user?.email ? user.email.split('@')[0] : '') || (operatorLabel !== 'Operator' ? operatorLabel : 'Admin')
   const dashboardTitle = operatorLabel !== 'Operator' ? `${operatorLabel} Dashboard` : 'Operator Dashboard'
   const subtitleParts = [helloLabel ? `Hello, ${helloLabel}` : 'Operator dashboard', dateLabel, timeLabel].filter(Boolean)
-  const dashboardSubtitle = subtitleParts.join(' • ')
+  const dashboardSubtitle = subtitleParts.join(' | ')
 
   useEffect(() => {
     const updateTime = () => {
