@@ -6,7 +6,14 @@ import VehicleCarePage from '../modules/vehicleCare/VehicleCarePage'
 import { fetchAccessGrants, type AccessGrant } from '../modules/vehicleCare/vehicleCare.api'
 
 type Sacco = { sacco_id?: string; name?: string }
-type Matatu = { id?: string; number_plate?: string; sacco_id?: string; savings_opt_in?: boolean }
+type Matatu = {
+  id?: string
+  number_plate?: string
+  sacco_id?: string
+  owner_name?: string
+  owner_phone?: string
+  savings_opt_in?: boolean
+}
 type Loan = { id?: string; matatu_id?: string; borrower_name?: string; status?: string; principal_kes?: number }
 type Tx = {
   id?: string
