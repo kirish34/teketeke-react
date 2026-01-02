@@ -6,7 +6,7 @@ import VehicleCarePage from "../modules/vehicleCare/VehicleCarePage"
 import { fetchAccessGrants, type AccessGrant } from "../modules/vehicleCare/vehicleCare.api"
 
 type Sacco = { sacco_id?: string; name?: string }
-type Matatu = { id?: string; number_plate?: string; sacco_id?: string }
+type Matatu = { id?: string; number_plate?: string; sacco_id?: string; owner_name?: string; owner_phone?: string }
 type Route = { id?: string; name?: string; code?: string }
 type Tx = {
   id?: string
@@ -45,6 +45,7 @@ const MatatuStaffDashboard = () => {
   const [manualMsg, setManualMsg] = useState("")
   const [manualEntries, setManualEntries] = useState<{ id: string; amount: number; note?: string; created_at: string }[]>([])
   const [staffName, setStaffName] = useState("")
+  const [timeLabel, setTimeLabel] = useState("")
 
   const [accessGrants, setAccessGrants] = useState<AccessGrant[]>([])
   const [activeTab, setActiveTab] = useState<"overview" | "trips" | "transactions" | "vehicle_care">("overview")
@@ -148,6 +149,21 @@ const MatatuStaffDashboard = () => {
   }, [fetchJson, saccoId, user?.id, user?.email])
 
   useEffect(() => {
+    const updateTime = () => {
+      setTimeLabel(
+        new Date().toLocaleTimeString("en-KE", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        }),
+      )
+    }
+    updateTime()
+    const timer = setInterval(updateTime, 60000)
+    return () => clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
     try {
       const raw = localStorage.getItem(manualKey(matatuId))
       if (raw) {
@@ -162,6 +178,22 @@ const MatatuStaffDashboard = () => {
   }, [matatuId])
 
   const filteredTx = useMemo(() => txs.filter((t) => !matatuId || t.matatu_id === matatuId), [txs, matatuId])
+  const currentMatatu = useMemo(
+    () => matatus.find((m) => m.id && m.id === matatuId) || null,
+    [matatuId, matatus],
+  )
+  const ownerMatatuCount = useMemo(() => {
+    if (!currentMatatu) return matatuId ? 1 : 0
+    const ownerPhone = currentMatatu.owner_phone || null
+    const ownerName = (currentMatatu.owner_name || "").toString().trim().toLowerCase()
+    const matchesOwner = (m: Matatu) => {
+      if (ownerPhone && m.owner_phone && String(m.owner_phone) === String(ownerPhone)) return true
+      if (ownerName && (m.owner_name || "").toString().trim().toLowerCase() === ownerName) return true
+      return m.id === currentMatatu.id
+    }
+    const count = matatus.filter(matchesOwner).length
+    return count || 1
+  }, [currentMatatu, matatuId, matatus])
 
   const transactionTotals = useMemo(() => {
     const manualLocal = manualEntries.reduce((acc, m) => acc + Number(m.amount || 0), 0)
@@ -256,7 +288,8 @@ const MatatuStaffDashboard = () => {
           <div className="muted">Staff dashboard overview</div>
           <div className="hero-inline">
             <span className="sys-pill-lite">{todayKey()}</span>
-            <span className="sys-pill-lite">{matatus.length} matatu(s)</span>
+            <span className="sys-pill-lite">{timeLabel}</span>
+            <span className="sys-pill-lite">{ownerMatatuCount} matatu(s)</span>
           </div>
         </div>
         <div className="row" style={{ gap: 8, alignItems: "center" }}>
