@@ -8,8 +8,10 @@ import { fetchAccessGrants, saveAccessGrant, type AccessGrant } from '../modules
 type Vehicle = {
   id?: string
   number_plate?: string
+  owner_name?: string
   sacco_id?: string
   sacco_name?: string
+  operator_name?: string
 }
 
 type Tx = {
@@ -147,6 +149,15 @@ const MatatuOwnerDashboard = () => {
     [vehicles, currentId],
   )
   const ownerScopeId = user?.matatu_id || currentId || null
+  const todayLabel = useMemo(
+    () =>
+      new Date().toLocaleDateString('en-KE', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      }),
+    [],
+  )
 
   const staffLoginOptions = useMemo(() => {
     return staff
@@ -595,12 +606,13 @@ const MatatuOwnerDashboard = () => {
       <div className="hero-bar" style={{ marginBottom: 16 }}>
         <div className="hero-left">
           <div className="hero-chip">Matatu Owner Console</div>
-          <h2 style={{ margin: '6px 0 4px' }}>Hello, {currentVehicle?.number_plate || 'owner'}</h2>
+          <h2 style={{ margin: '6px 0 4px' }}>Hello, {currentVehicle?.owner_name || 'owner'}</h2>
           <div className="muted">Manage your matatu, staff, loans, and savings</div>
           <div className="hero-inline">
             <span className="sys-pill-lite">
-              Operate Under: {currentVehicle?.sacco_name || '-'}
+              Operate Under: {currentVehicle?.operator_name || currentVehicle?.sacco_name || '-'}
             </span>
+            <span className="sys-pill-lite">{todayLabel}</span>
             <span className="sys-pill-lite">{status}</span>
           </div>
         </div>
@@ -672,7 +684,7 @@ const MatatuOwnerDashboard = () => {
               </div>
               <div className="card" style={{ boxShadow: 'none' }}>
                 <div className="muted small">Operate Under</div>
-                <div>{currentVehicle?.sacco_name || '-'}</div>
+                <div>{currentVehicle?.operator_name || currentVehicle?.sacco_name || '-'}</div>
               </div>
               <div className="card" style={{ boxShadow: 'none' }}>
                 <div className="muted small">Fees Today</div>

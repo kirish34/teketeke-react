@@ -61,6 +61,22 @@ async function getSaccoDetails(saccoId) {
   return data || null;
 }
 
+async function attachOperatorNames(items) {
+  if (!Array.isArray(items) || items.length === 0) return items || [];
+  const saccoIds = Array.from(new Set(items.map((item) => item?.sacco_id).filter(Boolean)));
+  if (!saccoIds.length) return items;
+  const { data, error } = await supabaseAdmin
+    .from('saccos')
+    .select('id,name,display_name')
+    .in('id', saccoIds);
+  if (error) throw error;
+  const byId = new Map((data || []).map((row) => [row.id, row.display_name || row.name || '']));
+  return items.map((item) => {
+    const resolved = byId.get(item?.sacco_id) || item?.sacco_name || null;
+    return { ...item, sacco_name: resolved, operator_name: resolved };
+  });
+}
+
 async function getSaccoContext(userId) {
   const role = await getRoleRow(userId);
   if (!role) return { role: null, saccoId: null, matatu: null };
@@ -1720,7 +1736,8 @@ router.get('/access-grants', async (req, res) => {
         return res.status(403).json({ error: 'Forbidden' });
       }
       const items = await getAccessGrantsForScope(scopeType, scopeId);
-      return res.json({ items });
+      const enriched = await attachOperatorNames(items);
+      return res.json({ items: enriched });
     }
 
     let query = supabaseAdmin
@@ -1865,7 +1882,8 @@ router.get('/vehicle-care/logs', async (req, res) => {
 
     const { data, error } = await query;
     if (error) throw error;
-    res.json({ items: data || [] });
+    const enriched = await attachOperatorNames(data || []);
+    res.json({ items: enriched });
   } catch (e) {
     res.status(500).json({ error: e.message || 'Failed to load maintenance logs' });
   }
