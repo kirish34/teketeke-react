@@ -175,6 +175,7 @@ export default function SaccoDashboard() {
   const [matatus, setMatatus] = useState<Matatu[]>([])
   const [matatuFilter, setMatatuFilter] = useState('')
   const [memberMsg, setMemberMsg] = useState('')
+  const [tlbEdits, setTlbEdits] = useState<Record<string, string>>({})
   const [txs, setTxs] = useState<Tx[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
   const [staffMsg, setStaffMsg] = useState('')
@@ -374,6 +375,23 @@ export default function SaccoDashboard() {
       setMemberMsg('Saved')
     } catch (err) {
       setMemberMsg(err instanceof Error ? err.message : 'Failed to update savings')
+    }
+  }
+
+  async function updateTlbNumber(matatuId?: string) {
+    if (!matatuId) return
+    const next = (tlbEdits[matatuId] ?? '').trim()
+    setMemberMsg('Saving...')
+    try {
+      const updated = await fetchJson<Matatu>(`/u/matatu/${encodeURIComponent(matatuId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ tlb_number: next || null }),
+      })
+      setMatatus((prev) => prev.map((m) => (m.id === matatuId ? { ...m, tlb_number: updated.tlb_number } : m)))
+      setMemberMsg('Saved')
+    } catch (err) {
+      setMemberMsg(err instanceof Error ? err.message : 'Failed to update TLB')
     }
   }
 
@@ -1769,27 +1787,56 @@ export default function SaccoDashboard() {
                       </td>
                     </tr>
                   ) : (
-                    filteredMatatus.map((m) => (
-                      <tr key={m.id || m.number_plate}>
-                        <td>{memberIdValue(m)}</td>
-                        <td>{m.owner_name || ''}</td>
-                        <td>{m.owner_phone || ''}</td>
-                        {showVehicleTypeColumn ? <td>{m.vehicle_type || ''}</td> : null}
-                        {showMemberLocation ? <td>{memberLocationValue(m)}</td> : null}
-                        {showTLBColumn ? <td>{m.tlb_number || ''}</td> : null}
-                        <td>
-                          <label className="muted small" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                            <input
-                              type="checkbox"
-                              checked={!!m.savings_opt_in}
-                              onChange={(e) => updateSavingsOptIn(m.id, e.target.checked)}
-                            />
-                            {m.savings_opt_in ? 'Enabled' : 'Off'}
-                          </label>
-                        </td>
-                        <td>{m.till_number || ''}</td>
-                      </tr>
-                    ))
+                    filteredMatatus.map((m) => {
+                      const tlbValue = tlbEdits[m.id || ''] ?? m.tlb_number ?? ''
+                      const tlbDisabled = !m.id || tlbValue === (m.tlb_number || '')
+                      return (
+                        <tr key={m.id || m.number_plate}>
+                          <td>{memberIdValue(m)}</td>
+                          <td>{m.owner_name || ''}</td>
+                          <td>{m.owner_phone || ''}</td>
+                          {showVehicleTypeColumn ? <td>{m.vehicle_type || ''}</td> : null}
+                          {showMemberLocation ? <td>{memberLocationValue(m)}</td> : null}
+                          {showTLBColumn ? (
+                            <td>
+                              <div className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                                <input
+                                  className="input"
+                                  value={tlbValue}
+                                  onChange={(e) =>
+                                    setTlbEdits((prev) => ({
+                                      ...prev,
+                                      [m.id || '']: e.target.value,
+                                    }))
+                                  }
+                                  placeholder="TLB number"
+                                  style={{ minWidth: 140 }}
+                                />
+                                <button
+                                  type="button"
+                                  className="btn ghost"
+                                  onClick={() => updateTlbNumber(m.id)}
+                                  disabled={tlbDisabled}
+                                >
+                                  Save
+                                </button>
+                              </div>
+                            </td>
+                          ) : null}
+                          <td>
+                            <label className="muted small" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                              <input
+                                type="checkbox"
+                                checked={!!m.savings_opt_in}
+                                onChange={(e) => updateSavingsOptIn(m.id, e.target.checked)}
+                              />
+                              {m.savings_opt_in ? 'Enabled' : 'Off'}
+                            </label>
+                          </td>
+                          <td>{m.till_number || ''}</td>
+                        </tr>
+                      )
+                    })
                   )}
                 </tbody>
               </table>

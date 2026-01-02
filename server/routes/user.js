@@ -41,7 +41,9 @@ async function getMatatu(rowMatatuId) {
   if (!rowMatatuId) return null;
   const { data, error } = await supabaseAdmin
     .from('matatus')
-    .select('id,sacco_id,number_plate,owner_name,owner_phone,vehicle_type,savings_opt_in')
+    .select(
+      'id,sacco_id,number_plate,owner_name,owner_phone,vehicle_type,savings_opt_in,insurance_expiry_date,inspection_expiry_date',
+    )
     .eq('id', rowMatatuId)
     .maybeSingle();
   if (error && error.code !== PG_ROW_NOT_FOUND) throw error;
@@ -919,34 +921,50 @@ router.patch('/matatu/:id', async (req,res)=>{
     if (!matatu) return res.status(404).json({ error:'Matatu not found' });
 
     const roleName = (ctx?.role?.role || '').toString().toUpperCase();
-    if (!['SACCO','SACCO_ADMIN'].includes(roleName)) {
+    const isSaccoAdmin = ['SACCO','SACCO_ADMIN'].includes(roleName);
+    const isOwner = roleName === 'OWNER';
+    if (!isSaccoAdmin && !isOwner) {
       return res.status(403).json({ error:'Forbidden' });
     }
 
     const updates = {};
-    if ('number_plate' in req.body){
-      const plate = (req.body?.number_plate || '').toString().trim().toUpperCase();
-      if (!plate) return res.status(400).json({ error:'number_plate required' });
-      updates.number_plate = plate;
+    const normalizeDate = (value) => {
+      if (!value) return null;
+      const trimmed = String(value).trim();
+      if (!trimmed) return null;
+      return trimmed.slice(0, 10);
+    };
+    if (isSaccoAdmin) {
+      if ('number_plate' in req.body){
+        const plate = (req.body?.number_plate || '').toString().trim().toUpperCase();
+        if (!plate) return res.status(400).json({ error:'number_plate required' });
+        updates.number_plate = plate;
+      }
+      if ('owner_name' in req.body){
+        const owner = (req.body?.owner_name || '').toString().trim();
+        updates.owner_name = owner || null;
+      }
+      if ('owner_phone' in req.body){
+        const phone = (req.body?.owner_phone || '').toString().trim();
+        updates.owner_phone = phone || null;
+      }
+      if ('tlb_number' in req.body){
+        const tlb = (req.body?.tlb_number || '').toString().trim();
+        updates.tlb_number = tlb || null;
+      }
+      if ('till_number' in req.body){
+        const till = (req.body?.till_number || '').toString().trim();
+        updates.till_number = till || null;
+      }
+      if ('savings_opt_in' in req.body){
+        updates.savings_opt_in = !!req.body?.savings_opt_in;
+      }
     }
-    if ('owner_name' in req.body){
-      const owner = (req.body?.owner_name || '').toString().trim();
-      updates.owner_name = owner || null;
+    if ('insurance_expiry_date' in req.body){
+      updates.insurance_expiry_date = normalizeDate(req.body?.insurance_expiry_date);
     }
-    if ('owner_phone' in req.body){
-      const phone = (req.body?.owner_phone || '').toString().trim();
-      updates.owner_phone = phone || null;
-    }
-    if ('tlb_number' in req.body){
-      const tlb = (req.body?.tlb_number || '').toString().trim();
-      updates.tlb_number = tlb || null;
-    }
-    if ('till_number' in req.body){
-      const till = (req.body?.till_number || '').toString().trim();
-      updates.till_number = till || null;
-    }
-    if ('savings_opt_in' in req.body){
-      updates.savings_opt_in = !!req.body?.savings_opt_in;
+    if ('inspection_expiry_date' in req.body){
+      updates.inspection_expiry_date = normalizeDate(req.body?.inspection_expiry_date);
     }
 
     if (!Object.keys(updates).length){

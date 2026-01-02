@@ -953,16 +953,6 @@ router.post('/register-shuttle', async (req,res)=>{
 
   const rawYear = shuttle.year ? Number(shuttle.year) : null;
   const year = Number.isFinite(rawYear) ? Math.trunc(rawYear) : null;
-  const normalizeDate = (value) => {
-    if (!value) return null;
-    const trimmed = String(value).trim();
-    if (!trimmed) return null;
-    return trimmed.slice(0, 10);
-  };
-  const tlbExpiry = normalizeDate(shuttle.tlb_expiry_date);
-  const insuranceExpiry = normalizeDate(shuttle.insurance_expiry_date);
-  const inspectionExpiry = normalizeDate(shuttle.inspection_expiry_date);
-
   const { data: ownerData, error: ownerError } = await supabaseAdmin
     .from('shuttle_owners')
     .insert(ownerRow)
@@ -980,10 +970,6 @@ router.post('/register-shuttle', async (req,res)=>{
     vehicle_type_other: vehicleType === 'OTHER' && vehicleTypeOther ? vehicleTypeOther : null,
     seat_capacity: needsSeatCapacity || vehicleType === 'OTHER' ? seatCapacity : null,
     load_capacity_kg: needsLoadCapacity || vehicleType === 'OTHER' ? loadCapacity : null,
-    tlb_license: shuttle.tlb_license ? String(shuttle.tlb_license).trim() : null,
-    tlb_expiry_date: tlbExpiry,
-    insurance_expiry_date: insuranceExpiry,
-    inspection_expiry_date: inspectionExpiry,
     till_number: tillNumber,
     owner_id: ownerData.id,
   };
@@ -1051,16 +1037,6 @@ router.post('/update-shuttle', async (req,res)=>{
 
   const rawYear = shuttlePayload.year ? Number(shuttlePayload.year) : null;
   const year = Number.isFinite(rawYear) ? Math.trunc(rawYear) : null;
-  const normalizeDate = (value) => {
-    if (!value) return null;
-    const trimmed = String(value).trim();
-    if (!trimmed) return null;
-    return trimmed.slice(0, 10);
-  };
-  const tlbExpiry = normalizeDate(shuttlePayload.tlb_expiry_date);
-  const insuranceExpiry = normalizeDate(shuttlePayload.insurance_expiry_date);
-  const inspectionExpiry = normalizeDate(shuttlePayload.inspection_expiry_date);
-
   const { error: ownerError } = await supabaseAdmin
     .from('shuttle_owners')
     .update(ownerUpdate)
@@ -1077,10 +1053,6 @@ router.post('/update-shuttle', async (req,res)=>{
     vehicle_type_other: vehicleType === 'OTHER' && vehicleTypeOther ? vehicleTypeOther : null,
     seat_capacity: needsSeatCapacity || vehicleType === 'OTHER' ? seatCapacity : null,
     load_capacity_kg: needsLoadCapacity || vehicleType === 'OTHER' ? loadCapacity : null,
-    tlb_license: shuttlePayload.tlb_license ? String(shuttlePayload.tlb_license).trim() : null,
-    tlb_expiry_date: tlbExpiry,
-    insurance_expiry_date: insuranceExpiry,
-    inspection_expiry_date: inspectionExpiry,
     till_number: tillNumber,
   };
   const { error: shuttleError } = await supabaseAdmin.from('shuttles').update(shuttleUpdate).eq('id', id);

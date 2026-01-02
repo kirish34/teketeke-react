@@ -12,6 +12,8 @@ type Vehicle = {
   sacco_id?: string
   sacco_name?: string
   operator_name?: string
+  insurance_expiry_date?: string | null
+  inspection_expiry_date?: string | null
 }
 
 type Tx = {
@@ -74,6 +76,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 const formatKes = (val?: number | null) => `KES ${(Number(val || 0)).toLocaleString('en-KE')}`
+const toDateInput = (value?: string | null) => (value ? String(value).slice(0, 10) : '')
 
 const MatatuOwnerDashboard = () => {
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
@@ -90,6 +93,9 @@ const MatatuOwnerDashboard = () => {
   const [err, setErr] = useState<string | null>(null)
   const [alerts, setAlerts] = useState<string[]>([])
   const [timeLabel, setTimeLabel] = useState('')
+  const [insuranceDate, setInsuranceDate] = useState('')
+  const [inspectionDate, setInspectionDate] = useState('')
+  const [complianceMsg, setComplianceMsg] = useState('')
 
   const [accessGrants, setAccessGrants] = useState<AccessGrant[]>([])
   const [grantTarget, setGrantTarget] = useState('')
@@ -161,6 +167,12 @@ const MatatuOwnerDashboard = () => {
       }),
     [],
   )
+
+  useEffect(() => {
+    setComplianceMsg('')
+    setInsuranceDate(toDateInput(currentVehicle?.insurance_expiry_date))
+    setInspectionDate(toDateInput(currentVehicle?.inspection_expiry_date))
+  }, [currentVehicle])
 
   useEffect(() => {
     const updateTime = () => {
@@ -436,6 +448,25 @@ const MatatuOwnerDashboard = () => {
     }
   }
 
+  async function saveComplianceDates() {
+    if (!currentId) return
+    setComplianceMsg('Saving...')
+    try {
+      const updated = await fetchJson<Vehicle>(`/u/matatu/${encodeURIComponent(currentId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          insurance_expiry_date: insuranceDate || null,
+          inspection_expiry_date: inspectionDate || null,
+        }),
+      })
+      setComplianceMsg('Compliance dates updated')
+      setVehicles((prev) => prev.map((v) => (v.id === updated.id ? { ...v, ...updated } : v)))
+    } catch (error) {
+      setComplianceMsg(error instanceof Error ? error.message : 'Failed to update compliance dates')
+    }
+  }
+
   async function saveOwnerGrant() {
     if (!ownerScopeId) {
       setGrantMsg('Owner scope missing')
@@ -639,6 +670,9 @@ const MatatuOwnerDashboard = () => {
     () => savingsTxs.reduce((sum, tx) => sum + Number(tx.fare_amount_kes || 0), 0),
     [savingsTxs],
   )
+  const baseInsuranceDate = toDateInput(currentVehicle?.insurance_expiry_date)
+  const baseInspectionDate = toDateInput(currentVehicle?.inspection_expiry_date)
+  const complianceDirty = insuranceDate !== baseInsuranceDate || inspectionDate !== baseInspectionDate
 
   const tabs = [
     { id: 'overview' as const, label: 'Overview' },
@@ -748,6 +782,46 @@ const MatatuOwnerDashboard = () => {
                 <div style={{ fontWeight: 700 }}>{formatKes(todaySummary.loanRepay)}</div>
               </div>
             </div>
+          </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Compliance dates</h3>
+              <span className="muted small">{currentVehicle?.number_plate || ''}</span>
+            </div>
+            <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <label className="muted small">
+                Insurance expiry
+                <input
+                  className="input"
+                  type="date"
+                  value={insuranceDate}
+                  onChange={(e) => setInsuranceDate(e.target.value)}
+                />
+              </label>
+              <label className="muted small">
+                Inspection expiry
+                <input
+                  className="input"
+                  type="date"
+                  value={inspectionDate}
+                  onChange={(e) => setInspectionDate(e.target.value)}
+                />
+              </label>
+              <button
+                className="btn ok"
+                type="button"
+                onClick={saveComplianceDates}
+                disabled={!currentId || !complianceDirty}
+              >
+                Save dates
+              </button>
+            </div>
+            {complianceMsg ? (
+              <div className="muted small" style={{ marginTop: 6 }}>
+                {complianceMsg}
+              </div>
+            ) : null}
           </section>
         </>
       ) : null}

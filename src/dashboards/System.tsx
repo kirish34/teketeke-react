@@ -566,10 +566,6 @@ function createShuttleForm() {
     seat_capacity: '',
     load_capacity_kg: '',
     operator_id: '',
-    tlb_license: '',
-    tlb_expiry_date: '',
-    insurance_expiry_date: '',
-    inspection_expiry_date: '',
     till_number: '',
   }
 }
@@ -2035,10 +2031,6 @@ const SystemDashboard = () => {
       seat_capacity: row.seat_capacity ? String(row.seat_capacity) : '',
       load_capacity_kg: row.load_capacity_kg ? String(row.load_capacity_kg) : '',
       operator_id: row.operator_id || row.operator?.id || '',
-      tlb_license: row.tlb_license || '',
-      tlb_expiry_date: formatDateInput(row.tlb_expiry_date),
-      insurance_expiry_date: formatDateInput(row.insurance_expiry_date),
-      inspection_expiry_date: formatDateInput(row.inspection_expiry_date),
       till_number: row.till_number || '',
     })
     setShuttleEditMsg('')
@@ -2072,10 +2064,6 @@ const SystemDashboard = () => {
       seat_capacity: shouldShowSeatCapacity(vehicleType) || vehicleType === 'OTHER' ? seatCapacity : null,
       load_capacity_kg: shouldShowLoadCapacity(vehicleType) || vehicleType === 'OTHER' ? loadCapacity : null,
       operator_id: shuttleForm.operator_id || null,
-      tlb_license: shuttleForm.tlb_license.trim() || null,
-      tlb_expiry_date: shuttleForm.tlb_expiry_date || null,
-      insurance_expiry_date: shuttleForm.insurance_expiry_date || null,
-      inspection_expiry_date: shuttleForm.inspection_expiry_date || null,
       till_number: shuttleForm.till_number.trim(),
     }
     if (!ownerPayload.full_name) {
@@ -2170,10 +2158,6 @@ const SystemDashboard = () => {
       seat_capacity: shouldShowSeatCapacity(vehicleType) || vehicleType === 'OTHER' ? seatCapacity : null,
       load_capacity_kg: shouldShowLoadCapacity(vehicleType) || vehicleType === 'OTHER' ? loadCapacity : null,
       operator_id: shuttleEditForm.operator_id || null,
-      tlb_license: shuttleEditForm.tlb_license.trim() || null,
-      tlb_expiry_date: shuttleEditForm.tlb_expiry_date || null,
-      insurance_expiry_date: shuttleEditForm.insurance_expiry_date || null,
-      inspection_expiry_date: shuttleEditForm.inspection_expiry_date || null,
       till_number: shuttleEditForm.till_number.trim(),
     }
     if (!ownerPayload.full_name) {
@@ -4477,42 +4461,6 @@ const SystemDashboard = () => {
                   </select>
                 </label>
                 <label className="muted small">
-                  TLB / License number
-                  <input
-                    className="input"
-                    value={shuttleForm.tlb_license}
-                    onChange={(e) => setShuttleForm((f) => ({ ...f, tlb_license: e.target.value }))}
-                    placeholder="Optional"
-                  />
-                </label>
-                <label className="muted small">
-                  TLB expiry date
-                  <input
-                    className="input"
-                    type="date"
-                    value={shuttleForm.tlb_expiry_date}
-                    onChange={(e) => setShuttleForm((f) => ({ ...f, tlb_expiry_date: e.target.value }))}
-                  />
-                </label>
-                <label className="muted small">
-                  Insurance expiry date
-                  <input
-                    className="input"
-                    type="date"
-                    value={shuttleForm.insurance_expiry_date}
-                    onChange={(e) => setShuttleForm((f) => ({ ...f, insurance_expiry_date: e.target.value }))}
-                  />
-                </label>
-                <label className="muted small">
-                  Inspection expiry date
-                  <input
-                    className="input"
-                    type="date"
-                    value={shuttleForm.inspection_expiry_date}
-                    onChange={(e) => setShuttleForm((f) => ({ ...f, inspection_expiry_date: e.target.value }))}
-                  />
-                </label>
-                <label className="muted small">
                   Till number *
                   <input
                     className="input"
@@ -4977,49 +4925,6 @@ const SystemDashboard = () => {
                                             </option>
                                           ))}
                                         </select>
-                                      </label>
-                                      <label className="muted small">
-                                        TLB / License number
-                                        <input
-                                          className="input"
-                                          value={shuttleEditForm.tlb_license}
-                                          onChange={(e) =>
-                                            setShuttleEditForm((f) => ({ ...f, tlb_license: e.target.value }))
-                                          }
-                                        />
-                                      </label>
-                                      <label className="muted small">
-                                        TLB expiry date
-                                        <input
-                                          className="input"
-                                          type="date"
-                                          value={shuttleEditForm.tlb_expiry_date}
-                                          onChange={(e) =>
-                                            setShuttleEditForm((f) => ({ ...f, tlb_expiry_date: e.target.value }))
-                                          }
-                                        />
-                                      </label>
-                                      <label className="muted small">
-                                        Insurance expiry date
-                                        <input
-                                          className="input"
-                                          type="date"
-                                          value={shuttleEditForm.insurance_expiry_date}
-                                          onChange={(e) =>
-                                            setShuttleEditForm((f) => ({ ...f, insurance_expiry_date: e.target.value }))
-                                          }
-                                        />
-                                      </label>
-                                      <label className="muted small">
-                                        Inspection expiry date
-                                        <input
-                                          className="input"
-                                          type="date"
-                                          value={shuttleEditForm.inspection_expiry_date}
-                                          onChange={(e) =>
-                                            setShuttleEditForm((f) => ({ ...f, inspection_expiry_date: e.target.value }))
-                                          }
-                                        />
                                       </label>
                                       <label className="muted small">
                                         Till number *
