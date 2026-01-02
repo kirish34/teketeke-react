@@ -16,6 +16,10 @@ type Tx = {
   matatu_id?: string
   fare_amount_kes?: number
   msisdn?: string
+  passenger_msisdn?: string
+  notes?: string
+  created_by_name?: string
+  created_by_email?: string
 }
 
 const fmtKES = (val?: number | null) => `KES ${(Number(val || 0)).toLocaleString("en-KE")}`
@@ -42,9 +46,20 @@ const MatatuStaffDashboard = () => {
   const [manualEntries, setManualEntries] = useState<{ id: string; amount: number; note?: string; created_at: string }[]>([])
 
   const [accessGrants, setAccessGrants] = useState<AccessGrant[]>([])
-  const [activeTab, setActiveTab] = useState<"trips" | "tx" | "manual" | "totals" | "vehicle_care">("trips")
+  const [activeTab, setActiveTab] = useState<"overview" | "trips" | "transactions" | "vehicle_care">("overview")
 
   const fetchJson = useCallback(<T,>(path: string) => api<T>(path, { token }), [token])
+
+  const loadTransactions = useCallback(async () => {
+    if (!saccoId) return
+    try {
+      const tRes = await fetchJson<{ items?: Tx[] }>(`/u/sacco/${encodeURIComponent(saccoId)}/transactions?limit=500`)
+      const items = tRes.items || []
+      setTxs(items.filter((t) => !matatuId || t.matatu_id === matatuId || !t.matatu_id))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load transactions")
+    }
+  }, [fetchJson, matatuId, saccoId])
 
   useEffect(() => {
     async function loadSaccos() {
@@ -66,15 +81,13 @@ const MatatuStaffDashboard = () => {
       setLoading(true)
       setError(null)
       try {
-        const [mRes, tRes, rRes] = await Promise.all([
+        const [mRes, rRes] = await Promise.all([
           fetchJson<{ items?: Matatu[] }>(`/u/sacco/${encodeURIComponent(saccoId)}/matatus`),
-          fetchJson<{ items?: Tx[] }>(`/u/sacco/${encodeURIComponent(saccoId)}/transactions?limit=500`),
           fetchJson<{ items?: Route[] }>(`/u/sacco/${encodeURIComponent(saccoId)}/routes`).catch(() => ({ items: [] })),
         ])
         const mats = mRes.items || []
         setMatatus(mats)
         if (mats.length) setMatatuId((prev) => prev || mats[0].id || "")
-        setTxs(tRes.items || [])
         setRoutes(rRes.items || [])
         if (!routeId && rRes.items?.length) setRouteId(rRes.items[0].id || "")
       } catch (err) {
@@ -85,6 +98,15 @@ const MatatuStaffDashboard = () => {
     }
     void loadData()
   }, [fetchJson, saccoId, routeId])
+
+  useEffect(() => {
+    if (!saccoId) return
+    void loadTransactions()
+    const timer = setInterval(() => {
+      void loadTransactions()
+    }, 10000)
+    return () => clearInterval(timer)
+  }, [loadTransactions, saccoId])
 
   useEffect(() => {
     void (async () => {
@@ -113,21 +135,33 @@ const MatatuStaffDashboard = () => {
 
   const filteredTx = useMemo(() => txs.filter((t) => !matatuId || t.matatu_id === matatuId), [txs, matatuId])
 
-  const sums = useMemo(() => {
-    let auto = 0
-    let manual = 0
+  const transactionTotals = useMemo(() => {
+    const manualLocal = manualEntries.reduce((acc, m) => acc + Number(m.amount || 0), 0)
+    let manualCash = 0
+    let dailyFee = 0
+    let savings = 0
+    let loans = 0
     filteredTx.forEach((t) => {
       const kind = (t.kind || "").toUpperCase()
-      if (kind === "CASH") manual += Number(t.fare_amount_kes || 0)
-      else auto += Number(t.fare_amount_kes || 0)
+      const amount = Number(t.fare_amount_kes || 0)
+      if (kind === "CASH") manualCash += amount
+      if (kind === "SACCO_FEE" || kind === "DAILY_FEE") dailyFee += amount
+      if (kind === "SAVINGS") savings += amount
+      if (kind === "LOAN_REPAY") loans += amount
     })
-    const manualLocal = manualEntries.reduce((acc, m) => acc + Number(m.amount || 0), 0)
+    const manualTotal = manualCash + manualLocal
+    const accountTotal = dailyFee + savings + loans
     return {
-      auto,
-      manual: manual + manualLocal,
-      total: auto + manual + manualLocal,
+      manualCash: manualTotal,
+      dailyFee,
+      savings,
+      loans,
+      accountTotal,
+      collectedTotal: manualTotal + accountTotal,
     }
   }, [filteredTx, manualEntries])
+
+  const liveTxs = useMemo(() => filteredTx.slice(0, 12), [filteredTx])
   const ownerScopeId = user?.matatu_id || ""
   const vehicleCareGrant = useMemo(
     () =>
@@ -179,7 +213,7 @@ const MatatuStaffDashboard = () => {
   }
 
   function refresh() {
-    setSaccoId((prev) => `${prev}`)
+    void loadTransactions()
   }
 
   const heroRight = user?.role ? `Role: ${user.role}` : "Matatu Staff"
@@ -211,7 +245,7 @@ const MatatuStaffDashboard = () => {
             <select value={routeId} onChange={(e) => setRouteId(e.target.value)} style={{ minWidth: 180, padding: 10 }}>
               {routes.map((r) => (
                 <option key={r.id || r.code} value={r.id || r.code || ""}>
-                  {r.code ? `${r.code} — ${r.name}` : r.name || r.id}
+                  {r.code ? `${r.code} - ${r.name}` : r.name || r.id}
                 </option>
               ))}
               {!routes.length ? <option value="">- no routes -</option> : null}
@@ -241,17 +275,16 @@ const MatatuStaffDashboard = () => {
           <button type="button" className="btn ghost" onClick={refresh}>
             Reload
           </button>
-          {loading ? <span className="muted small">Loading…</span> : null}
+          {loading ? <span className="muted small">Loading...</span> : null}
           {error ? <span className="err">{error}</span> : null}
         </div>
       </section>
 
       <nav className="sys-nav" aria-label="Matatu staff sections">
         {[
+          { id: "overview", label: "Overview" },
           { id: "trips", label: "Trips" },
-          { id: "tx", label: "Transactions" },
-          { id: "manual", label: "Manual Cash" },
-          { id: "totals", label: "Totals" },
+          { id: "transactions", label: "Transactions" },
           { id: "vehicle_care", label: "Vehicle Care" },
         ].map((t) => (
           <button
@@ -265,17 +298,59 @@ const MatatuStaffDashboard = () => {
         ))}
       </nav>
 
+      {activeTab === "overview" ? (
+        <section className="card">
+          <div className="topline">
+            <h3 style={{ margin: 0 }}>Live payments</h3>
+            <span className="muted small">Auto-refresh every 10 seconds</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
+            {liveTxs.length === 0 ? (
+              <div className="muted small">No payments yet.</div>
+            ) : (
+              liveTxs.map((tx) => {
+                const name =
+                  (tx.notes || "").trim() ||
+                  (tx.created_by_name || "").trim() ||
+                  (tx.created_by_email || "").trim() ||
+                  "Payer"
+                const phone = tx.passenger_msisdn || tx.msisdn || "-"
+                return (
+                  <div key={tx.id || tx.created_at} className="card" style={{ boxShadow: "none", border: "1px solid #e5e7eb" }}>
+                    <div className="row" style={{ alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                      <div>
+                        <div style={{ fontWeight: 600 }}>{name}</div>
+                        <div className="muted small">
+                          {phone} {tx.created_at ? `- ${new Date(tx.created_at).toLocaleTimeString()}` : ""}
+                        </div>
+                      </div>
+                      <div style={{ fontWeight: 700, color: "#0f172a" }}>{fmtKES(tx.fare_amount_kes)}</div>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </section>
+      ) : null}
+
       {activeTab === "trips" ? (
         <section className="card">
           <div className="topline">
-            <h3 style={{ margin: 0 }}>Start New Trip</h3>
-            <span className="muted small">Route {routeId || "n/a"} • Matatu {matatuId || "n/a"}</span>
+            <h3 style={{ margin: 0 }}>Trips</h3>
+            <span className="muted small">Route {routeId || "n/a"} - Matatu {matatuId || "n/a"}</span>
           </div>
-          <button type="button" className="btn primary" style={{ marginTop: 8, alignSelf: "flex-start" }}>
-            Start Trip
-          </button>
+          <div className="row" style={{ marginTop: 10, gap: 8, flexWrap: "wrap" }}>
+            <button type="button" className="btn primary">
+              Start Trip
+            </button>
+            <button type="button" className="btn ghost">
+              End Trip
+            </button>
+            <span className="muted small">Start and end trips for the selected route.</span>
+          </div>
           <div className="table-wrap" style={{ marginTop: 16 }}>
-            <h4 style={{ margin: "0 0 6px" }}>Today’s Trips</h4>
+            <h4 style={{ margin: "0 0 6px" }}>Today's Trips</h4>
             <table>
               <thead>
                 <tr>
@@ -291,7 +366,7 @@ const MatatuStaffDashboard = () => {
               <tbody>
                 <tr>
                   <td colSpan={7} className="muted">
-                    No trips recorded yet. Use “Start Trip” to begin tracking.
+                    No trips recorded yet. Use "Start Trip" to begin tracking.
                   </td>
                 </tr>
               </tbody>
@@ -300,130 +375,138 @@ const MatatuStaffDashboard = () => {
         </section>
       ) : null}
 
-      {activeTab === "tx" ? (
-        <section className="card">
-          <div className="topline">
-            <h3 style={{ margin: 0 }}>Transactions (FARE)</h3>
-            <button type="button" className="btn ghost" onClick={refresh}>
-              Reload
-            </button>
-          </div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>MSISDN</th>
-                  <th>Kind</th>
-                  <th>Amount</th>
-                  <th>Status</th>
-                  <th>ID</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredTx.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="muted">
-                      No fare transactions in range.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredTx.map((tx) => (
-                    <tr key={tx.id || tx.created_at}>
-                      <td>{tx.created_at ? new Date(tx.created_at).toLocaleString() : ""}</td>
-                      <td className="mono">{tx.msisdn || ""}</td>
-                      <td>{tx.kind || ""}</td>
-                      <td>{fmtKES(tx.fare_amount_kes)}</td>
-                      <td>{tx.status || ""}</td>
-                      <td className="mono">{tx.id}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      ) : null}
+      {activeTab === "transactions" ? (
+        <>
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Collections summary</h3>
+              <button type="button" className="btn ghost" onClick={refresh}>
+                Reload
+              </button>
+            </div>
+            <div className="grid g3" style={{ gap: 12, marginTop: 8 }}>
+              <div className="card" style={{ boxShadow: "none" }}>
+                <div className="muted small">Manual cash collected</div>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>{fmtKES(transactionTotals.manualCash)}</div>
+              </div>
+              <div className="card" style={{ boxShadow: "none" }}>
+                <div className="muted small">Account deductions</div>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>{fmtKES(transactionTotals.accountTotal)}</div>
+              </div>
+              <div className="card" style={{ boxShadow: "none" }}>
+                <div className="muted small">Total collected</div>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>{fmtKES(transactionTotals.collectedTotal)}</div>
+              </div>
+            </div>
+            <div className="grid g3" style={{ gap: 12, marginTop: 12 }}>
+              <div className="card" style={{ boxShadow: "none" }}>
+                <div className="muted small">Daily fee deducted</div>
+                <div style={{ fontWeight: 700 }}>{fmtKES(transactionTotals.dailyFee)}</div>
+              </div>
+              <div className="card" style={{ boxShadow: "none" }}>
+                <div className="muted small">Savings deducted</div>
+                <div style={{ fontWeight: 700 }}>{fmtKES(transactionTotals.savings)}</div>
+              </div>
+              <div className="card" style={{ boxShadow: "none" }}>
+                <div className="muted small">Loan repayments</div>
+                <div style={{ fontWeight: 700 }}>{fmtKES(transactionTotals.loans)}</div>
+              </div>
+            </div>
+          </section>
 
-      {activeTab === "manual" ? (
-        <section className="card">
-          <div className="topline">
-            <h3 style={{ margin: 0 }}>Manual Cash Collection</h3>
-            <span className="muted small">{manualMsg}</span>
-          </div>
-          <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-            <input
-              type="number"
-              placeholder="Amount (KES)"
-              value={manualAmount}
-              onChange={(e) => setManualAmount(e.target.value)}
-              style={{ width: 180 }}
-            />
-            <input
-              placeholder="Note (optional)"
-              value={manualNote}
-              onChange={(e) => setManualNote(e.target.value)}
-              style={{ flex: "1 1 260px" }}
-            />
-            <button type="button" onClick={recordManualCash}>
-              Record Cash
-            </button>
-          </div>
-          <div className="muted small" style={{ marginTop: 6 }}>
-            Records cash directly against the current matatu without affecting trip states.
-          </div>
-          {manualEntries.length ? (
-            <div className="table-wrap" style={{ marginTop: 10 }}>
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Manual cash entry</h3>
+              <span className="muted small">{manualMsg}</span>
+            </div>
+            <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+              <input
+                type="number"
+                placeholder="Amount (KES)"
+                value={manualAmount}
+                onChange={(e) => setManualAmount(e.target.value)}
+                style={{ width: 180 }}
+              />
+              <input
+                placeholder="Note (optional)"
+                value={manualNote}
+                onChange={(e) => setManualNote(e.target.value)}
+                style={{ flex: "1 1 260px" }}
+              />
+              <button type="button" onClick={recordManualCash}>
+                Record Cash
+              </button>
+            </div>
+            <div className="muted small" style={{ marginTop: 6 }}>
+              Records cash directly against the current matatu without affecting trip states.
+            </div>
+            {manualEntries.length ? (
+              <div className="table-wrap" style={{ marginTop: 10 }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>When</th>
+                      <th>Amount</th>
+                      <th>Note</th>
+                      <th>ID</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {manualEntries.map((e) => (
+                      <tr key={e.id}>
+                        <td>{new Date(e.created_at).toLocaleString()}</td>
+                        <td>{fmtKES(e.amount)}</td>
+                        <td>{e.note || ""}</td>
+                        <td className="mono">{e.id}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Transactions</h3>
+              <span className="muted small">{filteredTx.length} record(s)</span>
+            </div>
+            <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>When</th>
+                    <th>Time</th>
+                    <th>Payer</th>
+                    <th>Phone</th>
+                    <th>Kind</th>
                     <th>Amount</th>
-                    <th>Note</th>
-                    <th>ID</th>
+                    <th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {manualEntries.map((e) => (
-                    <tr key={e.id}>
-                      <td>{new Date(e.created_at).toLocaleString()}</td>
-                      <td>{fmtKES(e.amount)}</td>
-                      <td>{e.note || ""}</td>
-                      <td className="mono">{e.id}</td>
+                  {filteredTx.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="muted">
+                        No transactions in range.
+                      </td>
                     </tr>
-                  ))}
+                  ) : (
+                    filteredTx.map((tx) => (
+                      <tr key={tx.id || tx.created_at}>
+                        <td>{tx.created_at ? new Date(tx.created_at).toLocaleString() : ""}</td>
+                        <td>{(tx.notes || "").trim() || tx.created_by_name || tx.created_by_email || "-"}</td>
+                        <td className="mono">{tx.passenger_msisdn || tx.msisdn || "-"}</td>
+                        <td>{tx.kind || ""}</td>
+                        <td>{fmtKES(tx.fare_amount_kes)}</td>
+                        <td>{tx.status || ""}</td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
-          ) : null}
-        </section>
-      ) : null}
-
-      {activeTab === "totals" ? (
-        <section className="card">
-          <div className="topline">
-            <h3 style={{ margin: 0 }}>Current Trip Totals</h3>
-            <span className="muted small">Route {routeId || "n/a"} • Matatu {matatuId || "n/a"}</span>
-          </div>
-          <div className="grid g2" style={{ gap: 12, marginTop: 8 }}>
-            <div className="card" style={{ boxShadow: "none" }}>
-              <div className="muted small">MPESA (AUTO)</div>
-              <div style={{ fontSize: 22, fontWeight: 700 }}>{fmtKES(sums.auto)}</div>
-            </div>
-            <div className="card" style={{ boxShadow: "none" }}>
-              <div className="muted small">MANUAL CASH</div>
-              <div style={{ fontSize: 22, fontWeight: 700 }}>{fmtKES(sums.manual)}</div>
-            </div>
-            <div className="card" style={{ boxShadow: "none" }}>
-              <div className="muted small">TRIP TOTAL</div>
-              <div style={{ fontSize: 22, fontWeight: 700 }}>{fmtKES(sums.total)}</div>
-            </div>
-            <div className="card" style={{ boxShadow: "none" }}>
-              <div className="muted small">DAILY TOTAL</div>
-              <div style={{ fontSize: 22, fontWeight: 700 }}>{fmtKES(sums.total)}</div>
-            </div>
-          </div>
-        </section>
+          </section>
+        </>
       ) : null}
       {activeTab === "vehicle_care" ? (
         hasVehicleCareAccess && ownerScopeId ? (
