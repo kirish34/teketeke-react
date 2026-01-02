@@ -131,6 +131,16 @@ const MatatuOwnerDashboard = () => {
   const [loanPhone, setLoanPhone] = useState('')
   const [loanAccount, setLoanAccount] = useState('')
   const [loanMsg, setLoanMsg] = useState('')
+  const [manualLoanAmount, setManualLoanAmount] = useState<number | ''>('')
+  const [manualLoanName, setManualLoanName] = useState('')
+  const [manualLoanPhone, setManualLoanPhone] = useState('')
+  const [manualLoanNote, setManualLoanNote] = useState('')
+  const [manualLoanMsg, setManualLoanMsg] = useState('')
+  const [manualSavingsAmount, setManualSavingsAmount] = useState<number | ''>('')
+  const [manualSavingsName, setManualSavingsName] = useState('')
+  const [manualSavingsPhone, setManualSavingsPhone] = useState('')
+  const [manualSavingsNote, setManualSavingsNote] = useState('')
+  const [manualSavingsMsg, setManualSavingsMsg] = useState('')
 
   const currentVehicle = useMemo(
     () => vehicles.find((v) => v.id === currentId) || null,
@@ -449,6 +459,101 @@ const MatatuOwnerDashboard = () => {
       setLoanHist({ loanId: id, items: res.items || [], total: res.total || 0, msg: '' })
     } catch (error) {
       setLoanHist({ loanId: id, items: [], total: 0, msg: error instanceof Error ? error.message : 'Load failed' })
+    }
+  }
+
+  async function submitManualLoanPayment() {
+    if (!currentId) {
+      setManualLoanMsg('Select a vehicle first')
+      return
+    }
+    const saccoId = currentVehicle?.sacco_id
+    if (!saccoId) {
+      setManualLoanMsg('This vehicle is not linked to a SACCO')
+      return
+    }
+    const amount = Number(manualLoanAmount || 0)
+    if (!(amount > 0)) {
+      setManualLoanMsg('Enter amount')
+      return
+    }
+    const phone = manualLoanPhone.trim()
+    if (phone && !/^(2547\d{8}|07\d{8})$/.test(phone)) {
+      setManualLoanMsg('Phone must be 2547xxxxxxxx or 07xxxxxxxx')
+      return
+    }
+    setManualLoanMsg('Saving...')
+    try {
+      const created = await fetchJson<Tx>('/api/staff/cash', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          sacco_id: saccoId,
+          matatu_id: currentId,
+          kind: 'LOAN_REPAY',
+          amount,
+          payer_name: manualLoanName.trim() || 'Manual loan payment',
+          payer_phone: phone || '',
+          notes: manualLoanNote.trim() || '',
+        }),
+      })
+      setTxs((prev) => [created, ...prev])
+      setManualLoanAmount('')
+      setManualLoanName('')
+      setManualLoanPhone('')
+      setManualLoanNote('')
+      setManualLoanMsg('Saved')
+      if (loanHist.loanId) {
+        await loadLoanHistory(loanHist.loanId)
+      }
+    } catch (error) {
+      setManualLoanMsg(error instanceof Error ? error.message : 'Save failed')
+    }
+  }
+
+  async function submitManualSavingsContribution() {
+    if (!currentId) {
+      setManualSavingsMsg('Select a vehicle first')
+      return
+    }
+    const saccoId = currentVehicle?.sacco_id
+    if (!saccoId) {
+      setManualSavingsMsg('This vehicle is not linked to a SACCO')
+      return
+    }
+    const amount = Number(manualSavingsAmount || 0)
+    if (!(amount > 0)) {
+      setManualSavingsMsg('Enter amount')
+      return
+    }
+    const phone = manualSavingsPhone.trim()
+    if (phone && !/^(2547\d{8}|07\d{8})$/.test(phone)) {
+      setManualSavingsMsg('Phone must be 2547xxxxxxxx or 07xxxxxxxx')
+      return
+    }
+    setManualSavingsMsg('Saving...')
+    try {
+      const created = await fetchJson<Tx>('/api/staff/cash', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          sacco_id: saccoId,
+          matatu_id: currentId,
+          kind: 'SAVINGS',
+          amount,
+          payer_name: manualSavingsName.trim() || 'Manual savings contribution',
+          payer_phone: phone || '',
+          notes: manualSavingsNote.trim() || '',
+        }),
+      })
+      setTxs((prev) => [created, ...prev])
+      setManualSavingsAmount('')
+      setManualSavingsName('')
+      setManualSavingsPhone('')
+      setManualSavingsNote('')
+      setManualSavingsMsg('Saved')
+    } catch (error) {
+      setManualSavingsMsg(error instanceof Error ? error.message : 'Save failed')
     }
   }
 
@@ -983,6 +1088,47 @@ const MatatuOwnerDashboard = () => {
           </section>
 
           <section className="card">
+            <h3 style={{ marginTop: 0 }}>Manual loan repayment</h3>
+            <div className="row" style={{ marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
+              <input
+                className="input"
+                type="number"
+                placeholder="Amount"
+                value={manualLoanAmount}
+                onChange={(e) => setManualLoanAmount(e.target.value ? Number(e.target.value) : '')}
+                style={{ maxWidth: 160 }}
+              />
+              <input
+                className="input"
+                placeholder="Payer name"
+                value={manualLoanName}
+                onChange={(e) => setManualLoanName(e.target.value)}
+                style={{ minWidth: 180 }}
+              />
+              <input
+                className="input"
+                placeholder="Phone (07 / 2547)"
+                value={manualLoanPhone}
+                onChange={(e) => setManualLoanPhone(e.target.value)}
+                style={{ maxWidth: 180 }}
+              />
+            </div>
+            <div className="row" style={{ marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
+              <input
+                className="input"
+                placeholder="Note"
+                value={manualLoanNote}
+                onChange={(e) => setManualLoanNote(e.target.value)}
+                style={{ flex: 1, minWidth: 200 }}
+              />
+              <button className="btn ok" type="button" onClick={submitManualLoanPayment}>
+                Record Payment
+              </button>
+            </div>
+            <div className="muted small">{manualLoanMsg}</div>
+          </section>
+
+          <section className="card">
             <h3 style={{ marginTop: 0 }}>Due loans (today)</h3>
             <div className="table-wrap">
               <table>
@@ -1110,6 +1256,47 @@ const MatatuOwnerDashboard = () => {
 
       {activeTab === 'savings' ? (
         <>
+          <section className="card">
+            <h3 style={{ marginTop: 0 }}>Manual savings contribution</h3>
+            <div className="row" style={{ marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
+              <input
+                className="input"
+                type="number"
+                placeholder="Amount"
+                value={manualSavingsAmount}
+                onChange={(e) => setManualSavingsAmount(e.target.value ? Number(e.target.value) : '')}
+                style={{ maxWidth: 160 }}
+              />
+              <input
+                className="input"
+                placeholder="Contributor name"
+                value={manualSavingsName}
+                onChange={(e) => setManualSavingsName(e.target.value)}
+                style={{ minWidth: 180 }}
+              />
+              <input
+                className="input"
+                placeholder="Phone (07 / 2547)"
+                value={manualSavingsPhone}
+                onChange={(e) => setManualSavingsPhone(e.target.value)}
+                style={{ maxWidth: 180 }}
+              />
+            </div>
+            <div className="row" style={{ marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
+              <input
+                className="input"
+                placeholder="Note"
+                value={manualSavingsNote}
+                onChange={(e) => setManualSavingsNote(e.target.value)}
+                style={{ flex: 1, minWidth: 200 }}
+              />
+              <button className="btn ok" type="button" onClick={submitManualSavingsContribution}>
+                Record Contribution
+              </button>
+            </div>
+            <div className="muted small">{manualSavingsMsg}</div>
+          </section>
+
           <section className="card">
             <h3 style={{ marginTop: 0 }}>Savings summary</h3>
             <div className="grid g3" style={{ gap: 12 }}>
