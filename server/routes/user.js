@@ -533,7 +533,8 @@ router.get('/vehicles', async (req, res) => {
         if (error) throw error;
         items = data || [];
       }
-      return res.json({ items });
+      const enriched = await attachOperatorNames(items);
+      return res.json({ items: enriched });
     }
 
     // Default behaviour: sacco-scoped or single-matatu roles
@@ -542,7 +543,8 @@ router.get('/vehicles', async (req, res) => {
     if (ctx.matatu?.id) query = query.eq('id', ctx.matatu.id);
     const { data, error } = await query;
     if (error) throw error;
-    res.json({ items: data || [] });
+    const enriched = await attachOperatorNames(data || []);
+    res.json({ items: enriched });
   } catch (e) {
     res.status(500).json({ error: e.message || 'Failed to load vehicles' });
   }
@@ -1048,10 +1050,12 @@ router.get('/sacco/:id/staff', async (req,res)=>{
   try{
     const { allowed } = await ensureSaccoAccess(req.user.id, saccoId);
     if (!allowed) return res.status(403).json({ error:'Forbidden' });
+    const saccoRoles = ['SACCO_STAFF', 'SACCO_ADMIN', 'SACCO'];
     const { data, error } = await supabaseAdmin
       .from('staff_profiles')
       .select('*')
       .eq('sacco_id', saccoId)
+      .in('role', saccoRoles)
       .order('created_at', { ascending:false });
     if (error) throw error;
     res.json({ items: data || [] });
@@ -1072,6 +1076,9 @@ router.post('/sacco/:id/staff', async (req,res)=>{
     const email = (req.body?.email || '').trim() || null;
     const phone = (req.body?.phone || '').trim() || null;
     const roleReq = (req.body?.role || 'SACCO_STAFF').toString().toUpperCase();
+    if (!['SACCO_STAFF', 'SACCO_ADMIN', 'SACCO'].includes(roleReq)) {
+      return res.status(400).json({ error:'Invalid role' });
+    }
     const password = (req.body?.password || '').toString().trim();
 
     let userId = req.body?.user_id || null;

@@ -509,6 +509,7 @@ function createOperatorForm(operatorType?: string | null) {
     savings_enabled: true,
     loans_enabled: true,
     routes_enabled: defaults.routes_enabled,
+    admin_name: '',
     admin_email: '',
     admin_phone: '',
   }
@@ -6444,6 +6445,15 @@ const SystemDashboard = () => {
             <h4 style={{ margin: '16px 0 6px' }}>System access</h4>
             <div className="grid g2">
               <label className="muted small">
+                Dashboard manager name
+                <input
+                  className="input"
+                  value={saccoForm.admin_name}
+                  onChange={(e) => setSaccoForm((f) => ({ ...f, admin_name: e.target.value }))}
+                  placeholder="Manager full name"
+                />
+              </label>
+              <label className="muted small">
                 Admin user email
                 <input
                   className="input"
@@ -6482,6 +6492,7 @@ const SystemDashboard = () => {
                   const settlementMethod = saccoForm.settlement_method
                   const settlementBankName = saccoForm.settlement_bank_name.trim()
                   const settlementBankAccountNumber = saccoForm.settlement_bank_account_number.trim()
+                  const adminName = saccoForm.admin_name.trim()
                   const adminEmail = saccoForm.admin_email.trim()
                   const adminPhone = normalizePhoneInput(saccoForm.admin_phone)
                   const feeLabel = saccoForm.fee_label.trim() || buildOperatorDefaults(operatorType).fee_label
@@ -6491,6 +6502,7 @@ const SystemDashboard = () => {
                   if (!displayName) errors.push('Operator display name is required')
                   if (!operatorTypeRaw) errors.push('Operator type is required')
                   if (!defaultTill) errors.push('Settlement till/paybill is required')
+                  if (!adminName) errors.push('Dashboard manager name is required')
                   if (!adminEmail || !isValidEmail(adminEmail)) errors.push('Valid admin email is required')
                   if (!adminPhone || !isValidKenyanPhone(adminPhone)) errors.push('Admin phone must be Kenyan format')
                   if (contactPhone && !isValidKenyanPhone(contactPhone)) errors.push('Official phone must be Kenyan format')
@@ -6526,6 +6538,7 @@ const SystemDashboard = () => {
                       routes_enabled: saccoForm.routes_enabled,
                       settlement_bank_name: settlementBankName || null,
                       settlement_bank_account_number: settlementBankAccountNumber || null,
+                      admin_name: adminName,
                       admin_email: adminEmail,
                       admin_phone: adminPhone,
                       settlement_method: settlementMethod,

@@ -131,14 +131,14 @@ const MatatuStaffDashboard = () => {
   }, [])
 
   useEffect(() => {
-    if (!saccoId || !user?.id) {
+    if (!matatuId || !user?.id) {
       setStaffName("")
       return
     }
     void (async () => {
       try {
         const res = await fetchJson<{ items?: Array<{ user_id?: string; name?: string; email?: string }> }>(
-          `/u/sacco/${encodeURIComponent(saccoId)}/staff`,
+          `/u/matatu/${encodeURIComponent(matatuId)}/staff`,
         )
         const items = res.items || []
         const match =
@@ -155,7 +155,7 @@ const MatatuStaffDashboard = () => {
         setStaffName("")
       }
     })()
-  }, [fetchJson, saccoId, user?.id, user?.email])
+  }, [fetchJson, matatuId, user?.id, user?.email])
 
   useEffect(() => {
     const updateTime = () => {
@@ -191,6 +191,8 @@ const MatatuStaffDashboard = () => {
     () => matatus.find((m) => m.id && m.id === matatuId) || null,
     [matatuId, matatus],
   )
+  const currentSacco = useMemo(() => saccos.find((s) => s.sacco_id === saccoId) || null, [saccos, saccoId])
+  const operatorLabel = currentSacco?.name || currentSacco?.sacco_id || "Unassigned"
   const assignedMatatuLabel = useMemo(() => {
     if (currentMatatu?.number_plate) return currentMatatu.number_plate
     if (currentMatatu?.id) return currentMatatu.id
@@ -291,6 +293,7 @@ const MatatuStaffDashboard = () => {
           <h2 style={{ margin: "6px 0 4px" }}>Hello, {staffLabel}</h2>
           <div className="muted">Staff dashboard overview</div>
           <div className="hero-inline">
+            <span className="sys-pill-lite">Operate Under: {operatorLabel}</span>
             <span className="sys-pill-lite">{todayKey()}</span>
             <span className="sys-pill-lite">{timeLabel}</span>
             <span className="sys-pill-lite">{assignedMatatuCount} matatu(s)</span>

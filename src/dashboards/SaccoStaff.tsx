@@ -36,6 +36,8 @@ const SaccoStaffDashboard = () => {
   const [manualNote, setManualNote] = useState('')
   const [manualMsg, setManualMsg] = useState('')
   const [manualEntries, setManualEntries] = useState<{ id: string; amount: number; note?: string; created_at: string }[]>([])
+  const [staffName, setStaffName] = useState('')
+  const [timeLabel, setTimeLabel] = useState('')
 
   const [accessGrants, setAccessGrants] = useState<AccessGrant[]>([])
   const [activeTab, setActiveTab] = useState<'daily' | 'loans' | 'savings' | 'vehicle_care'>('daily')
@@ -91,6 +93,33 @@ const SaccoStaffDashboard = () => {
   }, [fetchJson, saccoId, matatuId])
 
   useEffect(() => {
+    if (!saccoId || !user?.id) {
+      setStaffName('')
+      return
+    }
+    void (async () => {
+      try {
+        const res = await fetchJson<{ items?: Array<{ user_id?: string; name?: string; email?: string }> }>(
+          `/u/sacco/${encodeURIComponent(saccoId)}/staff`,
+        )
+        const items = res.items || []
+        const match =
+          items.find((s) => s.user_id === user.id) ||
+          items.find(
+            (s) =>
+              s.email &&
+              user.email &&
+              s.email.toString().trim().toLowerCase() === user.email.toString().trim().toLowerCase(),
+          ) ||
+          null
+        setStaffName(match?.name || '')
+      } catch {
+        setStaffName('')
+      }
+    })()
+  }, [fetchJson, saccoId, user?.email, user?.id])
+
+  useEffect(() => {
     try {
       const raw = localStorage.getItem(manualKey(matatuId))
       if (raw) {
@@ -103,6 +132,21 @@ const SaccoStaffDashboard = () => {
       setManualEntries([])
     }
   }, [matatuId])
+
+  useEffect(() => {
+    const updateTime = () => {
+      setTimeLabel(
+        new Date().toLocaleTimeString('en-KE', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }),
+      )
+    }
+    updateTime()
+    const timer = setInterval(updateTime, 60000)
+    return () => clearInterval(timer)
+  }, [])
 
   const txByKind = useMemo(() => {
     const norm = (k?: string) => (k || '').toUpperCase()
@@ -162,16 +206,23 @@ const SaccoStaffDashboard = () => {
   }
 
   const heroRight = user?.role ? `Role: ${user.role}` : 'SACCO Staff'
+  const operatorLabel = useMemo(() => {
+    const match = saccos.find((s) => s.sacco_id === saccoId)
+    return match?.name || 'Operator'
+  }, [saccos, saccoId])
+  const staffLabel = staffName || user?.name || (user?.email ? user.email.split('@')[0] : '') || 'Staff'
 
   return (
     <DashboardShell title="SACCO Staff" subtitle="Cash Desk" hideShellChrome>
       <div className="hero-bar" style={{ marginBottom: 16 }}>
         <div className="hero-left">
           <div className="hero-chip">SACCO STAFF</div>
-          <h2 style={{ margin: '6px 0 4px' }}>Cash Desk</h2>
+          <h2 style={{ margin: '6px 0 4px' }}>{operatorLabel} Dashboard</h2>
+          <div className="muted">Hello, {staffLabel}</div>
           <div className="muted">Collect daily fees, loans, and savings</div>
           <div className="hero-inline">
             <span className="sys-pill-lite">{todayKey()}</span>
+            <span className="sys-pill-lite">{timeLabel}</span>
             <span className="sys-pill-lite">Matatus: {matatus.length || 0}</span>
           </div>
         </div>

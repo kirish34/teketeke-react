@@ -710,6 +710,7 @@ router.post('/register-sacco', async (req,res)=>{
   const feeLabelDefault = defaultFeeLabelForType(operatorType);
   const routesDefault = operatorType === 'MATATU_SACCO' || operatorType === 'MATATU_COMPANY';
   const statusRaw = String(req.body?.status || 'ACTIVE').trim().toUpperCase();
+  const adminName = String(req.body?.admin_name || req.body?.dashboard_manager_name || '').trim();
   const row = {
     name: displayName || null,
     display_name: displayName || null,
@@ -757,24 +758,39 @@ router.post('/register-sacco', async (req,res)=>{
       if (!created) {
         result.created_user.note = 'User existed; password not reset';
       }
-      if (loginPhone) {
-        try {
+      try {
+        const staffName = adminName || (displayName ? `${displayName} Admin` : 'Operator Admin');
+        const { data: existingStaff, error: staffLookupErr } = await supabaseAdmin
+          .from('staff_profiles')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('sacco_id', data.id)
+          .limit(1);
+        if (staffLookupErr) throw staffLookupErr;
+        const staffPayload = {
+          user_id: userId,
+          sacco_id: data.id,
+          role: 'SACCO_ADMIN',
+          name: staffName || null,
+          phone: loginPhone || null,
+          email: loginEmail || null,
+        };
+        if (existingStaff && existingStaff.length) {
           const { error: staffErr } = await supabaseAdmin
             .from('staff_profiles')
-            .insert({
-              user_id: userId,
-              sacco_id: data.id,
-              role: 'SACCO_ADMIN',
-              name: displayName ? `${displayName} Admin` : 'Operator Admin',
-              phone: loginPhone,
-              email: loginEmail,
-            });
+            .update(staffPayload)
+            .eq('id', existingStaff[0].id);
           if (staffErr) {
             result.staff_profile_error = staffErr.message;
           }
-        } catch (staffErr) {
-          result.staff_profile_error = staffErr?.message || 'Failed to save admin profile';
+        } else {
+          const { error: staffErr } = await supabaseAdmin.from('staff_profiles').insert(staffPayload);
+          if (staffErr) {
+            result.staff_profile_error = staffErr.message;
+          }
         }
+      } catch (staffErr) {
+        result.staff_profile_error = staffErr?.message || 'Failed to save admin profile';
       }
     }catch(e){
       result.login_error = e.message || 'Failed to create operator login';

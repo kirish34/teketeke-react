@@ -89,6 +89,7 @@ const MatatuOwnerDashboard = () => {
   const [status, setStatus] = useState<string>('Loading vehicles...')
   const [err, setErr] = useState<string | null>(null)
   const [alerts, setAlerts] = useState<string[]>([])
+  const [timeLabel, setTimeLabel] = useState('')
 
   const [accessGrants, setAccessGrants] = useState<AccessGrant[]>([])
   const [grantTarget, setGrantTarget] = useState('')
@@ -160,6 +161,21 @@ const MatatuOwnerDashboard = () => {
       }),
     [],
   )
+
+  useEffect(() => {
+    const updateTime = () => {
+      setTimeLabel(
+        new Date().toLocaleTimeString('en-KE', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }),
+      )
+    }
+    updateTime()
+    const timer = setInterval(updateTime, 60000)
+    return () => clearInterval(timer)
+  }, [])
 
   const staffLoginOptions = useMemo(() => {
     return staff
@@ -642,9 +658,10 @@ const MatatuOwnerDashboard = () => {
           <div className="muted">Manage your matatu, staff, loans, and savings</div>
           <div className="hero-inline">
             <span className="sys-pill-lite">
-              Operate Under: {currentVehicle?.operator_name || currentVehicle?.sacco_name || '-'}
+              Operate Under: {currentVehicle?.operator_name || currentVehicle?.sacco_name || currentVehicle?.sacco_id || '-'}
             </span>
             <span className="sys-pill-lite">{todayLabel}</span>
+            <span className="sys-pill-lite">{timeLabel}</span>
             <span className="sys-pill-lite">{status}</span>
           </div>
         </div>

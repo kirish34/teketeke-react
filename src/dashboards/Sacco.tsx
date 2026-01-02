@@ -4,6 +4,7 @@ import { authFetch } from '../lib/auth'
 import { getOperatorConfig, normalizeOperatorType } from '../lib/operatorConfig'
 import VehicleCarePage from '../modules/vehicleCare/VehicleCarePage'
 import { fetchAccessGrants, saveAccessGrant, type AccessGrant } from '../modules/vehicleCare/vehicleCare.api'
+import { useAuth } from '../state/auth'
 
 type SaccoOption = {
   sacco_id: string
@@ -150,10 +151,12 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 const todayIso = () => new Date().toISOString().slice(0, 10)
 
 export default function SaccoDashboard() {
+  const { user } = useAuth()
   const [saccos, setSaccos] = useState<SaccoOption[]>([])
   const [currentSacco, setCurrentSacco] = useState<string | null>(null)
   const [statusMsg, setStatusMsg] = useState('Loading organizations...')
   const [activeTab, setActiveTab] = useState<SaccoTabId>('overview')
+  const [timeLabel, setTimeLabel] = useState('')
 
   const [fromDate, setFromDate] = useState(todayIso())
   const [toDate, setToDate] = useState(todayIso())
@@ -379,6 +382,52 @@ export default function SaccoDashboard() {
     const fromRates = feeRates.map((r) => (r.vehicle_type || '').trim()).filter(Boolean)
     return Array.from(new Set([...fromMatatus, ...fromRates])).sort()
   }, [matatus, feeRates])
+
+  const dateLabel = useMemo(
+    () =>
+      new Date().toLocaleDateString('en-KE', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      }),
+    [],
+  )
+  const operatorLabel = useMemo(() => {
+    const match = saccos.find((s) => s.sacco_id === currentSacco)
+    return match?.name || 'Operator'
+  }, [currentSacco, saccos])
+
+  const staffLabel = useMemo(() => {
+    if (!user?.id) return ''
+    const byId = staff.find((s) => s.user_id === user.id) || null
+    const byEmail =
+      user.email &&
+      staff.find(
+        (s) => s.email && s.email.toString().trim().toLowerCase() === user.email?.toString().trim().toLowerCase(),
+      )
+    return byId?.name || byEmail?.name || ''
+  }, [staff, user?.email, user?.id])
+
+  const helloLabel =
+    staffLabel || (user?.email ? user.email.split('@')[0] : '') || (operatorLabel !== 'Operator' ? operatorLabel : 'Admin')
+  const dashboardTitle = operatorLabel !== 'Operator' ? `${operatorLabel} Dashboard` : 'Operator Dashboard'
+  const subtitleParts = [helloLabel ? `Hello, ${helloLabel}` : 'Operator dashboard', dateLabel, timeLabel].filter(Boolean)
+  const dashboardSubtitle = subtitleParts.join(' • ')
+
+  useEffect(() => {
+    const updateTime = () => {
+      setTimeLabel(
+        new Date().toLocaleTimeString('en-KE', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }),
+      )
+    }
+    updateTime()
+    const timer = setInterval(updateTime, 60000)
+    return () => clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     async function loadSaccos() {
@@ -1322,7 +1371,7 @@ export default function SaccoDashboard() {
   }
 
   return (
-    <DashboardShell title="Operator Dashboard" subtitle="Unified operator console" hideNav>
+    <DashboardShell title={dashboardTitle} subtitle={dashboardSubtitle} hideNav>
       {showFilters ? (
         <section className="card">
           <div className="row" style={{ alignItems: 'flex-end', gap: 12 }}>
