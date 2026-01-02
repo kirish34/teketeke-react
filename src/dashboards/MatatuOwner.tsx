@@ -86,7 +86,6 @@ const MatatuOwnerDashboard = () => {
   const [status, setStatus] = useState<string>('Loading vehicles...')
   const [err, setErr] = useState<string | null>(null)
   const [alerts, setAlerts] = useState<string[]>([])
-  const [vehicleMsg, setVehicleMsg] = useState('')
 
   const [accessGrants, setAccessGrants] = useState<AccessGrant[]>([])
   const [grantTarget, setGrantTarget] = useState('')
@@ -102,7 +101,9 @@ const MatatuOwnerDashboard = () => {
   const [grantMsg, setGrantMsg] = useState('')
   const [grantError, setGrantError] = useState<string | null>(null)
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'staff' | 'tx' | 'tools' | 'vehicle_care'>('overview')
+  const [activeTab, setActiveTab] = useState<
+    'overview' | 'staff' | 'staff_logins' | 'tx' | 'loans' | 'savings' | 'vehicle_care'
+  >('overview')
   const { user, logout } = useAuth()
 
   // staff form
@@ -111,6 +112,15 @@ const MatatuOwnerDashboard = () => {
   const [stEmail, setStEmail] = useState('')
   const [stRole, setStRole] = useState('MATATU_STAFF')
   const [stMsg, setStMsg] = useState('')
+
+  // staff login form
+  const [loginSourceId, setLoginSourceId] = useState('')
+  const [loginName, setLoginName] = useState('')
+  const [loginPhone, setLoginPhone] = useState('')
+  const [loginEmail, setLoginEmail] = useState('')
+  const [loginRole, setLoginRole] = useState('MATATU_STAFF')
+  const [loginPassword, setLoginPassword] = useState('')
+  const [loginMsg, setLoginMsg] = useState('')
 
   // loan form
   const [loanAmount, setLoanAmount] = useState<number | ''>('')
@@ -127,6 +137,18 @@ const MatatuOwnerDashboard = () => {
     [vehicles, currentId],
   )
   const ownerScopeId = user?.matatu_id || currentId || null
+
+  const staffLoginOptions = useMemo(() => {
+    return staff
+      .map((s) => {
+        const key = s.id || s.user_id || s.email || s.phone || ''
+        if (!key) return null
+        const labelBase = s.name || s.email || s.phone || key
+        const suffix = s.user_id ? ' (login exists)' : ''
+        return { key, label: `${labelBase}${suffix}`, staff: s }
+      })
+      .filter((option): option is { key: string; label: string; staff: Staff } => Boolean(option))
+  }, [staff])
 
   useEffect(() => {
     setLoanHist({ loanId: null, items: [], total: 0, msg: 'Select a loan' })
@@ -277,6 +299,59 @@ const MatatuOwnerDashboard = () => {
     }
   }
 
+  async function createStaffLogin() {
+    if (!currentId) return
+    const name = loginName.trim()
+    const email = loginEmail.trim()
+    const phone = loginPhone.trim() || null
+    const role = loginRole
+    const password = loginPassword.trim()
+    const selected = staffLoginOptions.find((opt) => opt.key === loginSourceId)?.staff || null
+
+    if (!name) {
+      setLoginMsg('Name required')
+      return
+    }
+    if (!email) {
+      setLoginMsg('Email required')
+      return
+    }
+    if (!password || password.length < 6) {
+      setLoginMsg('Password must be at least 6 characters')
+      return
+    }
+    if (selected?.user_id) {
+      setLoginMsg('Login already exists for this staff')
+      return
+    }
+
+    setLoginMsg('Saving...')
+    try {
+      await fetchJson(`/u/matatu/${encodeURIComponent(currentId)}/staff`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          name,
+          phone,
+          email,
+          role,
+          password,
+        }),
+      })
+      setLoginMsg('Login created')
+      setLoginSourceId('')
+      setLoginName('')
+      setLoginPhone('')
+      setLoginEmail('')
+      setLoginRole('MATATU_STAFF')
+      setLoginPassword('')
+      const stRes = await fetchJson<{ items?: Staff[] }>(`/u/matatu/${encodeURIComponent(currentId)}/staff`)
+      setStaff(stRes.items || [])
+    } catch (error) {
+      setLoginMsg(error instanceof Error ? error.message : 'Failed to create login')
+    }
+  }
+
   async function deleteStaff(id?: string) {
     if (!currentId || !id) return
     try {
@@ -363,31 +438,6 @@ const MatatuOwnerDashboard = () => {
     }
   }
 
-  async function deleteVehicle() {
-    if (!currentId) return
-    const label = currentVehicle?.number_plate || currentVehicle?.id || 'vehicle'
-    const confirmText = prompt(`Type the plate/ID (${label}) to confirm delete. Admin rights required.`, '')
-    if (!confirmText) return
-    const normalized = confirmText.trim().toUpperCase()
-    const expected = (label || '').toUpperCase()
-    if (normalized !== expected) {
-      setVehicleMsg('Delete cancelled (plate/ID mismatch)')
-      return
-    }
-    setVehicleMsg('Deleting...')
-    try {
-      await fetchJson(`/api/admin/matatus/${encodeURIComponent(currentId)}`, {
-        method: 'DELETE',
-        headers: { Accept: 'application/json' },
-      })
-      setVehicleMsg('Deleted')
-      setVehicles((prev) => prev.filter((v) => v.id !== currentId))
-      setCurrentId(null)
-    } catch (error) {
-      setVehicleMsg(error instanceof Error ? error.message : 'Delete failed (need admin?)')
-    }
-  }
-
   async function loadLoanHistory(id?: string) {
     const saccoId = currentVehicle?.sacco_id
     if (!saccoId || !id) return
@@ -416,11 +466,22 @@ const MatatuOwnerDashboard = () => {
     }
   }, [txs])
 
+  const savingsTxs = useMemo(
+    () => txs.filter((tx) => (tx.kind || '').toUpperCase() === 'SAVINGS'),
+    [txs],
+  )
+  const savingsTotal = useMemo(
+    () => savingsTxs.reduce((sum, tx) => sum + Number(tx.fare_amount_kes || 0), 0),
+    [savingsTxs],
+  )
+
   const tabs = [
     { id: 'overview' as const, label: 'Overview' },
     { id: 'staff' as const, label: 'Staff' },
+    { id: 'staff_logins' as const, label: 'Staff Logins' },
     { id: 'tx' as const, label: 'Transactions' },
-    { id: 'tools' as const, label: 'Tools' },
+    { id: 'loans' as const, label: 'Loans' },
+    { id: 'savings' as const, label: 'Savings' },
     { id: 'vehicle_care' as const, label: 'Vehicle Care' },
   ]
 
@@ -430,9 +491,11 @@ const MatatuOwnerDashboard = () => {
         <div className="hero-left">
           <div className="hero-chip">Matatu Owner Console</div>
           <h2 style={{ margin: '6px 0 4px' }}>Hello, {currentVehicle?.number_plate || 'owner'}</h2>
-          <div className="muted">Manage your matatu, staff, and loans</div>
+          <div className="muted">Manage your matatu, staff, loans, and savings</div>
           <div className="hero-inline">
-            <span className="sys-pill-lite">{currentVehicle?.sacco_name || currentVehicle?.sacco_id || 'SACCO'}</span>
+            <span className="sys-pill-lite">
+              Operate Under: {currentVehicle?.sacco_name || '-'}
+            </span>
             <span className="sys-pill-lite">{status}</span>
           </div>
         </div>
@@ -460,11 +523,7 @@ const MatatuOwnerDashboard = () => {
               ))}
             </select>
           </label>
-          <button type="button" className="btn bad ghost" onClick={deleteVehicle} disabled={!currentId}>
-            Delete vehicle
-          </button>
           {err ? <div className="err">{err}</div> : null}
-          <span className="muted small">{vehicleMsg}</span>
         </div>
       </section>
 
@@ -507,8 +566,8 @@ const MatatuOwnerDashboard = () => {
                 <div style={{ fontWeight: 700 }}>{currentVehicle?.number_plate || '-'}</div>
               </div>
               <div className="card" style={{ boxShadow: 'none' }}>
-                <div className="muted small">SACCO</div>
-                <div className="mono">{currentVehicle?.sacco_id || '-'}</div>
+                <div className="muted small">Operate Under</div>
+                <div>{currentVehicle?.sacco_name || '-'}</div>
               </div>
               <div className="card" style={{ boxShadow: 'none' }}>
                 <div className="muted small">Fees Today</div>
@@ -689,6 +748,95 @@ const MatatuOwnerDashboard = () => {
         </section>
       ) : null}
 
+      {activeTab === 'staff_logins' ? (
+        <section className="card">
+          <div className="topline">
+            <h3 style={{ margin: 0 }}>Staff Logins</h3>
+            <span className="muted small">Create login credentials for staff</span>
+          </div>
+          <div className="grid g2" style={{ marginTop: 8 }}>
+            <label className="muted small">
+              Copy from staff (optional)
+              <select
+                value={loginSourceId}
+                onChange={(e) => {
+                  const nextKey = e.target.value
+                  setLoginSourceId(nextKey)
+                  const match = staffLoginOptions.find((opt) => opt.key === nextKey)?.staff || null
+                  if (!match) return
+                  setLoginName(match.name || '')
+                  setLoginEmail(match.email || '')
+                  setLoginPhone(match.phone || '')
+                  setLoginRole(match.role || 'MATATU_STAFF')
+                }}
+                style={{ padding: 10 }}
+              >
+                <option value="">Select staff</option>
+                {staffLoginOptions.map((option) => (
+                  <option key={option.key} value={option.key}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="muted small">
+              Full name *
+              <input
+                className="input"
+                value={loginName}
+                onChange={(e) => setLoginName(e.target.value)}
+                placeholder="Staff name"
+              />
+            </label>
+            <label className="muted small">
+              Email *
+              <input
+                className="input"
+                type="email"
+                value={loginEmail}
+                onChange={(e) => setLoginEmail(e.target.value)}
+                placeholder="staff@email.com"
+              />
+            </label>
+            <label className="muted small">
+              Phone
+              <input
+                className="input"
+                value={loginPhone}
+                onChange={(e) => setLoginPhone(e.target.value)}
+                placeholder="07xx..."
+              />
+            </label>
+            <label className="muted small">
+              Role
+              <select value={loginRole} onChange={(e) => setLoginRole(e.target.value)} style={{ padding: 10 }}>
+                <option value="MATATU_STAFF">MATATU_STAFF</option>
+                <option value="DRIVER">DRIVER</option>
+              </select>
+            </label>
+            <label className="muted small">
+              Password *
+              <input
+                className="input"
+                type="password"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                placeholder="At least 6 characters"
+              />
+            </label>
+          </div>
+          <div className="row" style={{ marginTop: 10, gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn ok" type="button" onClick={createStaffLogin}>
+              Create login
+            </button>
+            <span className="muted small">{loginMsg}</span>
+          </div>
+          <div className="muted small" style={{ marginTop: 8 }}>
+            This will create a staff profile and user login for the selected matatu.
+          </div>
+        </section>
+      ) : null}
+
       {activeTab === 'tx' ? (
         <section className="card">
           <h3 style={{ marginTop: 0 }}>Transactions (recent)</h3>
@@ -729,7 +877,7 @@ const MatatuOwnerDashboard = () => {
         </section>
       ) : null}
 
-      {activeTab === 'tools' ? (
+      {activeTab === 'loans' ? (
         <>
           <section className="card">
             <h3 style={{ marginTop: 0 }}>Loan requests</h3>
@@ -957,13 +1105,68 @@ const MatatuOwnerDashboard = () => {
             ) : null}
           </section>
 
+        </>
+      ) : null}
+
+      {activeTab === 'savings' ? (
+        <>
           <section className="card">
-            <h3 style={{ marginTop: 0 }}>Legacy tools</h3>
-            <p className="muted">
-              For any remaining legacy-only tools, you can still open{' '}
-              <a href="/public/matatu/owner.html">/public/matatu/owner.html</a>. React now covers staff, loans, and
-              vehicle actions.
-            </p>
+            <h3 style={{ marginTop: 0 }}>Savings summary</h3>
+            <div className="grid g3" style={{ gap: 12 }}>
+              <div className="card" style={{ boxShadow: 'none' }}>
+                <div className="muted small">Today</div>
+                <div style={{ fontWeight: 700 }}>{formatKes(todaySummary.savings)}</div>
+              </div>
+              <div className="card" style={{ boxShadow: 'none' }}>
+                <div className="muted small">Loaded total</div>
+                <div style={{ fontWeight: 700 }}>{formatKes(savingsTotal)}</div>
+              </div>
+              <div className="card" style={{ boxShadow: 'none' }}>
+                <div className="muted small">Transactions</div>
+                <div style={{ fontWeight: 700 }}>{savingsTxs.length}</div>
+              </div>
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ marginTop: 0 }}>Savings transactions</h3>
+              <span className="muted small">{savingsTxs.length} record(s)</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Amount</th>
+                    <th>Phone</th>
+                    <th>Status</th>
+                    <th>Staff</th>
+                    <th>Note</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {savingsTxs.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="muted">
+                        No savings transactions.
+                      </td>
+                    </tr>
+                  ) : (
+                    savingsTxs.map((tx) => (
+                      <tr key={tx.id || tx.created_at}>
+                        <td>{tx.created_at ? new Date(tx.created_at).toLocaleString() : ''}</td>
+                        <td>{formatKes(tx.fare_amount_kes)}</td>
+                        <td>{tx.phone || ''}</td>
+                        <td>{tx.status || ''}</td>
+                        <td>{tx.created_by_name || tx.created_by_email || ''}</td>
+                        <td>{tx.notes || ''}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </section>
         </>
       ) : null}
