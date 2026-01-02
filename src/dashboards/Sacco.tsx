@@ -23,6 +23,7 @@ type Matatu = {
   vehicle_type?: string
   tlb_number?: string
   till_number?: string
+  savings_opt_in?: boolean
 }
 
 type Tx = {
@@ -173,6 +174,7 @@ export default function SaccoDashboard() {
 
   const [matatus, setMatatus] = useState<Matatu[]>([])
   const [matatuFilter, setMatatuFilter] = useState('')
+  const [memberMsg, setMemberMsg] = useState('')
   const [txs, setTxs] = useState<Tx[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
   const [staffMsg, setStaffMsg] = useState('')
@@ -357,6 +359,24 @@ export default function SaccoDashboard() {
     })
   }, [matatuFilter, matatus])
 
+  async function updateSavingsOptIn(matatuId?: string, next?: boolean) {
+    if (!matatuId) return
+    setMemberMsg('Saving...')
+    try {
+      const updated = await fetchJson<Matatu>(`/u/matatu/${encodeURIComponent(matatuId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ savings_opt_in: !!next }),
+      })
+      setMatatus((prev) =>
+        prev.map((m) => (m.id === matatuId ? { ...m, savings_opt_in: updated.savings_opt_in } : m)),
+      )
+      setMemberMsg('Saved')
+    } catch (err) {
+      setMemberMsg(err instanceof Error ? err.message : 'Failed to update savings')
+    }
+  }
+
   const showTLBColumn = useMemo(
     () => operatorConfig.showTLB && matatus.some((m) => (m.tlb_number || '').trim()),
     [operatorConfig.showTLB, matatus],
@@ -370,8 +390,8 @@ export default function SaccoDashboard() {
     [memberLocationLabel, matatus],
   )
   const memberTableColSpan =
-    4 + (showVehicleTypeColumn ? 1 : 0) + (showMemberLocation ? 1 : 0) + (showTLBColumn ? 1 : 0)
-  const bodaTableColSpan = 4 + (showMemberLocation ? 1 : 0)
+    5 + (showVehicleTypeColumn ? 1 : 0) + (showMemberLocation ? 1 : 0) + (showTLBColumn ? 1 : 0)
+  const bodaTableColSpan = 5 + (showMemberLocation ? 1 : 0)
 
   const txPageCount = Math.max(1, Math.ceil(txTotal / txLimit || 1))
   const txRangeStart = txTotal ? (txPage - 1) * txLimit + 1 : 0
@@ -1682,6 +1702,7 @@ export default function SaccoDashboard() {
               className="input"
               style={{ maxWidth: 220 }}
             />
+            <span className="muted small">{memberMsg}</span>
           </div>
           <div className="table-wrap">
             {isBoda ? (
@@ -1692,6 +1713,7 @@ export default function SaccoDashboard() {
                     <th>Phone</th>
                     <th>{memberIdLabel}</th>
                     {showMemberLocation ? <th>{memberLocationLabel}</th> : null}
+                    <th>Savings</th>
                     <th>Till</th>
                   </tr>
                 </thead>
@@ -1709,6 +1731,16 @@ export default function SaccoDashboard() {
                         <td>{m.owner_phone || ''}</td>
                         <td>{memberIdValue(m)}</td>
                         {showMemberLocation ? <td>{memberLocationValue(m)}</td> : null}
+                        <td>
+                          <label className="muted small" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                            <input
+                              type="checkbox"
+                              checked={!!m.savings_opt_in}
+                              onChange={(e) => updateSavingsOptIn(m.id, e.target.checked)}
+                            />
+                            {m.savings_opt_in ? 'Enabled' : 'Off'}
+                          </label>
+                        </td>
                         <td>{m.till_number || ''}</td>
                       </tr>
                     ))
@@ -1725,6 +1757,7 @@ export default function SaccoDashboard() {
                     {showVehicleTypeColumn ? <th>Type</th> : null}
                     {showMemberLocation ? <th>{memberLocationLabel}</th> : null}
                     {showTLBColumn ? <th>TLB</th> : null}
+                    <th>Savings</th>
                     <th>Till</th>
                   </tr>
                 </thead>
@@ -1744,6 +1777,16 @@ export default function SaccoDashboard() {
                         {showVehicleTypeColumn ? <td>{m.vehicle_type || ''}</td> : null}
                         {showMemberLocation ? <td>{memberLocationValue(m)}</td> : null}
                         {showTLBColumn ? <td>{m.tlb_number || ''}</td> : null}
+                        <td>
+                          <label className="muted small" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                            <input
+                              type="checkbox"
+                              checked={!!m.savings_opt_in}
+                              onChange={(e) => updateSavingsOptIn(m.id, e.target.checked)}
+                            />
+                            {m.savings_opt_in ? 'Enabled' : 'Off'}
+                          </label>
+                        </td>
                         <td>{m.till_number || ''}</td>
                       </tr>
                     ))

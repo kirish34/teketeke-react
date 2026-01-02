@@ -41,7 +41,7 @@ async function getMatatu(rowMatatuId) {
   if (!rowMatatuId) return null;
   const { data, error } = await supabaseAdmin
     .from('matatus')
-    .select('id,sacco_id,number_plate,owner_name,owner_phone,vehicle_type')
+    .select('id,sacco_id,number_plate,owner_name,owner_phone,vehicle_type,savings_opt_in')
     .eq('id', rowMatatuId)
     .maybeSingle();
   if (error && error.code !== PG_ROW_NOT_FOUND) throw error;
@@ -944,6 +944,9 @@ router.patch('/matatu/:id', async (req,res)=>{
     if ('till_number' in req.body){
       const till = (req.body?.till_number || '').toString().trim();
       updates.till_number = till || null;
+    }
+    if ('savings_opt_in' in req.body){
+      updates.savings_opt_in = !!req.body?.savings_opt_in;
     }
 
     if (!Object.keys(updates).length){

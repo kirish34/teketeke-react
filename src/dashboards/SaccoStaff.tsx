@@ -6,7 +6,8 @@ import VehicleCarePage from '../modules/vehicleCare/VehicleCarePage'
 import { fetchAccessGrants, type AccessGrant } from '../modules/vehicleCare/vehicleCare.api'
 
 type Sacco = { sacco_id?: string; name?: string }
-type Matatu = { id?: string; number_plate?: string; sacco_id?: string }
+type Matatu = { id?: string; number_plate?: string; sacco_id?: string; savings_opt_in?: boolean }
+type Loan = { id?: string; matatu_id?: string; borrower_name?: string; status?: string; principal_kes?: number }
 type Tx = {
   id?: string
   created_at?: string
@@ -18,13 +19,37 @@ type Tx = {
 
 const fmtKES = (val?: number | null) => `KES ${(Number(val || 0)).toLocaleString('en-KE')}`
 const todayKey = () => new Date().toISOString().slice(0, 10)
-const manualKey = (matatuId: string) => `tt_sacco_staff_manual_${matatuId || 'na'}`
+
+type PaidInfo = { total: number; last_at: string }
+
+function buildPaidMap(txs: Tx[], kinds: string[]) {
+  const kindSet = new Set(kinds.map((k) => k.toUpperCase()))
+  const map = new Map<string, PaidInfo>()
+  txs.forEach((t) => {
+    const kind = (t.kind || '').toUpperCase()
+    if (!kindSet.has(kind)) return
+    const id = t.matatu_id || ''
+    if (!id) return
+    const amount = Number(t.fare_amount_kes || 0)
+    const lastAt = t.created_at || ''
+    const existing = map.get(id)
+    if (!existing) {
+      map.set(id, { total: amount, last_at: lastAt })
+      return
+    }
+    const nextTotal = existing.total + amount
+    const nextLast = existing.last_at && lastAt && existing.last_at > lastAt ? existing.last_at : lastAt
+    map.set(id, { total: nextTotal, last_at: nextLast })
+  })
+  return map
+}
 
 const SaccoStaffDashboard = () => {
   const { token, user, logout } = useAuth()
 
   const [saccos, setSaccos] = useState<Sacco[]>([])
   const [matatus, setMatatus] = useState<Matatu[]>([])
+  const [loans, setLoans] = useState<Loan[]>([])
   const [saccoId, setSaccoId] = useState('')
   const [matatuId, setMatatuId] = useState('')
 
@@ -32,10 +57,15 @@ const SaccoStaffDashboard = () => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const [manualAmount, setManualAmount] = useState('')
-  const [manualNote, setManualNote] = useState('')
-  const [manualMsg, setManualMsg] = useState('')
-  const [manualEntries, setManualEntries] = useState<{ id: string; amount: number; note?: string; created_at: string }[]>([])
+  const [dailyAmount, setDailyAmount] = useState('')
+  const [dailyNote, setDailyNote] = useState('')
+  const [dailyMsg, setDailyMsg] = useState('')
+  const [loanAmount, setLoanAmount] = useState('')
+  const [loanNote, setLoanNote] = useState('')
+  const [loanMsg, setLoanMsg] = useState('')
+  const [savingsAmount, setSavingsAmount] = useState('')
+  const [savingsNote, setSavingsNote] = useState('')
+  const [savingsMsg, setSavingsMsg] = useState('')
   const [staffName, setStaffName] = useState('')
   const [timeLabel, setTimeLabel] = useState('')
 
@@ -75,14 +105,16 @@ const SaccoStaffDashboard = () => {
       setLoading(true)
       setError(null)
       try {
-        const [mRes, tRes] = await Promise.all([
+        const [mRes, tRes, lRes] = await Promise.all([
           fetchJson<{ items?: Matatu[] }>(`/u/sacco/${encodeURIComponent(saccoId)}/matatus`),
           fetchJson<{ items?: Tx[] }>(`/u/sacco/${encodeURIComponent(saccoId)}/transactions?limit=500`),
+          fetchJson<{ items?: Loan[] }>(`/u/sacco/${encodeURIComponent(saccoId)}/loans`).catch(() => ({ items: [] })),
         ])
         const mats = mRes.items || []
         setMatatus(mats)
         if (mats.length) setMatatuId((prev) => prev || (mats[0].id || ''))
-        setTxs((tRes.items || []).filter((t) => !matatuId || t.matatu_id === matatuId || !t.matatu_id))
+        setTxs(tRes.items || [])
+        setLoans(lRes.items || [])
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load data')
       } finally {
@@ -90,7 +122,7 @@ const SaccoStaffDashboard = () => {
       }
     }
     void loadData()
-  }, [fetchJson, saccoId, matatuId])
+  }, [fetchJson, saccoId])
 
   useEffect(() => {
     if (!saccoId || !user?.id) {
@@ -120,20 +152,6 @@ const SaccoStaffDashboard = () => {
   }, [fetchJson, saccoId, user?.email, user?.id])
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(manualKey(matatuId))
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        if (Array.isArray(parsed)) setManualEntries(parsed)
-      } else {
-        setManualEntries([])
-      }
-    } catch {
-      setManualEntries([])
-    }
-  }, [matatuId])
-
-  useEffect(() => {
     const updateTime = () => {
       setTimeLabel(
         new Date().toLocaleTimeString('en-KE', {
@@ -148,14 +166,68 @@ const SaccoStaffDashboard = () => {
     return () => clearInterval(timer)
   }, [])
 
-  const txByKind = useMemo(() => {
-    const norm = (k?: string) => (k || '').toUpperCase()
-    return {
-      daily: txs.filter((t) => ['CASH', 'SACCO_FEE'].includes(norm(t.kind))),
-      loans: txs.filter((t) => norm(t.kind) === 'LOAN_REPAY'),
-      savings: txs.filter((t) => norm(t.kind) === 'SAVINGS'),
-    }
-  }, [txs])
+  const todayIso = todayKey()
+  const todayTxs = useMemo(
+    () => txs.filter((t) => (t.created_at || '').slice(0, 10) === todayIso),
+    [txs, todayIso],
+  )
+
+  const dailyPaidMap = useMemo(() => buildPaidMap(todayTxs, ['SACCO_FEE', 'DAILY_FEE']), [todayTxs])
+  const savingsPaidMap = useMemo(() => buildPaidMap(todayTxs, ['SAVINGS']), [todayTxs])
+  const loanPaidMap = useMemo(() => buildPaidMap(todayTxs, ['LOAN_REPAY']), [todayTxs])
+
+  const savingsMatatus = useMemo(() => matatus.filter((m) => m.savings_opt_in), [matatus])
+  const activeLoans = useMemo(
+    () => loans.filter((l) => (l.status || '').toUpperCase() === 'ACTIVE' && l.matatu_id),
+    [loans],
+  )
+  const loanByMatatu = useMemo(() => {
+    const map = new Map<string, Loan>()
+    activeLoans.forEach((loan) => {
+      if (!loan.matatu_id) return
+      if (!map.has(loan.matatu_id)) map.set(loan.matatu_id, loan)
+    })
+    return map
+  }, [activeLoans])
+  const loanMatatuIds = useMemo(() => new Set(activeLoans.map((l) => l.matatu_id).filter(Boolean)), [activeLoans])
+  const loanMatatus = useMemo(
+    () => matatus.filter((m) => m.id && loanMatatuIds.has(m.id)),
+    [matatus, loanMatatuIds],
+  )
+
+  const dailyPaidRows = useMemo(
+    () =>
+      matatus
+        .filter((m) => m.id && dailyPaidMap.has(m.id))
+        .map((m) => ({ matatu: m, paid: dailyPaidMap.get(m.id || '') as PaidInfo })),
+    [matatus, dailyPaidMap],
+  )
+  const dailyUnpaidRows = useMemo(
+    () => matatus.filter((m) => m.id && !dailyPaidMap.has(m.id)),
+    [matatus, dailyPaidMap],
+  )
+  const savingsPaidRows = useMemo(
+    () =>
+      savingsMatatus
+        .filter((m) => m.id && savingsPaidMap.has(m.id))
+        .map((m) => ({ matatu: m, paid: savingsPaidMap.get(m.id || '') as PaidInfo })),
+    [savingsMatatus, savingsPaidMap],
+  )
+  const savingsUnpaidRows = useMemo(
+    () => savingsMatatus.filter((m) => m.id && !savingsPaidMap.has(m.id)),
+    [savingsMatatus, savingsPaidMap],
+  )
+  const loanPaidRows = useMemo(
+    () =>
+      loanMatatus
+        .filter((m) => m.id && loanPaidMap.has(m.id))
+        .map((m) => ({ matatu: m, paid: loanPaidMap.get(m.id || '') as PaidInfo })),
+    [loanMatatus, loanPaidMap],
+  )
+  const loanUnpaidRows = useMemo(
+    () => loanMatatus.filter((m) => m.id && !loanPaidMap.has(m.id)),
+    [loanMatatus, loanPaidMap],
+  )
 
   const vehicleCareGrant = useMemo(
     () =>
@@ -169,40 +241,64 @@ const SaccoStaffDashboard = () => {
   const canManageCompliance = Boolean(vehicleCareGrant?.can_manage_compliance)
   const canViewVehicleCareAnalytics = vehicleCareGrant?.can_view_analytics !== false
 
-  async function recordManualCash() {
+  async function recordManual(
+    kind: 'SACCO_FEE' | 'SAVINGS' | 'LOAN_REPAY',
+    amountRaw: string,
+    note: string,
+    setMsg: (msg: string) => void,
+    reset: () => void,
+  ) {
     if (!saccoId || !matatuId) {
-      setManualMsg('Pick a SACCO and matatu first')
+      setMsg('Pick a SACCO and matatu first')
       return
     }
-    const amt = Number(manualAmount || 0)
+    const amt = Number(amountRaw || 0)
     if (!(amt > 0)) {
-      setManualMsg('Enter amount')
+      setMsg('Enter amount')
       return
     }
-    setManualMsg('Saving...')
+    setMsg('Saving...')
     try {
-      await api('/api/staff/cash', {
+      const created = await api<Tx>('/api/staff/cash', {
         method: 'POST',
         body: {
           sacco_id: saccoId,
           matatu_id: matatuId,
-          kind: 'CASH',
+          kind,
           amount: amt,
-          payer_name: manualNote.trim() || 'Manual cash entry',
+          payer_name: note.trim() || `Manual ${kind.split('_').join(' ').toLowerCase()}`,
           payer_phone: '',
+          notes: note.trim(),
         },
         token,
       })
-      const entry = { id: `MAN_${Date.now()}`, amount: amt, note: manualNote, created_at: new Date().toISOString() }
-      const next = [entry, ...manualEntries]
-      setManualEntries(next)
-      localStorage.setItem(manualKey(matatuId), JSON.stringify(next))
-      setManualAmount('')
-      setManualNote('')
-      setManualMsg('Saved')
+      setTxs((prev) => [created, ...prev])
+      reset()
+      setMsg('Saved')
     } catch (err) {
-      setManualMsg(err instanceof Error ? err.message : 'Save failed')
+      setMsg(err instanceof Error ? err.message : 'Save failed')
     }
+  }
+
+  function recordDailyFee() {
+    void recordManual('SACCO_FEE', dailyAmount, dailyNote, setDailyMsg, () => {
+      setDailyAmount('')
+      setDailyNote('')
+    })
+  }
+
+  function recordLoanPayment() {
+    void recordManual('LOAN_REPAY', loanAmount, loanNote, setLoanMsg, () => {
+      setLoanAmount('')
+      setLoanNote('')
+    })
+  }
+
+  function recordSavingsPayment() {
+    void recordManual('SAVINGS', savingsAmount, savingsNote, setSavingsMsg, () => {
+      setSavingsAmount('')
+      setSavingsNote('')
+    })
   }
 
   const heroRight = user?.role ? `Role: ${user.role}` : 'SACCO Staff'
@@ -246,16 +342,6 @@ const SaccoStaffDashboard = () => {
               ))}
             </select>
           </label>
-          <label>
-            <div className="muted small">Matatu</div>
-            <select value={matatuId} onChange={(e) => setMatatuId(e.target.value)} style={{ padding: 10, minWidth: 180 }}>
-              {matatus.map((m) => (
-                <option key={m.id} value={m.id || ''}>
-                  {m.number_plate || m.id}
-                </option>
-              ))}
-            </select>
-          </label>
           {loading ? <span className="muted small">Loading...</span> : null}
           {error ? <span className="err">{error}</span> : null}
         </div>
@@ -283,33 +369,84 @@ const SaccoStaffDashboard = () => {
         <>
           <section className="card">
             <div className="topline">
-              <h3 style={{ margin: 0 }}>Daily Fee</h3>
-              <span className="muted small">{txByKind.daily.length} paid today</span>
+              <h3 style={{ margin: 0 }}>Daily Fee - Unpaid Today</h3>
+              <span className="muted small">{dailyUnpaidRows.length} matatu(s)</span>
             </div>
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>When</th>
                     <th>Matatu</th>
-                    <th>Amount</th>
-                    <th>Status</th>
+                    <th>Owner</th>
+                    <th>Phone</th>
+                    <th>Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {txByKind.daily.length === 0 ? (
+                  {matatus.length === 0 ? (
                     <tr>
                       <td colSpan={4} className="muted">
+                        No matatus loaded.
+                      </td>
+                    </tr>
+                  ) : dailyUnpaidRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="muted">
+                        All matatus have paid today.
+                      </td>
+                    </tr>
+                  ) : (
+                    dailyUnpaidRows.map((m) => (
+                      <tr key={m.id || m.number_plate}>
+                        <td>{m.number_plate || m.id || ''}</td>
+                        <td>{m.owner_name || ''}</td>
+                        <td>{m.owner_phone || ''}</td>
+                        <td>
+                          <button type="button" className="btn ghost" onClick={() => setMatatuId(m.id || '')}>
+                            Select
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Daily Fee - Paid Today</h3>
+              <span className="muted small">{dailyPaidRows.length} matatu(s)</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Matatu</th>
+                    <th>Amount</th>
+                    <th>Last paid</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {matatus.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="muted">
+                        No matatus loaded.
+                      </td>
+                    </tr>
+                  ) : dailyPaidRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="muted">
                         No daily fee payments yet.
                       </td>
                     </tr>
                   ) : (
-                    txByKind.daily.map((tx) => (
-                      <tr key={tx.id || tx.created_at}>
-                        <td>{tx.created_at ? new Date(tx.created_at).toLocaleString() : ''}</td>
-                        <td>{tx.matatu_id || matatuId}</td>
-                        <td>{fmtKES(tx.fare_amount_kes)}</td>
-                        <td>{tx.status || ''}</td>
+                    dailyPaidRows.map(({ matatu, paid }) => (
+                      <tr key={matatu.id || matatu.number_plate}>
+                        <td>{matatu.number_plate || matatu.id || ''}</td>
+                        <td>{fmtKES(paid.total)}</td>
+                        <td>{paid.last_at ? new Date(paid.last_at).toLocaleTimeString() : ''}</td>
                       </tr>
                     ))
                   )}
@@ -321,126 +458,286 @@ const SaccoStaffDashboard = () => {
           <section className="card">
             <div className="topline">
               <h3 style={{ margin: 0 }}>Manual collection</h3>
-              <span className="muted small">{manualMsg}</span>
+              <span className="muted small">{dailyMsg}</span>
             </div>
             <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-              <input
-                type="number"
-                placeholder="Amount (KES)"
-                value={manualAmount}
-                onChange={(e) => setManualAmount(e.target.value)}
-                style={{ width: 200 }}
-              />
-              <input
-                placeholder="Payer / note"
-                value={manualNote}
-                onChange={(e) => setManualNote(e.target.value)}
-                style={{ flex: '1 1 240px' }}
-              />
-              <button type="button" onClick={recordManualCash}>
+              <label className="muted small">
+                Matatu
+                <select value={matatuId} onChange={(e) => setMatatuId(e.target.value)} style={{ padding: 10, minWidth: 180 }}>
+                  <option value="">Select matatu</option>
+                  {matatus.map((m) => (
+                    <option key={m.id} value={m.id || ''}>
+                      {m.number_plate || m.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="muted small">
+                Amount (KES)
+                <input
+                  type="number"
+                  value={dailyAmount}
+                  onChange={(e) => setDailyAmount(e.target.value)}
+                  style={{ width: 180 }}
+                />
+              </label>
+              <label className="muted small" style={{ flex: '1 1 240px' }}>
+                Note (optional)
+                <input value={dailyNote} onChange={(e) => setDailyNote(e.target.value)} />
+              </label>
+              <button type="button" className="btn" onClick={recordDailyFee}>
                 Collect
               </button>
             </div>
-            {manualEntries.length ? (
-              <div className="table-wrap" style={{ marginTop: 10 }}>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>When</th>
-                      <th>Amount</th>
-                      <th>Note</th>
-                      <th>ID</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {manualEntries.map((e) => (
-                      <tr key={e.id}>
-                        <td>{new Date(e.created_at).toLocaleString()}</td>
-                        <td>{fmtKES(e.amount)}</td>
-                        <td>{e.note || ''}</td>
-                        <td className="mono">{e.id}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : null}
           </section>
         </>
       ) : null}
 
       {activeTab === 'loans' ? (
-        <section className="card">
-          <div className="topline">
-            <h3 style={{ margin: 0 }}>Loans (due today)</h3>
-            <span className="muted small">{txByKind.loans.length} records</span>
-          </div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Matatu</th>
-                  <th>Amount</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {txByKind.loans.length === 0 ? (
+        <>
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Loan Repayments - Unpaid Today</h3>
+              <span className="muted small">{loanUnpaidRows.length} matatu(s)</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
                   <tr>
-                    <td colSpan={3} className="muted">
-                      No loan repayments today.
-                    </td>
+                    <th>Matatu</th>
+                    <th>Borrower</th>
+                    <th>Action</th>
                   </tr>
-                ) : (
-                  txByKind.loans.map((tx) => (
-                    <tr key={tx.id || tx.created_at}>
-                      <td>{tx.matatu_id || matatuId}</td>
-                      <td>{fmtKES(tx.fare_amount_kes)}</td>
-                      <td>{tx.status || ''}</td>
+                </thead>
+                <tbody>
+                  {loanMatatus.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="muted">
+                        No active loans.
+                      </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
+                  ) : loanUnpaidRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="muted">
+                        All loan matatus have paid today.
+                      </td>
+                    </tr>
+                  ) : (
+                    loanUnpaidRows.map((m) => (
+                      <tr key={m.id || m.number_plate}>
+                        <td>{m.number_plate || m.id || ''}</td>
+                        <td>{loanByMatatu.get(m.id || '')?.borrower_name || m.owner_name || ''}</td>
+                        <td>
+                          <button type="button" className="btn ghost" onClick={() => setMatatuId(m.id || '')}>
+                            Select
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Loan Repayments - Paid Today</h3>
+              <span className="muted small">{loanPaidRows.length} matatu(s)</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Matatu</th>
+                    <th>Amount</th>
+                    <th>Last paid</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loanMatatus.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="muted">
+                        No active loans.
+                      </td>
+                    </tr>
+                  ) : loanPaidRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="muted">
+                        No loan repayments yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    loanPaidRows.map(({ matatu, paid }) => (
+                      <tr key={matatu.id || matatu.number_plate}>
+                        <td>{matatu.number_plate || matatu.id || ''}</td>
+                        <td>{fmtKES(paid.total)}</td>
+                        <td>{paid.last_at ? new Date(paid.last_at).toLocaleTimeString() : ''}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Manual collection</h3>
+              <span className="muted small">{loanMsg}</span>
+            </div>
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+              <label className="muted small">
+                Matatu
+                <select value={matatuId} onChange={(e) => setMatatuId(e.target.value)} style={{ padding: 10, minWidth: 180 }}>
+                  <option value="">Select matatu</option>
+                  {loanMatatus.map((m) => (
+                    <option key={m.id} value={m.id || ''}>
+                      {m.number_plate || m.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="muted small">
+                Amount (KES)
+                <input type="number" value={loanAmount} onChange={(e) => setLoanAmount(e.target.value)} style={{ width: 180 }} />
+              </label>
+              <label className="muted small" style={{ flex: '1 1 240px' }}>
+                Note (optional)
+                <input value={loanNote} onChange={(e) => setLoanNote(e.target.value)} />
+              </label>
+              <button type="button" className="btn" onClick={recordLoanPayment}>
+                Collect
+              </button>
+            </div>
+          </section>
+        </>
       ) : null}
 
       {activeTab === 'savings' ? (
-        <section className="card">
-          <div className="topline">
-            <h3 style={{ margin: 0 }}>Savings</h3>
-            <span className="muted small">{txByKind.savings.length} records</span>
-          </div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Matatu</th>
-                  <th>Amount</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {txByKind.savings.length === 0 ? (
+        <>
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Savings - Unpaid Today</h3>
+              <span className="muted small">{savingsUnpaidRows.length} matatu(s)</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
                   <tr>
-                    <td colSpan={3} className="muted">
-                      No savings payments today.
-                    </td>
+                    <th>Matatu</th>
+                    <th>Owner</th>
+                    <th>Action</th>
                   </tr>
-                ) : (
-                  txByKind.savings.map((tx) => (
-                    <tr key={tx.id || tx.created_at}>
-                      <td>{tx.matatu_id || matatuId}</td>
-                      <td>{fmtKES(tx.fare_amount_kes)}</td>
-                      <td>{tx.status || ''}</td>
+                </thead>
+                <tbody>
+                  {savingsMatatus.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="muted">
+                        No matatus enrolled in savings.
+                      </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
+                  ) : savingsUnpaidRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="muted">
+                        All savings members have paid today.
+                      </td>
+                    </tr>
+                  ) : (
+                    savingsUnpaidRows.map((m) => (
+                      <tr key={m.id || m.number_plate}>
+                        <td>{m.number_plate || m.id || ''}</td>
+                        <td>{m.owner_name || ''}</td>
+                        <td>
+                          <button type="button" className="btn ghost" onClick={() => setMatatuId(m.id || '')}>
+                            Select
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Savings - Paid Today</h3>
+              <span className="muted small">{savingsPaidRows.length} matatu(s)</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Matatu</th>
+                    <th>Amount</th>
+                    <th>Last paid</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {savingsMatatus.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="muted">
+                        No matatus enrolled in savings.
+                      </td>
+                    </tr>
+                  ) : savingsPaidRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="muted">
+                        No savings payments yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    savingsPaidRows.map(({ matatu, paid }) => (
+                      <tr key={matatu.id || matatu.number_plate}>
+                        <td>{matatu.number_plate || matatu.id || ''}</td>
+                        <td>{fmtKES(paid.total)}</td>
+                        <td>{paid.last_at ? new Date(paid.last_at).toLocaleTimeString() : ''}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Manual collection</h3>
+              <span className="muted small">{savingsMsg}</span>
+            </div>
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+              <label className="muted small">
+                Matatu
+                <select value={matatuId} onChange={(e) => setMatatuId(e.target.value)} style={{ padding: 10, minWidth: 180 }}>
+                  <option value="">Select matatu</option>
+                  {savingsMatatus.map((m) => (
+                    <option key={m.id} value={m.id || ''}>
+                      {m.number_plate || m.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="muted small">
+                Amount (KES)
+                <input
+                  type="number"
+                  value={savingsAmount}
+                  onChange={(e) => setSavingsAmount(e.target.value)}
+                  style={{ width: 180 }}
+                />
+              </label>
+              <label className="muted small" style={{ flex: '1 1 240px' }}>
+                Note (optional)
+                <input value={savingsNote} onChange={(e) => setSavingsNote(e.target.value)} />
+              </label>
+              <button type="button" className="btn" onClick={recordSavingsPayment}>
+                Collect
+              </button>
+            </div>
+          </section>
+        </>
       ) : null}
 
       {activeTab === 'vehicle_care' ? (
