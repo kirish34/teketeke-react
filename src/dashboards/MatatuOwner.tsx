@@ -33,6 +33,7 @@ type Staff = {
   email?: string
   role?: string
   user_id?: string
+  matatu_id?: string
 }
 
 type LoanRequest = {
@@ -114,6 +115,7 @@ const MatatuOwnerDashboard = () => {
   const [stEmail, setStEmail] = useState('')
   const [stRole, setStRole] = useState('MATATU_STAFF')
   const [stMsg, setStMsg] = useState('')
+  const [staffAssign, setStaffAssign] = useState<Record<string, string>>({})
 
   // staff login form
   const [loginSourceId, setLoginSourceId] = useState('')
@@ -171,6 +173,16 @@ const MatatuOwnerDashboard = () => {
       })
       .filter((option): option is { key: string; label: string; staff: Staff } => Boolean(option))
   }, [staff])
+
+  const ownerMatatuOptions = useMemo(() => {
+    return vehicles
+      .map((v) => {
+        if (!v.id) return null
+        const label = v.number_plate || v.id
+        return { id: v.id, label }
+      })
+      .filter((option): option is { id: string; label: string } => Boolean(option))
+  }, [vehicles])
 
   useEffect(() => {
     setLoanHist({ loanId: null, items: [], total: 0, msg: 'Select a loan' })
@@ -383,6 +395,28 @@ const MatatuOwnerDashboard = () => {
       setStaff(stRes.items || [])
     } catch (error) {
       setStMsg(error instanceof Error ? error.message : 'Failed to delete staff')
+    }
+  }
+
+  async function assignStaffMatatu(staffId?: string) {
+    if (!currentId || !staffId) return
+    const targetMatatuId = staffAssign[staffId] || ''
+    if (!targetMatatuId) {
+      setStMsg('Select a matatu')
+      return
+    }
+    setStMsg('Assigning...')
+    try {
+      await fetchJson(`/u/matatu/${encodeURIComponent(currentId)}/staff/${encodeURIComponent(staffId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ matatu_id: targetMatatuId }),
+      })
+      setStMsg('Staff assigned')
+      const stRes = await fetchJson<{ items?: Staff[] }>(`/u/matatu/${encodeURIComponent(currentId)}/staff`)
+      setStaff(stRes.items || [])
+    } catch (error) {
+      setStMsg(error instanceof Error ? error.message : 'Failed to assign staff')
     }
   }
 
@@ -730,31 +764,66 @@ const MatatuOwnerDashboard = () => {
                   <th>Email</th>
                   <th>Role</th>
                   <th>User / ID</th>
+                  <th>Assigned Matatu</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {staff.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="muted">
+                    <td colSpan={7} className="muted">
                       No staff loaded.
                     </td>
                   </tr>
                 ) : (
-                  staff.map((s) => (
-                    <tr key={s.id || s.email || s.user_id}>
-                      <td>{s.name || ''}</td>
-                      <td>{s.phone || ''}</td>
-                      <td>{s.email || ''}</td>
-                      <td>{s.role || ''}</td>
-                      <td className="mono">{s.user_id || s.id || ''}</td>
-                      <td>
-                        <button className="btn ghost" type="button" onClick={() => deleteStaff(s.id)}>
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                  staff.map((s) => {
+                    const staffId = s.id || ''
+                    const assignedValue = staffAssign[staffId] ?? s.matatu_id ?? currentId ?? ''
+                    const assignDisabled = !staffId || !assignedValue || assignedValue === s.matatu_id
+                    return (
+                      <tr key={s.id || s.email || s.user_id}>
+                        <td>{s.name || ''}</td>
+                        <td>{s.phone || ''}</td>
+                        <td>{s.email || ''}</td>
+                        <td>{s.role || ''}</td>
+                        <td className="mono">{s.user_id || s.id || ''}</td>
+                        <td>
+                          <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <select
+                              value={assignedValue}
+                              onChange={(e) =>
+                                setStaffAssign((prev) => ({
+                                  ...prev,
+                                  [staffId]: e.target.value,
+                                }))
+                              }
+                              style={{ minWidth: 160, padding: 8 }}
+                            >
+                              <option value="">Select matatu</option>
+                              {ownerMatatuOptions.map((option) => (
+                                <option key={option.id} value={option.id}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              className="btn ghost"
+                              type="button"
+                              onClick={() => assignStaffMatatu(staffId)}
+                              disabled={assignDisabled}
+                            >
+                              Assign
+                            </button>
+                          </div>
+                        </td>
+                        <td>
+                          <button className="btn ghost" type="button" onClick={() => deleteStaff(s.id)}>
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })
                 )}
               </tbody>
             </table>

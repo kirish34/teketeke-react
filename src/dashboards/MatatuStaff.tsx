@@ -53,11 +53,14 @@ const MatatuStaffDashboard = () => {
   const fetchJson = useCallback(<T,>(path: string) => api<T>(path, { token }), [token])
 
   const loadTransactions = useCallback(async () => {
-    if (!saccoId) return
+    if (!saccoId || !matatuId) {
+      setTxs([])
+      return
+    }
     try {
       const tRes = await fetchJson<{ items?: Tx[] }>(`/u/sacco/${encodeURIComponent(saccoId)}/transactions?limit=500`)
       const items = tRes.items || []
-      setTxs(items.filter((t) => !matatuId || t.matatu_id === matatuId || !t.matatu_id))
+      setTxs(items.filter((t) => t.matatu_id === matatuId))
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load transactions")
     }
@@ -78,6 +81,12 @@ const MatatuStaffDashboard = () => {
   }, [fetchJson])
 
   useEffect(() => {
+    if (user?.matatu_id) {
+      setMatatuId(user.matatu_id)
+    }
+  }, [user?.matatu_id])
+
+  useEffect(() => {
     if (!saccoId) return
     async function loadData() {
       setLoading(true)
@@ -89,7 +98,7 @@ const MatatuStaffDashboard = () => {
         ])
         const mats = mRes.items || []
         setMatatus(mats)
-        if (mats.length) setMatatuId((prev) => prev || mats[0].id || "")
+        if (!user?.matatu_id) setMatatuId("")
         setRoutes(rRes.items || [])
         if (!routeId && rRes.items?.length) setRouteId(rRes.items[0].id || "")
       } catch (err) {
@@ -99,7 +108,7 @@ const MatatuStaffDashboard = () => {
       }
     }
     void loadData()
-  }, [fetchJson, saccoId, routeId])
+  }, [fetchJson, saccoId, routeId, user?.matatu_id])
 
   useEffect(() => {
     if (!saccoId) return
@@ -177,23 +186,18 @@ const MatatuStaffDashboard = () => {
     }
   }, [matatuId])
 
-  const filteredTx = useMemo(() => txs.filter((t) => !matatuId || t.matatu_id === matatuId), [txs, matatuId])
+  const filteredTx = useMemo(() => (matatuId ? txs.filter((t) => t.matatu_id === matatuId) : []), [txs, matatuId])
   const currentMatatu = useMemo(
     () => matatus.find((m) => m.id && m.id === matatuId) || null,
     [matatuId, matatus],
   )
-  const ownerMatatuCount = useMemo(() => {
-    if (!currentMatatu) return matatuId ? 1 : 0
-    const ownerPhone = currentMatatu.owner_phone || null
-    const ownerName = (currentMatatu.owner_name || "").toString().trim().toLowerCase()
-    const matchesOwner = (m: Matatu) => {
-      if (ownerPhone && m.owner_phone && String(m.owner_phone) === String(ownerPhone)) return true
-      if (ownerName && (m.owner_name || "").toString().trim().toLowerCase() === ownerName) return true
-      return m.id === currentMatatu.id
-    }
-    const count = matatus.filter(matchesOwner).length
-    return count || 1
-  }, [currentMatatu, matatuId, matatus])
+  const assignedMatatuLabel = useMemo(() => {
+    if (currentMatatu?.number_plate) return currentMatatu.number_plate
+    if (currentMatatu?.id) return currentMatatu.id
+    if (matatuId) return matatuId
+    return "Unassigned"
+  }, [currentMatatu, matatuId])
+  const assignedMatatuCount = matatuId ? 1 : 0
 
   const transactionTotals = useMemo(() => {
     const manualLocal = manualEntries.reduce((acc, m) => acc + Number(m.amount || 0), 0)
@@ -238,7 +242,7 @@ const MatatuStaffDashboard = () => {
 
   async function recordManualCash() {
     if (!saccoId || !matatuId) {
-      setManualMsg("Pick a SACCO and matatu first")
+      setManualMsg("Missing SACCO or assigned matatu")
       return
     }
     const amt = Number(manualAmount || 0)
@@ -289,7 +293,7 @@ const MatatuStaffDashboard = () => {
           <div className="hero-inline">
             <span className="sys-pill-lite">{todayKey()}</span>
             <span className="sys-pill-lite">{timeLabel}</span>
-            <span className="sys-pill-lite">{ownerMatatuCount} matatu(s)</span>
+            <span className="sys-pill-lite">{assignedMatatuCount} matatu(s)</span>
           </div>
         </div>
         <div className="row" style={{ gap: 8, alignItems: "center" }}>
@@ -324,15 +328,8 @@ const MatatuStaffDashboard = () => {
             </select>
           </label>
           <label>
-            <div className="muted small">Matatu</div>
-            <select value={matatuId} onChange={(e) => setMatatuId(e.target.value)} style={{ minWidth: 140, padding: 10 }}>
-              {matatus.map((m) => (
-                <option key={m.id} value={m.id || ""}>
-                  {m.number_plate || m.id}
-                </option>
-              ))}
-              {!matatus.length ? <option value="">- none -</option> : null}
-            </select>
+            <div className="muted small">Assigned Matatu</div>
+            <input className="input" value={assignedMatatuLabel} readOnly style={{ minWidth: 160 }} />
           </label>
           <button type="button" className="btn ghost" onClick={refresh}>
             Reload
@@ -400,7 +397,7 @@ const MatatuStaffDashboard = () => {
         <section className="card">
           <div className="topline">
             <h3 style={{ margin: 0 }}>Trips</h3>
-            <span className="muted small">Route {routeId || "n/a"} - Matatu {matatuId || "n/a"}</span>
+            <span className="muted small">Route {routeId || "n/a"} - Matatu {assignedMatatuLabel}</span>
           </div>
           <div className="row" style={{ marginTop: 10, gap: 8, flexWrap: "wrap" }}>
             <button type="button" className="btn primary">

@@ -1749,6 +1749,16 @@ router.patch('/matatu/:id/staff/:staff_id', async (req,res)=>{
       if (!requestedRole) return res.status(400).json({ error:'role required' });
       updates.role = requestedRole;
     }
+    let nextMatatu = null;
+    if ('matatu_id' in req.body) {
+      const nextMatatuId = (req.body?.matatu_id || '').toString().trim();
+      if (!nextMatatuId) return res.status(400).json({ error:'matatu_id required' });
+      const access = await ensureMatatuAccess(req.user.id, nextMatatuId);
+      if (!access.allowed || !access.matatu) return res.status(403).json({ error:'Forbidden' });
+      nextMatatu = access.matatu;
+      updates.matatu_id = nextMatatu.id;
+      updates.sacco_id = nextMatatu.sacco_id || null;
+    }
 
     if (!Object.keys(updates).length){
       return res.status(400).json({ error:'No updates provided' });
@@ -1774,6 +1784,13 @@ router.patch('/matatu/:id/staff/:staff_id', async (req,res)=>{
         .update({ role: normalizedRole })
         .eq('user_id', data.user_id)
         .eq('matatu_id', matatu.id);
+      if (urErr) throw urErr;
+    }
+    if (nextMatatu && data?.user_id) {
+      const { error: urErr } = await supabaseAdmin
+        .from('user_roles')
+        .update({ matatu_id: nextMatatu.id, sacco_id: nextMatatu.sacco_id || null })
+        .eq('user_id', data.user_id);
       if (urErr) throw urErr;
     }
 
