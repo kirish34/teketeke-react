@@ -1077,8 +1077,9 @@ const SystemDashboard = () => {
     email: '',
     password: '',
     role: 'SACCO',
-    sacco_id: '',
-    vehicle_ref: '',
+    operator_id: '',
+    vehicle_type: '',
+    vehicle_id: '',
   })
   const [loginMsg, setLoginMsg] = useState('')
 
@@ -1165,74 +1166,46 @@ const SystemDashboard = () => {
       .sort((a, b) => a.label.localeCompare(b.label))
   }, [saccos])
 
-  const vehicleOptions = useMemo(() => {
-    const options: Array<{ id: string; label: string; type: string }> = []
-    const labelType = (value?: string | null) => {
-      const raw = String(value || '').trim().toUpperCase()
-      if (raw === 'SHUTTLE') return 'Shuttle'
-      if (raw === 'BODA' || raw === 'BODABODA') return 'BodaBoda'
-      if (raw === 'TAXI') return 'Taxi'
-      if (raw === 'MATATU') return 'Matatu'
-      if (!raw) return 'Vehicle'
-      return raw
+  const loginVehicleOptions = useMemo(() => {
+    const operatorId = loginForm.operator_id
+    const type = loginForm.vehicle_type
+    if (!type) return []
+    const matchesOperator = (value?: string | null) => {
+      if (!operatorId) return true
+      return String(value || '') === String(operatorId)
     }
-    const pushOption = (
-      id: string,
-      typeKey: string,
-      typeLabel: string,
-      plate: string,
-      operatorLabel?: string | null,
-    ) => {
-      if (!id || !plate) return
-      const trimmedPlate = String(plate).trim()
-      if (!trimmedPlate) return
-      const label = operatorLabel ? `${typeLabel}: ${trimmedPlate} - ${operatorLabel}` : `${typeLabel}: ${trimmedPlate}`
-      options.push({ id, label, type: typeKey })
+    if (type === 'SHUTTLE') {
+      return shuttles
+        .filter((row) => matchesOperator(row.operator_id || row.operator?.id || ''))
+        .map((row) => ({
+          id: row.id || '',
+          label: row.plate || row.id || '',
+        }))
+        .filter((row) => row.id && row.label)
+        .sort((a, b) => a.label.localeCompare(b.label))
     }
-
-    matatus.forEach((row) => {
-      const id = row.id || ''
-      if (!id) return
-      const plate = row.number_plate || row.plate || row.registration || row.id || id
-      const saccoRow = row.sacco_id ? saccoById.get(row.sacco_id) : null
-      const operatorLabel =
-        row.sacco_name ||
-        row.sacco ||
-        saccoRow?.display_name ||
-        saccoRow?.name ||
-        saccoRow?.sacco_name ||
-        row.sacco_id ||
-        null
-      const typeLabel = labelType(row.vehicle_type || row.body_type || row.type)
-      pushOption(id, 'MATATU', typeLabel, plate, operatorLabel)
-    })
-
-    taxis.forEach((row) => {
-      const id = row.id || ''
-      if (!id) return
-      const plate = row.plate || row.id || id
-      const operatorLabel = operatorLabelFromParts(row.operator_id || row.operator?.id || '', row.operator || null)
-      pushOption(id, 'TAXI', 'Taxi', plate, operatorLabel === '-' ? null : operatorLabel)
-    })
-
-    bodaBikes.forEach((row) => {
-      const id = row.id || ''
-      if (!id) return
-      const plate = row.identifier || row.id || id
-      const operatorLabel = operatorLabelFromParts(row.operator_id || row.operator?.id || '', row.operator || null)
-      pushOption(id, 'BODA', 'BodaBoda', plate, operatorLabel === '-' ? null : operatorLabel)
-    })
-
-    shuttles.forEach((row) => {
-      const id = row.id || ''
-      if (!id) return
-      const plate = row.plate || row.id || id
-      const operatorLabel = operatorLabelFromParts(row.operator_id || row.operator?.id || '', row.operator || null)
-      pushOption(id, 'SHUTTLE', 'Shuttle', plate, operatorLabel === '-' ? null : operatorLabel)
-    })
-
-    return options.sort((a, b) => a.label.localeCompare(b.label))
-  }, [matatus, taxis, bodaBikes, shuttles, saccoById])
+    if (type === 'TAXI') {
+      return taxis
+        .filter((row) => matchesOperator(row.operator_id || row.operator?.id || ''))
+        .map((row) => ({
+          id: row.id || '',
+          label: row.plate || row.id || '',
+        }))
+        .filter((row) => row.id && row.label)
+        .sort((a, b) => a.label.localeCompare(b.label))
+    }
+    if (type === 'BODA') {
+      return bodaBikes
+        .filter((row) => matchesOperator(row.operator_id || row.operator?.id || ''))
+        .map((row) => ({
+          id: row.id || '',
+          label: row.identifier || row.id || '',
+        }))
+        .filter((row) => row.id && row.label)
+        .sort((a, b) => a.label.localeCompare(b.label))
+    }
+    return []
+  }, [bodaBikes, loginForm.operator_id, loginForm.vehicle_type, shuttles, taxis])
 
   const shuttlesById = useMemo(() => {
     const map = new Map<string, ShuttleRow>()
@@ -8509,90 +8482,164 @@ const SystemDashboard = () => {
           <span className="muted small">{logins.length} login(s)</span>
         </div>
         {loginError ? <div className="err">Logins error: {loginError}</div> : null}
-        <div className="row" style={{ marginBottom: 8 }}>
-          <input
-            className="input"
-            placeholder="Email"
-            value={loginForm.email}
-            onChange={(e) => setLoginForm((f) => ({ ...f, email: e.target.value }))}
-          />
-          <input
-            className="input"
-            placeholder="Password"
-            type="password"
-            value={loginForm.password}
-            onChange={(e) => setLoginForm((f) => ({ ...f, password: e.target.value }))}
-          />
-          <select
-            value={loginForm.role}
-            onChange={(e) => setLoginForm((f) => ({ ...f, role: e.target.value }))}
-            style={{ padding: 10 }}
-          >
-            <option value="SYSTEM_ADMIN">SYSTEM_ADMIN</option>
-            <option value="SACCO">SACCO</option>
-            <option value="OWNER">OWNER</option>
-            <option value="STAFF">STAFF</option>
-            <option value="TAXI">TAXI</option>
-            <option value="BODA">BODA</option>
-            <option value="OPS">OPS</option>
-          </select>
-          <select
-            value={loginForm.sacco_id}
-            onChange={(e) => setLoginForm((f) => ({ ...f, sacco_id: e.target.value }))}
-            style={{ padding: 10 }}
-          >
-            <option value="">SACCO (optional)</option>
-            {operatorOptions.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <select
-            value={loginForm.vehicle_ref}
-            onChange={(e) => setLoginForm((f) => ({ ...f, vehicle_ref: e.target.value }))}
-            style={{ padding: 10 }}
-          >
-            <option value="">Vehicle (optional)</option>
-            {vehicleOptions.map((option) => (
-              <option key={`${option.type}:${option.id}`} value={`${option.type}:${option.id}`}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+        <div className="card" style={{ marginTop: 10, background: '#f8fafc' }}>
+          <h4 style={{ margin: '0 0 6px' }}>Account details</h4>
+          <div className="grid g3" style={{ gap: 12 }}>
+            <label className="muted small">
+              Email
+              <input
+                className="input"
+                placeholder="Email"
+                value={loginForm.email}
+                onChange={(e) => setLoginForm((f) => ({ ...f, email: e.target.value }))}
+              />
+            </label>
+            <label className="muted small">
+              Password
+              <input
+                className="input"
+                placeholder="Password"
+                type="password"
+                value={loginForm.password}
+                onChange={(e) => setLoginForm((f) => ({ ...f, password: e.target.value }))}
+              />
+            </label>
+            <label className="muted small">
+              Role
+              <select
+                value={loginForm.role}
+                onChange={(e) => setLoginForm((f) => ({ ...f, role: e.target.value }))}
+                style={{ padding: 10 }}
+              >
+                <option value="SYSTEM_ADMIN">SYSTEM_ADMIN</option>
+                <option value="SACCO">SACCO</option>
+                <option value="OWNER">OWNER</option>
+                <option value="STAFF">STAFF</option>
+                <option value="TAXI">TAXI</option>
+                <option value="BODA">BODA</option>
+                <option value="OPS">OPS</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div className="card" style={{ marginTop: 10 }}>
+          <h4 style={{ margin: '0 0 6px' }}>Operator and vehicle</h4>
+          <div className="muted small" style={{ marginBottom: 8 }}>
+            Select the operator first, then vehicle type, then the specific vehicle.
+          </div>
+          <div className="grid g3" style={{ gap: 12 }}>
+            <label className="muted small">
+              Operator
+              <select
+                value={loginForm.operator_id}
+                onChange={(e) =>
+                  setLoginForm((f) => ({
+                    ...f,
+                    operator_id: e.target.value,
+                    vehicle_id: '',
+                  }))
+                }
+                style={{ padding: 10 }}
+              >
+                <option value="">Select operator</option>
+                {operatorOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="muted small">
+              Vehicle type
+              <select
+                value={loginForm.vehicle_type}
+                onChange={(e) =>
+                  setLoginForm((f) => ({
+                    ...f,
+                    vehicle_type: e.target.value,
+                    vehicle_id: '',
+                  }))
+                }
+                style={{ padding: 10 }}
+                disabled={!loginForm.operator_id}
+              >
+                <option value="">Select type</option>
+                <option value="SHUTTLE">Shuttle</option>
+                <option value="TAXI">Taxi</option>
+                <option value="BODA">BodaBoda</option>
+              </select>
+            </label>
+            <label className="muted small">
+              Vehicle
+              <select
+                value={loginForm.vehicle_id}
+                onChange={(e) => setLoginForm((f) => ({ ...f, vehicle_id: e.target.value }))}
+                style={{ padding: 10 }}
+                disabled={!loginForm.operator_id || !loginForm.vehicle_type}
+              >
+                <option value="">Select vehicle</option>
+                {loginVehicleOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </div>
+        <div className="row" style={{ marginTop: 10, gap: 8, flexWrap: 'wrap' }}>
           <button
             className="btn"
             type="button"
             onClick={async () => {
               setLoginMsg('Saving...')
               try {
-                const vehicleRef = loginForm.vehicle_ref.trim()
-                let vehicleType: string | null = null
-                let vehicleId: string | null = null
-                let matatuId: string | null = null
-                if (vehicleRef) {
-                  const [rawType, rawId] = vehicleRef.split(':')
-                  if (rawId) {
-                    vehicleType = rawType.toUpperCase()
-                    vehicleId = rawId
-                    if (vehicleType === 'MATATU') matatuId = rawId
-                  } else {
-                    vehicleType = 'MATATU'
-                    vehicleId = vehicleRef
-                    matatuId = vehicleRef
+                const role = loginForm.role
+                const needsSacco = ['SACCO', 'SACCO_STAFF'].includes(role)
+                const needsVehicle = ['OWNER', 'STAFF', 'TAXI', 'BODA'].includes(role)
+                if (!loginForm.email.trim()) {
+                  setLoginMsg('Email required')
+                  return
+                }
+                if (!loginForm.password) {
+                  setLoginMsg('Password required')
+                  return
+                }
+                if (needsSacco && !loginForm.operator_id) {
+                  setLoginMsg('Select operator')
+                  return
+                }
+                if (needsVehicle) {
+                  if (!loginForm.operator_id) {
+                    setLoginMsg('Select operator')
+                    return
+                  }
+                  if (!loginForm.vehicle_type) {
+                    setLoginMsg('Select vehicle type')
+                    return
+                  }
+                  if (!loginForm.vehicle_id) {
+                    setLoginMsg('Select vehicle')
+                    return
                   }
                 }
                 await sendJson('/api/admin/user-roles/create-user', 'POST', {
                   email: loginForm.email.trim(),
                   password: loginForm.password,
-                  role: loginForm.role,
-                  sacco_id: loginForm.sacco_id || null,
-                  matatu_id: matatuId,
-                  vehicle_id: vehicleId,
-                  vehicle_type: vehicleType,
+                  role,
+                  sacco_id: loginForm.operator_id || null,
+                  vehicle_id: loginForm.vehicle_id || null,
+                  vehicle_type: loginForm.vehicle_type || null,
                 })
                 setLoginMsg('Login created')
-                setLoginForm({ email: '', password: '', role: 'SACCO', sacco_id: '', vehicle_ref: '' })
+                setLoginForm({
+                  email: '',
+                  password: '',
+                  role: 'SACCO',
+                  operator_id: '',
+                  vehicle_type: '',
+                  vehicle_id: '',
+                })
                 await loadLogins()
               } catch (err) {
                 setLoginMsg(err instanceof Error ? err.message : 'Create failed')
@@ -8601,8 +8648,8 @@ const SystemDashboard = () => {
           >
             Create login
           </button>
+          <span className="muted small">{loginMsg}</span>
         </div>
-        <div className="muted small">{loginMsg}</div>
         <div className="table-wrap" style={{ marginTop: 10 }}>
           <table>
             <thead>

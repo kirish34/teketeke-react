@@ -1611,42 +1611,112 @@ router.get("/matatu/:id/staff", async (req,res)=>{
 router.post("/matatu/:id/staff", async (req,res)=>{
   try{
     const matatu = await ensureMatatuWithAccess(req,res); if(!matatu) return;
-    const name  = (req.body?.name || "").trim();
-    const phone = (req.body?.phone || "").trim() || null;
-    const email = (req.body?.email || "").trim() || null;
-    const role  = (req.body?.role || "STAFF").toString().toUpperCase();
-    const password = (req.body?.password || "").toString().trim();
-    if (!name) return res.status(400).json({ error:"name required" });
+    const staffId = (req.body?.staff_id || '').toString().trim() || null;
+    let existing = null;
+    if (staffId) {
+      const { data, error } = await supabaseAdmin
+        .from('staff_profiles')
+        .select('*')
+        .eq('id', staffId)
+        .eq('matatu_id', matatu.id)
+        .maybeSingle();
+      if (error && error.code !== PG_ROW_NOT_FOUND) throw error;
+      if (!data) return res.status(404).json({ error: 'Staff not found' });
+      existing = data;
+    }
 
-    let userId = req.body?.user_id || null;
-    if (!userId && email){
-      const created = await supabaseAdmin.auth.admin.createUser({ email, email_confirm: true, password: password || Math.random().toString(36).slice(2) + 'X1!' });
-      if (created.error){
-        let page=1, found=null;
-        while(page<=25){
+    const name = (req.body?.name ?? existing?.name ?? '').toString().trim();
+    const phone = (req.body?.phone ?? existing?.phone ?? '').toString().trim() || null;
+    const email = (req.body?.email ?? existing?.email ?? '').toString().trim() || null;
+    const role = (req.body?.role || existing?.role || 'STAFF').toString().toUpperCase();
+    const password = (req.body?.password || '').toString().trim();
+    if (!name) return res.status(400).json({ error: 'name required' });
+
+    let userId = req.body?.user_id || existing?.user_id || null;
+    const wantsLogin = Boolean(password) || req.body?.create_login === true;
+    if (wantsLogin && !userId && !email) {
+      return res.status(400).json({ error: 'email required for login' });
+    }
+    if (wantsLogin && !password && !userId) {
+      return res.status(400).json({ error: 'password required for login' });
+    }
+
+    if (!userId && email && wantsLogin) {
+      const created = await supabaseAdmin.auth.admin.createUser({
+        email,
+        email_confirm: true,
+        password: password,
+      });
+      if (created.error) {
+        let page = 1;
+        let found = null;
+        while (page <= 25) {
           const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 200 });
           if (error) break;
-          found = (data?.users||[]).find(u => (u.email||"").toLowerCase() === email.toLowerCase());
-          if (found) break; page++;
+          found = (data?.users || []).find((u) => (u.email || '').toLowerCase() === email.toLowerCase());
+          if (found) break;
+          page += 1;
         }
-        if (found) userId = found.id; else throw created.error;
-      }else{
+        if (found) userId = found.id;
+        else throw created.error;
+      } else {
         userId = created.data?.user?.id || null;
       }
     }
 
-    if (userId){
+    if (userId && (password || (email && email !== existing?.email))) {
+      const updates = {};
+      if (email) updates.email = email;
+      if (password) updates.password = password;
+      const updated = await supabaseAdmin.auth.admin.updateUserById(userId, updates);
+      if (updated.error) throw updated.error;
+    }
+
+    if (userId) {
       const normalizedRole = (role === 'DRIVER' || role === 'MATATU_STAFF') ? 'STAFF' : role;
       const { error: urErr } = await supabaseAdmin
         .from('user_roles')
-        .upsert({ user_id: userId, role: normalizedRole, sacco_id: matatu.sacco_id || null, matatu_id: matatu.id }, { onConflict: 'user_id' });
+        .upsert(
+          { user_id: userId, role: normalizedRole, sacco_id: matatu.sacco_id || null, matatu_id: matatu.id },
+          { onConflict: 'user_id' },
+        );
       if (urErr) throw urErr;
+    }
+
+    if (staffId) {
+      const { data, error } = await supabaseAdmin
+        .from('staff_profiles')
+        .update({
+          sacco_id: matatu.sacco_id || null,
+          matatu_id: matatu.id,
+          name,
+          phone,
+          email,
+          role: role || 'STAFF',
+          user_id: userId || existing?.user_id || null,
+        })
+        .eq('id', staffId)
+        .eq('matatu_id', matatu.id)
+        .select()
+        .single();
+      if (error) throw error;
+      res.json(data);
+      return;
     }
 
     const { data, error } = await supabaseAdmin
       .from('staff_profiles')
-      .insert({ sacco_id: matatu.sacco_id || null, matatu_id: matatu.id, name, phone, email, role: role || 'STAFF', user_id: userId })
-      .select().single();
+      .insert({
+        sacco_id: matatu.sacco_id || null,
+        matatu_id: matatu.id,
+        name,
+        phone,
+        email,
+        role: role || 'STAFF',
+        user_id: userId,
+      })
+      .select()
+      .single();
     if (error) throw error;
     res.json(data);
   }catch(e){ res.status(500).json({ error: e.message || 'Failed to add staff' }); }

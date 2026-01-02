@@ -104,7 +104,7 @@ const MatatuOwnerDashboard = () => {
   const [grantError, setGrantError] = useState<string | null>(null)
 
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'staff' | 'staff_logins' | 'tx' | 'loans' | 'savings' | 'vehicle_care'
+    'overview' | 'staff' | 'tx' | 'loans' | 'savings' | 'vehicle_care'
   >('overview')
   const { user, logout } = useAuth()
 
@@ -161,8 +161,9 @@ const MatatuOwnerDashboard = () => {
 
   const staffLoginOptions = useMemo(() => {
     return staff
+      .filter((s) => s.id)
       .map((s) => {
-        const key = s.id || s.user_id || s.email || s.phone || ''
+        const key = s.id || ''
         if (!key) return null
         const labelBase = s.name || s.email || s.phone || key
         const suffix = s.user_id ? ' (login exists)' : ''
@@ -328,6 +329,7 @@ const MatatuOwnerDashboard = () => {
     const role = loginRole
     const password = loginPassword.trim()
     const selected = staffLoginOptions.find((opt) => opt.key === loginSourceId)?.staff || null
+    const hasLogin = Boolean(selected?.user_id)
 
     if (!name) {
       setLoginMsg('Name required')
@@ -341,10 +343,6 @@ const MatatuOwnerDashboard = () => {
       setLoginMsg('Password must be at least 6 characters')
       return
     }
-    if (selected?.user_id) {
-      setLoginMsg('Login already exists for this staff')
-      return
-    }
 
     setLoginMsg('Saving...')
     try {
@@ -352,6 +350,7 @@ const MatatuOwnerDashboard = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
+          staff_id: selected?.id || null,
           name,
           phone,
           email,
@@ -359,7 +358,7 @@ const MatatuOwnerDashboard = () => {
           password,
         }),
       })
-      setLoginMsg('Login created')
+      setLoginMsg(hasLogin ? 'Login updated' : 'Login created')
       setLoginSourceId('')
       setLoginName('')
       setLoginPhone('')
@@ -594,7 +593,6 @@ const MatatuOwnerDashboard = () => {
   const tabs = [
     { id: 'overview' as const, label: 'Overview' },
     { id: 'staff' as const, label: 'Staff' },
-    { id: 'staff_logins' as const, label: 'Staff Logins' },
     { id: 'tx' as const, label: 'Transactions' },
     { id: 'loans' as const, label: 'Loans' },
     { id: 'savings' as const, label: 'Savings' },
@@ -704,7 +702,8 @@ const MatatuOwnerDashboard = () => {
       ) : null}
 
       {activeTab === 'staff' ? (
-        <section className="card">
+        <>
+          <section className="card">
           <div className="topline">
             <h3 style={{ margin: 0 }}>Staff</h3>
             <span className="muted small">{staff.length} staff</span>
@@ -863,13 +862,11 @@ const MatatuOwnerDashboard = () => {
             )}
           </div>
         </section>
-      ) : null}
 
-      {activeTab === 'staff_logins' ? (
         <section className="card">
           <div className="topline">
             <h3 style={{ margin: 0 }}>Staff Logins</h3>
-            <span className="muted small">Create login credentials for staff</span>
+            <span className="muted small">Create or update login credentials for staff</span>
           </div>
           <div className="grid g2" style={{ marginTop: 8 }}>
             <label className="muted small">
@@ -949,9 +946,10 @@ const MatatuOwnerDashboard = () => {
             <span className="muted small">{loginMsg}</span>
           </div>
           <div className="muted small" style={{ marginTop: 8 }}>
-            This will create a staff profile and user login for the selected matatu.
+            This will create or update a login for the selected matatu staff.
           </div>
         </section>
+      </>
       ) : null}
 
       {activeTab === 'tx' ? (
