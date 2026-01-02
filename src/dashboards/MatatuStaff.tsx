@@ -44,6 +44,7 @@ const MatatuStaffDashboard = () => {
   const [manualNote, setManualNote] = useState("")
   const [manualMsg, setManualMsg] = useState("")
   const [manualEntries, setManualEntries] = useState<{ id: string; amount: number; note?: string; created_at: string }[]>([])
+  const [staffName, setStaffName] = useState("")
 
   const [accessGrants, setAccessGrants] = useState<AccessGrant[]>([])
   const [activeTab, setActiveTab] = useState<"overview" | "trips" | "transactions" | "vehicle_care">("overview")
@@ -118,6 +119,33 @@ const MatatuStaffDashboard = () => {
       }
     })()
   }, [])
+
+  useEffect(() => {
+    if (!saccoId || !user?.id) {
+      setStaffName("")
+      return
+    }
+    void (async () => {
+      try {
+        const res = await fetchJson<{ items?: Array<{ user_id?: string; name?: string; email?: string }> }>(
+          `/u/sacco/${encodeURIComponent(saccoId)}/staff`,
+        )
+        const items = res.items || []
+        const match =
+          items.find((s) => s.user_id === user.id) ||
+          items.find(
+            (s) =>
+              s.email &&
+              user.email &&
+              s.email.toString().trim().toLowerCase() === user.email.toString().trim().toLowerCase(),
+          ) ||
+          null
+        setStaffName(match?.name || "")
+      } catch {
+        setStaffName("")
+      }
+    })()
+  }, [fetchJson, saccoId, user?.id, user?.email])
 
   useEffect(() => {
     try {
@@ -216,15 +244,16 @@ const MatatuStaffDashboard = () => {
     void loadTransactions()
   }
 
+  const staffLabel = staffName || user?.name || (user?.email ? user.email.split("@")[0] : "") || "Staff"
   const heroRight = user?.role ? `Role: ${user.role}` : "Matatu Staff"
 
   return (
-    <DashboardShell title="Matatu Staff" subtitle="Trips & Cash" hideShellChrome>
+    <DashboardShell title="Matatu Staff" subtitle="Staff Dashboard" hideShellChrome>
       <div className="hero-bar" style={{ marginBottom: 16 }}>
         <div className="hero-left">
           <div className="hero-chip">MATATU STAFF</div>
-          <h2 style={{ margin: "6px 0 4px" }}>Trips & Cash</h2>
-          <div className="muted">Collect fares and manual cash on active routes</div>
+          <h2 style={{ margin: "6px 0 4px" }}>Hello, {staffLabel}</h2>
+          <div className="muted">Staff dashboard overview</div>
           <div className="hero-inline">
             <span className="sys-pill-lite">{todayKey()}</span>
             <span className="sys-pill-lite">{matatus.length} matatu(s)</span>
