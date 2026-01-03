@@ -2011,7 +2011,6 @@ router.post('/register-taxi', async (req,res)=>{
         key: PAYBILL_KEY_BY_KIND.TAXI_DRIVER,
         client,
       });
-      await client.query(`UPDATE taxis SET wallet_id = $1 WHERE id = $2`, [taxiWallet.id, data.id]);
       await client.query('COMMIT');
       return res.json({
         ...data,
@@ -2187,7 +2186,6 @@ router.post('/register-boda', async (req,res)=>{
         key: PAYBILL_KEY_BY_KIND.BODA_RIDER,
         client,
       });
-      await client.query(`UPDATE boda_bikes SET wallet_id = $1 WHERE id = $2`, [bodaWallet.id, data.id]);
       await client.query('COMMIT');
       return res.json({
         ...data,
