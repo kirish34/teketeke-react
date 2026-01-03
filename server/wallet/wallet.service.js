@@ -528,6 +528,10 @@ async function createWalletRecord({
     let walletRow = null;
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const code = generateVirtualAccountCode(entityType, baseRef + attempt);
+      const savepoint = `wallet_create_${attempt}`;
+      if (useClient?.query) {
+        await useClient.query(`SAVEPOINT ${savepoint}`);
+      }
       try {
         const walletRes = await useClient.query(
           `
@@ -540,8 +544,15 @@ async function createWalletRecord({
           [entityType, entityId, code, walletType, code, saccoId, matatuId, walletKind]
         );
         walletRow = walletRes.rows[0];
+        if (useClient?.query) {
+          await useClient.query(`RELEASE SAVEPOINT ${savepoint}`);
+        }
         break;
       } catch (e) {
+        if (useClient?.query) {
+          await useClient.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+          await useClient.query(`RELEASE SAVEPOINT ${savepoint}`);
+        }
         const msg = String(e.message || '').toLowerCase();
         if (msg.includes('duplicate') || msg.includes('unique')) continue;
         throw e;

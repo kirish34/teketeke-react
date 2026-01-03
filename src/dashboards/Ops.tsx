@@ -249,11 +249,12 @@ const OpsDashboard = () => {
             />
           </label>
           <label className="muted small">
-            Default till
+            Default till (optional)
             <input
               className="input"
               value={saccoForm.default_till}
               onChange={(e) => setSaccoForm((f) => ({ ...f, default_till: e.target.value }))}
+              placeholder="Optional (TekeTeke provides)"
             />
           </label>
           <label className="muted small">
@@ -410,11 +411,12 @@ const OpsDashboard = () => {
             />
           </label>
           <label className="muted small">
-            Till number
+            Till number (optional)
             <input
               className="input"
               value={matatuForm.till_number}
               onChange={(e) => setMatatuForm((f) => ({ ...f, till_number: e.target.value }))}
+              placeholder="Optional (TekeTeke provides)"
             />
           </label>
         </div>

@@ -2285,7 +2285,7 @@ const SystemDashboard = () => {
       seat_capacity: shouldShowSeatCapacity(vehicleType) || vehicleType === 'OTHER' ? seatCapacity : null,
       load_capacity_kg: shouldShowLoadCapacity(vehicleType) || vehicleType === 'OTHER' ? loadCapacity : null,
       operator_id: shuttleForm.operator_id || null,
-      till_number: shuttleForm.till_number.trim(),
+      till_number: shuttleForm.till_number.trim() || null,
     }
     if (!ownerPayload.full_name) {
       setShuttleMsg('Owner full name is required')
@@ -2327,10 +2327,6 @@ const SystemDashboard = () => {
       }
     } else if (loadCapacityInput && !loadCapacity) {
       setShuttleMsg('Load capacity must be a positive integer')
-      return
-    }
-    if (!shuttlePayload.till_number) {
-      setShuttleMsg('Till number is required')
       return
     }
     setShuttleMsg('Saving...')
@@ -2384,7 +2380,7 @@ const SystemDashboard = () => {
       seat_capacity: shouldShowSeatCapacity(vehicleType) || vehicleType === 'OTHER' ? seatCapacity : null,
       load_capacity_kg: shouldShowLoadCapacity(vehicleType) || vehicleType === 'OTHER' ? loadCapacity : null,
       operator_id: shuttleEditForm.operator_id || null,
-      till_number: shuttleEditForm.till_number.trim(),
+      till_number: shuttleEditForm.till_number.trim() || null,
     }
     if (!ownerPayload.full_name) {
       setShuttleEditMsg('Owner full name is required')
@@ -2426,10 +2422,6 @@ const SystemDashboard = () => {
       }
     } else if (loadCapacityInput && !loadCapacity) {
       setShuttleEditMsg('Load capacity must be a positive integer')
-      return
-    }
-    if (!shuttlePayload.till_number) {
-      setShuttleEditMsg('Till number is required')
       return
     }
     setShuttleEditMsg('Saving...')
@@ -4919,12 +4911,12 @@ const SystemDashboard = () => {
                   </select>
                 </label>
                 <label className="muted small">
-                  Till number *
+                  Till number (optional)
                   <input
                     className="input"
                     value={shuttleForm.till_number}
                     onChange={(e) => setShuttleForm((f) => ({ ...f, till_number: e.target.value }))}
-                    placeholder="Till or paybill"
+                    placeholder="Optional (TekeTeke provides)"
                   />
                 </label>
               </div>
@@ -5406,7 +5398,7 @@ const SystemDashboard = () => {
                                         </select>
                                       </label>
                                       <label className="muted small">
-                                        Till number *
+                                        Till number (optional)
                                         <input
                                           className="input"
                                           value={shuttleEditForm.till_number}
@@ -6756,12 +6748,12 @@ const SystemDashboard = () => {
                 />
               </label>
               <label className="muted small">
-                Settlement till / paybill
+                Settlement till / paybill (optional)
                 <input
                   className="input"
                   value={saccoForm.default_till}
                   onChange={(e) => setSaccoForm((f) => ({ ...f, default_till: e.target.value }))}
-                  placeholder="Paybill or till number"
+                  placeholder="Optional (TekeTeke provides)"
                 />
               </label>
               <label className="muted small">
@@ -6895,7 +6887,6 @@ const SystemDashboard = () => {
                   const errors: string[] = []
                   if (!displayName) errors.push('Operator display name is required')
                   if (!operatorTypeRaw) errors.push('Operator type is required')
-                  if (!defaultTill) errors.push('Settlement till/paybill is required')
                   if (!adminName) errors.push('Dashboard manager name is required')
                   if (!adminEmail || !isValidEmail(adminEmail)) errors.push('Valid admin email is required')
                   if (!adminPhone || !isValidKenyanPhone(adminPhone)) errors.push('Admin phone must be Kenyan format')
@@ -6925,7 +6916,7 @@ const SystemDashboard = () => {
                       contact_name: contactName || null,
                       contact_phone: contactPhone || null,
                       contact_email: contactEmail || null,
-                      default_till: defaultTill,
+                      default_till: defaultTill || null,
                       fee_label: feeLabel,
                       savings_enabled: saccoForm.savings_enabled,
                       loans_enabled: saccoForm.loans_enabled,
@@ -7106,7 +7097,7 @@ const SystemDashboard = () => {
                                       />
                                     </label>
                                     <label className="muted small">
-                                      Settlement till / paybill
+                                      Settlement till / paybill (optional)
                                       <input
                                         className="input"
                                         value={saccoEditForm.default_till}

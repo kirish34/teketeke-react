@@ -113,7 +113,11 @@ async function ensurePaybillAlias({ walletId, key, client } = {}) {
   }
 
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    const candidate = await allocatePaybillCode(key, { client: db });
+    const candidate = await allocatePaybillCode(key, { client });
+    const savepoint = `paybill_alias_${attempt}`;
+    if (client) {
+      await db.query(`SAVEPOINT ${savepoint}`);
+    }
     try {
       const insert = await db.query(
         `
@@ -123,8 +127,15 @@ async function ensurePaybillAlias({ walletId, key, client } = {}) {
         `,
         [walletId, candidate]
       );
+      if (client) {
+        await db.query(`RELEASE SAVEPOINT ${savepoint}`);
+      }
       return insert.rows[0].alias;
     } catch (err) {
+      if (client) {
+        await db.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+        await db.query(`RELEASE SAVEPOINT ${savepoint}`);
+      }
       const msg = String(err?.message || '').toLowerCase();
       if (msg.includes('duplicate') || msg.includes('unique')) continue;
       throw err;

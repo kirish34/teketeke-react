@@ -1680,7 +1680,6 @@ router.post('/register-shuttle', async (req,res)=>{
   if (!plate) return res.status(400).json({ error: 'plate required' });
   if (!operatorId) return res.status(400).json({ error: 'operator_id required' });
   if (!vehicleType) return res.status(400).json({ error: 'vehicle_type required' });
-  if (!tillNumber) return res.status(400).json({ error: 'till_number required' });
 
   const parsePositiveInt = (value) => {
     if (value === null || value === undefined || value === '') return null;
@@ -1727,7 +1726,7 @@ router.post('/register-shuttle', async (req,res)=>{
     vehicle_type_other: vehicleType === 'OTHER' && vehicleTypeOther ? vehicleTypeOther : null,
     seat_capacity: needsSeatCapacity || vehicleType === 'OTHER' ? seatCapacity : null,
     load_capacity_kg: needsLoadCapacity || vehicleType === 'OTHER' ? loadCapacity : null,
-    till_number: tillNumber,
+    till_number: tillNumber || null,
     owner_id: ownerData.id,
   };
   const { data, error } = await supabaseAdmin.from('shuttles').insert(shuttleRow).select().single();
@@ -1764,7 +1763,6 @@ router.post('/update-shuttle', async (req,res)=>{
   if (!plate) return res.status(400).json({ error: 'plate required' });
   if (!operatorId) return res.status(400).json({ error: 'operator_id required' });
   if (!vehicleType) return res.status(400).json({ error: 'vehicle_type required' });
-  if (!tillNumber) return res.status(400).json({ error: 'till_number required' });
 
   const parsePositiveInt = (value) => {
     if (value === null || value === undefined || value === '') return null;
@@ -1810,7 +1808,7 @@ router.post('/update-shuttle', async (req,res)=>{
     vehicle_type_other: vehicleType === 'OTHER' && vehicleTypeOther ? vehicleTypeOther : null,
     seat_capacity: needsSeatCapacity || vehicleType === 'OTHER' ? seatCapacity : null,
     load_capacity_kg: needsLoadCapacity || vehicleType === 'OTHER' ? loadCapacity : null,
-    till_number: tillNumber,
+    till_number: tillNumber || null,
   };
   const { error: shuttleError } = await supabaseAdmin.from('shuttles').update(shuttleUpdate).eq('id', id);
   if (shuttleError) return res.status(500).json({ error: shuttleError.message });
