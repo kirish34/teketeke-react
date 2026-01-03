@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import DashboardShell from '../components/DashboardShell'
+import PaybillCodeCard from '../components/PaybillCodeCard'
+import PaybillHeader from '../components/PaybillHeader'
 import { authFetch } from '../lib/auth'
 import { defaultOperatorType, getOperatorConfig, normalizeOperatorType, type OperatorType } from '../lib/operatorConfig'
 import PayoutHistory from '../pages/PayoutHistory'
@@ -67,17 +69,98 @@ type WithdrawalInlineEdit = {
 
 type C2bPaymentRow = {
   id?: string
-  mpesa_receipt?: string
-  phone_number?: string
+  receipt?: string
+  msisdn?: string
   amount?: number
   paybill_number?: string
   account_reference?: string
-  transaction_timestamp?: string
-  processed?: boolean
-  processed_at?: string
+  status?: string
+  created_at?: string
+}
+
+type PaybillAliasRow = {
+  wallet_id?: string
+  entity_type?: string
+  entity_id?: string
+  wallet_kind?: string
+  alias?: string
+  alias_type?: string
+}
+
+type ReconciliationPaybillRow = {
+  id?: string
+  date?: string
+  paybill_number?: string
+  credited_total?: number
+  credited_count?: number
+  quarantined_total?: number
+  quarantined_count?: number
+  rejected_total?: number
+  rejected_count?: number
+  created_at?: string
+  updated_at?: string
+}
+
+type ReconciliationChannelRow = {
+  id?: string
+  date?: string
+  channel?: 'C2B' | 'STK' | string
+  paybill_number?: string
+  credited_total?: number
+  credited_count?: number
+  quarantined_total?: number
+  quarantined_count?: number
+  rejected_total?: number
+  rejected_count?: number
+  created_at?: string
+  updated_at?: string
+}
+
+type ReconciliationCombinedRow = {
+  date?: string
+  credited_total?: number
+  credited_count?: number
+  quarantined_total?: number
+  quarantined_count?: number
+  rejected_total?: number
+  rejected_count?: number
+}
+
+type QuarantineRow = {
+  id?: string
+  receipt?: string
+  msisdn?: string
+  amount?: number
+  paybill_number?: string
+  account_reference?: string
+  status?: string
+  risk_level?: string
+  risk_score?: number
+  risk_flags?: Record<string, unknown>
+  created_at?: string
+}
+
+type OpsAlertRow = {
+  id?: string
+  created_at?: string
+  type?: string
+  severity?: string
+  entity_type?: string
+  entity_id?: string
+  payment_id?: string
+  message?: string
+  meta?: Record<string, unknown>
 }
 
 type C2bActionState = {
+  busy?: boolean
+  error?: string
+  msg?: string
+}
+
+type QuarantineActionState = {
+  wallet_id?: string
+  note?: string
   busy?: boolean
   error?: string
   msg?: string
@@ -192,6 +275,9 @@ type SystemTabId =
   | 'analytics'
   | 'finance'
   | 'c2b'
+  | 'reconciliation'
+  | 'quarantine'
+  | 'alerts'
   | 'payouts'
   | 'worker_monitor'
   | 'saccos'
@@ -455,8 +541,32 @@ async function deleteJson(url: string) {
 }
 
 const formatKes = (val?: number | null) => `KES ${(Number(val || 0)).toLocaleString('en-KE')}`
+const formatPercent = (val?: number | null) => `${(Number(val || 0) * 100).toFixed(1)}%`
 
 const WITHDRAW_STATUS_OPTIONS = ['PENDING', 'PROCESSING', 'SENT', 'SUCCESS', 'FAILED']
+
+function copyToClipboard(value: string) {
+  if (!value) return
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    void navigator.clipboard.writeText(value)
+    return
+  }
+  if (typeof document === 'undefined') return
+  const area = document.createElement('textarea')
+  area.value = value
+  area.style.position = 'fixed'
+  area.style.left = '-9999px'
+  document.body.appendChild(area)
+  area.focus()
+  area.select()
+  try {
+    document.execCommand('copy')
+  } catch {
+    // ignore
+  } finally {
+    document.body.removeChild(area)
+  }
+}
 
 function parseAmountInput(value: string) {
   const num = Number(value)
@@ -638,6 +748,26 @@ function createBodaBikeForm() {
 
 function normalizePhoneInput(value: string) {
   return String(value || '').replace(/\s+/g, '')
+}
+
+function normalizePlateInput(value: string) {
+  return String(value || '').trim().toUpperCase().replace(/\s+/g, '')
+}
+
+function isValidPlateInput(value: string) {
+  return /^[A-Z]{3}\d{3}[A-Z]$/.test(value)
+}
+
+function normalizeDigitsInput(value: string) {
+  return String(value || '').replace(/\D/g, '')
+}
+
+function isValidManualAccountCode(value: string) {
+  return /^\d{7}$/.test(value)
+}
+
+function isValidPaybillOrTill(value: string) {
+  return /^\d{5,7}$/.test(value)
 }
 
 function isValidEmail(value: string) {
@@ -885,6 +1015,8 @@ const SystemDashboard = () => {
   const [saccosError, setSaccosError] = useState<string | null>(null)
 
   const [matatus, setMatatus] = useState<VehicleRow[]>([])
+  const [paybillAliases, setPaybillAliases] = useState<PaybillAliasRow[]>([])
+  const [paybillAliasesError, setPaybillAliasesError] = useState<string | null>(null)
 
   const [finance, setFinance] = useState<FinanceOverview | null>(null)
   const [financeError, setFinanceError] = useState<string | null>(null)
@@ -907,6 +1039,32 @@ const SystemDashboard = () => {
   const [c2bError, setC2bError] = useState<string | null>(null)
   const [c2bActions, setC2bActions] = useState<Record<string, C2bActionState>>({})
   const [c2bRawState, setC2bRawState] = useState<Record<string, C2bRawState>>({})
+
+  const [reconFrom, setReconFrom] = useState(getRange('week').from)
+  const [reconTo, setReconTo] = useState(getRange('week').to)
+  const [reconPaybillRows, setReconPaybillRows] = useState<ReconciliationPaybillRow[]>([])
+  const [reconChannelRows, setReconChannelRows] = useState<ReconciliationChannelRow[]>([])
+  const [reconCombinedRows, setReconCombinedRows] = useState<ReconciliationCombinedRow[]>([])
+  const [reconView, setReconView] = useState<'combined' | 'c2b' | 'stk'>('combined')
+  const [reconError, setReconError] = useState<string | null>(null)
+
+  const [quarantineRiskLevel, setQuarantineRiskLevel] = useState('')
+  const [quarantineFlag, setQuarantineFlag] = useState('')
+  const [quarantineSearch, setQuarantineSearch] = useState('')
+  const [quarantinePage, setQuarantinePage] = useState(1)
+  const [quarantineLimit, setQuarantineLimit] = useState(50)
+  const [quarantineTotal, setQuarantineTotal] = useState(0)
+  const [quarantineRows, setQuarantineRows] = useState<QuarantineRow[]>([])
+  const [quarantineError, setQuarantineError] = useState<string | null>(null)
+  const [quarantineActions, setQuarantineActions] = useState<Record<string, QuarantineActionState>>({})
+
+  const [alertsSeverity, setAlertsSeverity] = useState('')
+  const [alertsType, setAlertsType] = useState('')
+  const [alertsPage, setAlertsPage] = useState(1)
+  const [alertsLimit, setAlertsLimit] = useState(50)
+  const [alertsTotal, setAlertsTotal] = useState(0)
+  const [alertsRows, setAlertsRows] = useState<OpsAlertRow[]>([])
+  const [alertsError, setAlertsError] = useState<string | null>(null)
 
   const [walletCode, setWalletCode] = useState('')
   const [walletSummary, setWalletSummary] = useState<WalletSummary | null>(null)
@@ -1090,6 +1248,9 @@ const SystemDashboard = () => {
     { id: 'registry', label: 'System Registry' },
     { id: 'finance', label: 'Finance' },
     { id: 'c2b', label: 'C2B Payments' },
+    { id: 'reconciliation', label: 'Reconciliation' },
+    { id: 'quarantine', label: 'Quarantine' },
+    { id: 'alerts', label: 'Alerts' },
     { id: 'payouts', label: 'B2C Payouts' },
     { id: 'worker_monitor', label: 'Worker Monitor' },
     { id: 'saccos', label: 'Operators' },
@@ -1812,6 +1973,69 @@ const SystemDashboard = () => {
     return { base, check, expected, valid }
   }, [ussdBindForm.ussd_code])
 
+  const paybillCodesBySaccoId = useMemo(() => {
+    const map = new Map<string, { fee?: string; loan?: string; savings?: string }>()
+    paybillAliases.forEach((row) => {
+      if (String(row.entity_type || '').toUpperCase() !== 'SACCO') return
+      if (row.alias_type !== 'PAYBILL_CODE') return
+      const id = row.entity_id || ''
+      if (!id) return
+      const entry = map.get(id) || {}
+      const kind = String(row.wallet_kind || '').toUpperCase()
+      if (kind === 'SACCO_DAILY_FEE') entry.fee = row.alias || ''
+      if (kind === 'SACCO_LOAN') entry.loan = row.alias || ''
+      if (kind === 'SACCO_SAVINGS') entry.savings = row.alias || ''
+      map.set(id, entry)
+    })
+    return map
+  }, [paybillAliases])
+
+  const paybillCodesByMatatuId = useMemo(() => {
+    const map = new Map<string, { owner?: string; vehicle?: string; plate?: string }>()
+    paybillAliases.forEach((row) => {
+      if (String(row.entity_type || '').toUpperCase() !== 'MATATU') return
+      const id = row.entity_id || ''
+      if (!id) return
+      const entry = map.get(id) || {}
+      const kind = String(row.wallet_kind || '').toUpperCase()
+      const aliasType = String(row.alias_type || '').toUpperCase()
+      if (aliasType === 'PAYBILL_CODE') {
+        if (kind === 'MATATU_OWNER') entry.owner = row.alias || ''
+        if (kind === 'MATATU_VEHICLE') entry.vehicle = row.alias || ''
+      }
+      if (aliasType === 'PLATE' && kind === 'MATATU_VEHICLE') {
+        entry.plate = row.alias || ''
+      }
+      map.set(id, entry)
+    })
+    return map
+  }, [paybillAliases])
+
+  const paybillCodesByTaxiId = useMemo(() => {
+    const map = new Map<string, { code?: string }>()
+    paybillAliases.forEach((row) => {
+      if (String(row.entity_type || '').toUpperCase() !== 'TAXI') return
+      if (String(row.alias_type || '').toUpperCase() !== 'PAYBILL_CODE') return
+      const id = row.entity_id || ''
+      if (!id) return
+      map.set(id, { code: row.alias || '' })
+    })
+    return map
+  }, [paybillAliases])
+
+  const paybillCodesByBodaId = useMemo(() => {
+    const map = new Map<string, { code?: string }>()
+    paybillAliases.forEach((row) => {
+      const entityType = String(row.entity_type || '').toUpperCase()
+      if (entityType !== 'BODA' && entityType !== 'BODABODA') return
+      if (String(row.alias_type || '').toUpperCase() !== 'PAYBILL_CODE') return
+      const id = row.entity_id || ''
+      if (!id) return
+      map.set(id, { code: row.alias || '' })
+    })
+    return map
+  }, [paybillAliases])
+
   const paybillRows = useMemo(() => {
     const rows: Array<{
       type: 'MATATU' | 'SACCO'
@@ -1821,11 +2045,18 @@ const SystemDashboard = () => {
       ussd_code: string
       ussd_assigned_at: string
       parent: string
+      owner_code?: string
+      vehicle_code?: string
+      plate_alias?: string
+      fee_code?: string
+      loan_code?: string
+      savings_code?: string
     }> = []
 
     matatus.forEach((row) => {
       if (!row.id) return
       const ussdRow = ussdByMatatuId.get(row.id)
+      const codes = paybillCodesByMatatuId.get(row.id)
       const sacco = row.sacco_id ? saccoById.get(row.sacco_id) : null
       const saccoName =
         row.sacco_name || sacco?.display_name || sacco?.name || sacco?.sacco_name || row.sacco || ''
@@ -1837,6 +2068,9 @@ const SystemDashboard = () => {
         ussd_code: ussdRow ? formatUssdCode(ussdRow) : '',
         ussd_assigned_at: ussdRow?.allocated_at || '',
         parent: saccoName,
+        owner_code: codes?.owner || '',
+        vehicle_code: codes?.vehicle || '',
+        plate_alias: codes?.plate || '',
       })
     })
 
@@ -1844,6 +2078,7 @@ const SystemDashboard = () => {
       const id = row.id || row.sacco_id
       if (!id) return
       const ussdRow = ussdBySaccoId.get(id)
+      const codes = paybillCodesBySaccoId.get(id)
       rows.push({
         type: 'SACCO',
         id,
@@ -1852,11 +2087,14 @@ const SystemDashboard = () => {
         ussd_code: ussdRow ? formatUssdCode(ussdRow) : '',
         ussd_assigned_at: ussdRow?.allocated_at || '',
         parent: '',
+        fee_code: codes?.fee || '',
+        loan_code: codes?.loan || '',
+        savings_code: codes?.savings || '',
       })
     })
 
     return rows
-  }, [matatus, saccos, saccoById, ussdByMatatuId, ussdBySaccoId])
+  }, [matatus, saccos, saccoById, ussdByMatatuId, ussdBySaccoId, paybillCodesByMatatuId, paybillCodesBySaccoId])
 
   const filteredPaybillRows = useMemo(() => {
     const q = paybillSearch.trim().toLowerCase()
@@ -2054,8 +2292,17 @@ const SystemDashboard = () => {
     const loadCapacityInput = shuttleForm.load_capacity_kg.trim()
     const seatCapacity = parsePositiveIntInput(seatCapacityInput)
     const loadCapacity = parsePositiveIntInput(loadCapacityInput)
+    const plate = normalizePlateInput(shuttleForm.plate)
+    if (!plate) {
+      setShuttleMsg('Shuttle plate/identifier is required')
+      return
+    }
+    if (!isValidPlateInput(plate)) {
+      setShuttleMsg('Plate must match format ABC123D')
+      return
+    }
     const shuttlePayload = {
-      plate: shuttleForm.plate.trim().toUpperCase(),
+      plate,
       make: shuttleForm.make.trim() || null,
       model: shuttleForm.model.trim() || null,
       year: parseYearInput(shuttleForm.year),
@@ -2080,10 +2327,6 @@ const SystemDashboard = () => {
     }
     if (!isValidKenyanPhone(ownerPayload.phone)) {
       setShuttleMsg('Enter a valid Kenyan phone number')
-      return
-    }
-    if (!shuttlePayload.plate) {
-      setShuttleMsg('Shuttle plate/identifier is required')
       return
     }
     if (!shuttlePayload.operator_id) {
@@ -2148,8 +2391,17 @@ const SystemDashboard = () => {
     const loadCapacityInput = shuttleEditForm.load_capacity_kg.trim()
     const seatCapacity = parsePositiveIntInput(seatCapacityInput)
     const loadCapacity = parsePositiveIntInput(loadCapacityInput)
+    const plate = normalizePlateInput(shuttleEditForm.plate)
+    if (!plate) {
+      setShuttleEditMsg('Shuttle plate/identifier is required')
+      return
+    }
+    if (!isValidPlateInput(plate)) {
+      setShuttleEditMsg('Plate must match format ABC123D')
+      return
+    }
     const shuttlePayload = {
-      plate: shuttleEditForm.plate.trim().toUpperCase(),
+      plate,
       make: shuttleEditForm.make.trim() || null,
       model: shuttleEditForm.model.trim() || null,
       year: parseYearInput(shuttleEditForm.year),
@@ -2174,10 +2426,6 @@ const SystemDashboard = () => {
     }
     if (!isValidKenyanPhone(ownerPayload.phone)) {
       setShuttleEditMsg('Enter a valid Kenyan phone number')
-      return
-    }
-    if (!shuttlePayload.plate) {
-      setShuttleEditMsg('Shuttle plate/identifier is required')
       return
     }
     if (!shuttlePayload.operator_id) {
@@ -2306,8 +2554,17 @@ const SystemDashboard = () => {
     const category = normalizeTaxiCategory(taxiForm.category)
     const seatCapacityInput = taxiForm.seat_capacity.trim()
     const seatCapacity = parsePositiveIntInput(seatCapacityInput)
+    const plate = normalizePlateInput(taxiForm.plate)
+    if (!plate) {
+      setTaxiMsg('Taxi plate/identifier is required')
+      return
+    }
+    if (!isValidPlateInput(plate)) {
+      setTaxiMsg('Plate must match format ABC123D')
+      return
+    }
     const taxiPayload = {
-      plate: taxiForm.plate.trim().toUpperCase(),
+      plate,
       make: taxiForm.make.trim() || null,
       model: taxiForm.model.trim() || null,
       year: parseYearInput(taxiForm.year),
@@ -2333,10 +2590,6 @@ const SystemDashboard = () => {
       setTaxiMsg('Enter a valid Kenyan phone number')
       return
     }
-    if (!taxiPayload.plate) {
-      setTaxiMsg('Taxi plate/identifier is required')
-      return
-    }
     if (!taxiPayload.operator_id) {
       setTaxiMsg('Operator is required')
       return
@@ -2358,6 +2611,7 @@ const SystemDashboard = () => {
       setTaxiMsg('Taxi registered')
       resetTaxiFormState()
       await loadTaxis()
+      await loadPaybillAliases()
     } catch (err) {
       setTaxiMsg(err instanceof Error ? err.message : 'Create failed')
     }
@@ -2377,8 +2631,17 @@ const SystemDashboard = () => {
     const category = normalizeTaxiCategory(taxiEditForm.category)
     const seatCapacityInput = taxiEditForm.seat_capacity.trim()
     const seatCapacity = parsePositiveIntInput(seatCapacityInput)
+    const plate = normalizePlateInput(taxiEditForm.plate)
+    if (!plate) {
+      setTaxiEditMsg('Taxi plate/identifier is required')
+      return
+    }
+    if (!isValidPlateInput(plate)) {
+      setTaxiEditMsg('Plate must match format ABC123D')
+      return
+    }
     const taxiPayload = {
-      plate: taxiEditForm.plate.trim().toUpperCase(),
+      plate,
       make: taxiEditForm.make.trim() || null,
       model: taxiEditForm.model.trim() || null,
       year: parseYearInput(taxiEditForm.year),
@@ -2402,10 +2665,6 @@ const SystemDashboard = () => {
     }
     if (!isValidKenyanPhone(ownerPayload.phone)) {
       setTaxiEditMsg('Enter a valid Kenyan phone number')
-      return
-    }
-    if (!taxiPayload.plate) {
-      setTaxiEditMsg('Taxi plate/identifier is required')
       return
     }
     if (!taxiPayload.operator_id) {
@@ -2559,6 +2818,7 @@ const SystemDashboard = () => {
       setBodaMsg('Boda registered')
       resetBodaFormState()
       await loadBodaBikes()
+      await loadPaybillAliases()
     } catch (err) {
       setBodaMsg(err instanceof Error ? err.message : 'Create failed')
     }
@@ -2840,6 +3100,200 @@ const SystemDashboard = () => {
     void loadC2bRaw(id)
   }
 
+  async function loadReconciliation({
+    from,
+    to,
+  }: {
+    from?: string
+    to?: string
+  } = {}) {
+    const fromValue = from ?? reconFrom
+    const toValue = to ?? reconTo
+    if (from !== undefined) setReconFrom(fromValue)
+    if (to !== undefined) setReconTo(toValue)
+    try {
+      const params = new URLSearchParams()
+      if (fromValue) params.set('from', fromValue)
+      if (toValue) params.set('to', toValue)
+      const res = await fetchJson<{
+        paybill_c2b?: ReconciliationPaybillRow[]
+        channels?: ReconciliationChannelRow[]
+        combined?: ReconciliationCombinedRow[]
+      }>(
+        `/api/admin/reconciliation?${params.toString()}`,
+      )
+      setReconPaybillRows(res.paybill_c2b || [])
+      setReconChannelRows(res.channels || [])
+      setReconCombinedRows(res.combined || [])
+      setReconError(null)
+    } catch (err) {
+      setReconPaybillRows([])
+      setReconChannelRows([])
+      setReconCombinedRows([])
+      setReconError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const reconC2bMap = useMemo(() => {
+    const map: Record<string, ReconciliationPaybillRow> = {}
+    reconPaybillRows.forEach((row) => {
+      if (!row.date) return
+      map[row.date] = row
+    })
+    return map
+  }, [reconPaybillRows])
+
+  const reconStkMap = useMemo(() => {
+    const map: Record<string, ReconciliationChannelRow> = {}
+    reconChannelRows.forEach((row) => {
+      if (!row.date || row.channel !== 'STK') return
+      map[row.date] = row
+    })
+    return map
+  }, [reconChannelRows])
+
+  const reconCombinedMap = useMemo(() => {
+    const map: Record<string, ReconciliationCombinedRow> = {}
+    reconCombinedRows.forEach((row) => {
+      if (!row.date) return
+      map[row.date] = row
+    })
+    return map
+  }, [reconCombinedRows])
+
+  const reconDates = useMemo(() => {
+    const set = new Set<string>()
+    reconCombinedRows.forEach((row) => {
+      if (row.date) set.add(row.date)
+    })
+    reconPaybillRows.forEach((row) => {
+      if (row.date) set.add(row.date)
+    })
+    reconChannelRows.forEach((row) => {
+      if (row.date && row.channel === 'STK') set.add(row.date)
+    })
+    return Array.from(set).sort((a, b) => (a < b ? 1 : -1))
+  }, [reconCombinedRows, reconPaybillRows, reconChannelRows])
+
+  function updateQuarantineAction(id: string, patch: Partial<QuarantineActionState>) {
+    setQuarantineActions((prev) => ({
+      ...prev,
+      [id]: { ...(prev[id] || {}), ...patch },
+    }))
+  }
+
+  async function loadQuarantine({
+    page,
+    limit,
+    riskLevel,
+    flag,
+    search,
+  }: {
+    page?: number
+    limit?: number
+    riskLevel?: string
+    flag?: string
+    search?: string
+  } = {}) {
+    const pageValue = page !== undefined ? page : quarantinePage
+    const limitValue = limit !== undefined ? limit : quarantineLimit
+    const riskValue = riskLevel !== undefined ? riskLevel : quarantineRiskLevel
+    const flagValue = flag !== undefined ? flag : quarantineFlag
+    const searchValue = search !== undefined ? search : quarantineSearch
+
+    if (page !== undefined) setQuarantinePage(pageValue)
+    if (limit !== undefined) setQuarantineLimit(limitValue)
+    if (riskLevel !== undefined) setQuarantineRiskLevel(riskValue)
+    if (flag !== undefined) setQuarantineFlag(flagValue)
+    if (search !== undefined) setQuarantineSearch(searchValue)
+
+    try {
+      const params = new URLSearchParams()
+      params.set('status', 'QUARANTINED')
+      if (riskValue) params.set('risk_level', riskValue)
+      if (flagValue) params.set('flag', flagValue)
+      if (searchValue.trim()) params.set('q', searchValue.trim())
+      params.set('limit', String(limitValue))
+      params.set('offset', String(Math.max(0, (pageValue - 1) * limitValue)))
+      const res = await fetchJson<{ items?: QuarantineRow[]; total?: number }>(
+        `/api/admin/c2b/quarantine?${params.toString()}`,
+      )
+      setQuarantineRows(res.items || [])
+      setQuarantineTotal(res.total || 0)
+      setQuarantineError(null)
+    } catch (err) {
+      setQuarantineRows([])
+      setQuarantineTotal(0)
+      setQuarantineError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function resolveQuarantine(id: string, action: 'CREDIT' | 'REJECT') {
+    if (!id) return
+    const current = quarantineActions[id] || {}
+    updateQuarantineAction(id, { busy: true, error: '', msg: '' })
+    try {
+      const payload: Record<string, unknown> = {
+        action,
+        note: current.note?.trim() || null,
+      }
+      if (current.wallet_id?.trim()) payload.wallet_id = current.wallet_id.trim()
+      const res = await sendJson<{ message?: string }>(
+        `/api/admin/c2b/${encodeURIComponent(id)}/resolve`,
+        'POST',
+        payload,
+      )
+      updateQuarantineAction(id, { busy: false, error: '', msg: res?.message || 'Resolved' })
+      await loadQuarantine({ page: quarantinePage })
+    } catch (err) {
+      updateQuarantineAction(id, {
+        busy: false,
+        error: err instanceof Error ? err.message : 'Resolve failed',
+        msg: '',
+      })
+    }
+  }
+
+  async function loadAlerts({
+    page,
+    limit,
+    severity,
+    type,
+  }: {
+    page?: number
+    limit?: number
+    severity?: string
+    type?: string
+  } = {}) {
+    const pageValue = page !== undefined ? page : alertsPage
+    const limitValue = limit !== undefined ? limit : alertsLimit
+    const severityValue = severity !== undefined ? severity : alertsSeverity
+    const typeValue = type !== undefined ? type : alertsType
+
+    if (page !== undefined) setAlertsPage(pageValue)
+    if (limit !== undefined) setAlertsLimit(limitValue)
+    if (severity !== undefined) setAlertsSeverity(severityValue)
+    if (type !== undefined) setAlertsType(typeValue)
+
+    try {
+      const params = new URLSearchParams()
+      if (severityValue) params.set('severity', severityValue)
+      if (typeValue) params.set('type', typeValue)
+      params.set('limit', String(limitValue))
+      params.set('offset', String(Math.max(0, (pageValue - 1) * limitValue)))
+      const res = await fetchJson<{ items?: OpsAlertRow[]; total?: number }>(
+        `/api/admin/ops-alerts?${params.toString()}`,
+      )
+      setAlertsRows(res.items || [])
+      setAlertsTotal(res.total || 0)
+      setAlertsError(null)
+    } catch (err) {
+      setAlertsRows([])
+      setAlertsTotal(0)
+      setAlertsError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   useEffect(() => {
     if (!routeMapOpen || !routeEditId) return
     let cancelled = false
@@ -2889,6 +3343,19 @@ const SystemDashboard = () => {
     if (routeMapOpen) syncRouteMap()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [parsedRoutePoints])
+
+  useEffect(() => {
+    if (activeTab === 'reconciliation') {
+      void loadReconciliation()
+    }
+    if (activeTab === 'quarantine') {
+      void loadQuarantine({ page: 1 })
+    }
+    if (activeTab === 'alerts') {
+      void loadAlerts({ page: 1 })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab])
 
   async function loadWallet(code: string) {
     const clean = code.trim()
@@ -3080,25 +3547,23 @@ const SystemDashboard = () => {
   function exportC2bCsv() {
     const headers: CsvHeader[] = [
       { key: 'id', label: 'ID' },
-      { key: 'mpesa_receipt', label: 'M-Pesa Receipt' },
-      { key: 'phone_number', label: 'Phone' },
+      { key: 'receipt', label: 'M-Pesa Receipt' },
+      { key: 'msisdn', label: 'Phone' },
       { key: 'amount', label: 'Amount' },
       { key: 'paybill_number', label: 'Paybill' },
       { key: 'account_reference', label: 'Account' },
-      { key: 'transaction_timestamp', label: 'Transaction Time' },
-      { key: 'processed', label: 'Processed' },
-      { key: 'processed_at', label: 'Processed At' },
+      { key: 'status', label: 'Status' },
+      { key: 'created_at', label: 'Created At' },
     ]
     const rows: CsvRow[] = c2bRows.map((row) => ({
       id: row.id || '',
-      mpesa_receipt: row.mpesa_receipt || '',
-      phone_number: row.phone_number || '',
+      receipt: row.receipt || '',
+      msisdn: row.msisdn || '',
       amount: row.amount ?? 0,
       paybill_number: row.paybill_number || '',
       account_reference: row.account_reference || '',
-      transaction_timestamp: row.transaction_timestamp || '',
-      processed: row.processed ? 'true' : 'false',
-      processed_at: row.processed_at || '',
+      status: row.status || '',
+      created_at: row.created_at || '',
     }))
     const csv = buildCsv(headers, rows)
     downloadFile('c2b-payments.csv', csv, 'text/csv;charset=utf-8;')
@@ -3295,7 +3760,7 @@ const SystemDashboard = () => {
     setPaybillMsg('Saving...')
     const level = paybillForm.level
     const targetId = level === 'MATATU' ? paybillForm.matatu_id : paybillForm.sacco_id
-    const paybillAccount = paybillForm.paybill_account.trim()
+    const paybillAccount = normalizeDigitsInput(paybillForm.paybill_account)
     const ussdInput = paybillForm.ussd_code.trim()
 
     if (!targetId) {
@@ -3304,6 +3769,14 @@ const SystemDashboard = () => {
     }
     if (!paybillAccount) {
       setPaybillMsg('Enter a paybill account')
+      return
+    }
+    if (level === 'MATATU' && !isValidManualAccountCode(paybillAccount)) {
+      setPaybillMsg('Manual account code must be 7 digits')
+      return
+    }
+    if (level === 'SACCO' && !isValidPaybillOrTill(paybillAccount)) {
+      setPaybillMsg('Paybill/Till must be 5-7 digits')
       return
     }
 
@@ -3370,6 +3843,7 @@ const SystemDashboard = () => {
 
   async function refreshPaybillData() {
     await loadUssd()
+    await loadPaybillAliases()
     try {
       const rows = await fetchList<SaccoRow>('/api/admin/saccos')
       setSaccos(rows)
@@ -3554,6 +4028,17 @@ const SystemDashboard = () => {
     }
   }
 
+  async function loadPaybillAliases() {
+    try {
+      const rows = await fetchList<PaybillAliasRow>('/api/admin/paybill-codes')
+      setPaybillAliases(rows)
+      setPaybillAliasesError(null)
+    } catch (err) {
+      setPaybillAliases([])
+      setPaybillAliasesError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
 
 
 
@@ -3632,6 +4117,7 @@ const SystemDashboard = () => {
       fetchList<VehicleRow>('/api/admin/matatus')
         .then((rows) => setMatatus(rows))
         .catch((err) => console.warn('matatu load failed', err))
+      await loadPaybillAliases()
       Promise.all([
         fetchJson<PlatformTotals>(
           '/api/admin/platform-overview?from=' + getRange('today').from + '&to=' + getRange('today').to,
@@ -4249,7 +4735,7 @@ const SystemDashboard = () => {
     const normalizedType = normalizeShuttleType(shuttleForm.vehicle_type)
     const showSeatCapacity = shouldShowSeatCapacity(normalizedType) || normalizedType === 'OTHER'
     const showLoadCapacity = shouldShowLoadCapacity(normalizedType) || normalizedType === 'OTHER'
-    const shuttlesTableColSpan = 15
+    const shuttlesTableColSpan = 16
     return (
       <>
         <section className="card">
@@ -4564,6 +5050,7 @@ const SystemDashboard = () => {
                   <th>Operator</th>
                   <th>TLB/License</th>
                   <th>Till</th>
+                  <th>PayBill accounts</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -4586,6 +5073,7 @@ const SystemDashboard = () => {
                       : row.load_capacity_kg
                         ? `${row.load_capacity_kg} kg`
                         : '-'
+                    const paybillCodes = row.id ? paybillCodesByMatatuId.get(row.id) : null
                     const age = getVehicleAge(row.year)
                     const riskScore = getRiskScoreForAge(age)
                     const maintenanceCount = row.id ? maintenanceCountsByShuttle.get(row.id) || 0 : 0
@@ -4665,6 +5153,25 @@ const SystemDashboard = () => {
                           <td>{operatorLabelFor(row)}</td>
                           <td>{row.tlb_license || '-'}</td>
                           <td>{row.till_number || '-'}</td>
+                          <td>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              <PaybillCodeCard
+                                variant="inline"
+                                label="OWNER Account"
+                                code={paybillCodes?.owner || ''}
+                              />
+                              <PaybillCodeCard
+                                variant="inline"
+                                label="MATATU Account"
+                                code={paybillCodes?.vehicle || ''}
+                              />
+                              <PaybillCodeCard
+                                variant="inline"
+                                label="STK/USSD Reference (Plate)"
+                                code={paybillCodes?.plate || ''}
+                              />
+                            </div>
+                          </td>
                           <td>
                             <div className="row" style={{ gap: 6 }}>
                               <button className="btn ghost" type="button" onClick={() => startShuttleEdit(row)}>
@@ -4972,7 +5479,7 @@ const SystemDashboard = () => {
         taxiOperatorFilter
       : 'All operators'
     const taxiCategory = normalizeTaxiCategory(taxiForm.category)
-    const taxiTableColSpan = 11
+    const taxiTableColSpan = 12
     return (
       <>
         <section className="card">
@@ -5240,6 +5747,7 @@ const SystemDashboard = () => {
                   <th>Year</th>
                   <th>Operator</th>
                   <th>Till</th>
+                  <th>PayBill account</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -5258,6 +5766,7 @@ const SystemDashboard = () => {
                       rowCategory === 'OTHER' ? `OTHER${row.category_other ? ` (${row.category_other})` : ''}` : rowCategory || '-'
                     // TODO: Use seat capacity for fleet analysis, revenue per seat, utilization, and operator comparisons.
                     const seatLabel = row.seat_capacity ? String(row.seat_capacity) : '-'
+                    const taxiCode = row.id ? paybillCodesByTaxiId.get(row.id)?.code || '' : ''
                     return (
                       <Fragment key={row.id || row.plate}>
                         <tr>
@@ -5271,6 +5780,9 @@ const SystemDashboard = () => {
                           <td>{row.year || '-'}</td>
                           <td>{operatorLabelFromParts(row.operator_id || row.operator?.id || '', row.operator || null)}</td>
                           <td>{row.till_number || '-'}</td>
+                          <td>
+                            <PaybillCodeCard variant="inline" label="TAXI Account (Driver)" code={taxiCode} />
+                          </td>
                           <td>
                             <div className="row" style={{ gap: 6 }}>
                               <button className="btn ghost" type="button" onClick={() => startTaxiEdit(row)}>
@@ -5517,7 +6029,7 @@ const SystemDashboard = () => {
         operatorOptions.find((row) => row.id === bodaOperatorFilter)?.label ||
         bodaOperatorFilter
       : 'All operators'
-    const bodaTableColSpan = 12
+    const bodaTableColSpan = 13
     return (
       <>
         <section className="card">
@@ -5776,6 +6288,7 @@ const SystemDashboard = () => {
                   <th>Till</th>
                   <th>License</th>
                   <th>Compliance</th>
+                  <th>PayBill account</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -5792,6 +6305,7 @@ const SystemDashboard = () => {
                     const compliance = [row.has_helmet ? 'Helmet' : '', row.has_reflector ? 'Reflector' : '']
                       .filter(Boolean)
                       .join(', ')
+                    const bodaCode = row.id ? paybillCodesByBodaId.get(row.id)?.code || '' : ''
                     return (
                       <Fragment key={row.id || row.identifier}>
                         <tr>
@@ -5806,6 +6320,9 @@ const SystemDashboard = () => {
                           <td>{row.till_number || '-'}</td>
                           <td>{row.license_no || '-'}</td>
                           <td>{compliance || '-'}</td>
+                          <td>
+                            <PaybillCodeCard variant="inline" label="BODA Account (Rider)" code={bodaCode} />
+                          </td>
                           <td>
                             <div className="row" style={{ gap: 6 }}>
                               <button className="btn ghost" type="button" onClick={() => startBodaEdit(row)}>
@@ -6458,6 +6975,7 @@ const SystemDashboard = () => {
                     await fetchList<SaccoRow>('/api/admin/saccos')
                       .then((rows) => setSaccos(rows))
                       .catch((err) => setSaccosError(err instanceof Error ? err.message : String(err)))
+                    await loadPaybillAliases()
                     if (createdUser?.temp_password) {
                       const loginEmail = createdUser.email || adminEmail
                       try {
@@ -6511,6 +7029,7 @@ const SystemDashboard = () => {
                     <th>Email</th>
                     <th>Settlement</th>
                     <th>Status</th>
+                    <th>PayBill codes</th>
                     <th>ID</th>
                     <th>Actions</th>
                   </tr>
@@ -6518,7 +7037,7 @@ const SystemDashboard = () => {
                 <tbody>
                   {saccos.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="muted">
+                      <td colSpan={9} className="muted">
                         No operators yet.
                       </td>
                     </tr>
@@ -6526,6 +7045,7 @@ const SystemDashboard = () => {
                     saccos.map((sacco) => {
                       const saccoId = sacco.id || sacco.sacco_id || ''
                       const isEditing = !!saccoId && saccoEditId === saccoId
+                      const codes = saccoId ? paybillCodesBySaccoId.get(saccoId) : null
                       return (
                         <Fragment key={sacco.id || sacco.sacco_id || sacco.email}>
                           <tr>
@@ -6535,6 +7055,25 @@ const SystemDashboard = () => {
                             <td>{sacco.email || sacco.contact_email || '-'}</td>
                             <td>{sacco.default_till || '-'}</td>
                             <td>{sacco.status || 'ACTIVE'}</td>
+                            <td>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                <PaybillCodeCard
+                                  variant="inline"
+                                  label="SACCO FEE Account"
+                                  code={codes?.fee || ''}
+                                />
+                                <PaybillCodeCard
+                                  variant="inline"
+                                  label="SACCO LOAN Account"
+                                  code={codes?.loan || ''}
+                                />
+                                <PaybillCodeCard
+                                  variant="inline"
+                                  label="SACCO SAVINGS Account"
+                                  code={codes?.savings || ''}
+                                />
+                              </div>
+                            </td>
                             <td>{saccoId || '-'}</td>
                             <td>
                               <div className="row" style={{ gap: 6 }}>
@@ -6554,7 +7093,7 @@ const SystemDashboard = () => {
                           </tr>
                           {isEditing ? (
                             <tr>
-                              <td colSpan={8}>
+                              <td colSpan={9}>
                                 <div className="card" style={{ margin: '6px 0' }}>
                                   <div className="topline">
                                     <h3 style={{ margin: 0 }}>Edit Operator</h3>
@@ -7093,8 +7632,10 @@ const SystemDashboard = () => {
                 onChange={(e) => loadC2bPayments({ status: e.target.value, page: 1 })}
               >
                 <option value="">Any</option>
-                <option value="pending">Pending</option>
-                <option value="processed">Processed</option>
+                <option value="RECEIVED">Received</option>
+                <option value="CREDITED">Credited</option>
+                <option value="REJECTED">Rejected</option>
+                <option value="QUARANTINED">Quarantined</option>
               </select>
             </label>
             <input
@@ -7171,14 +7712,13 @@ const SystemDashboard = () => {
                 <th>Paybill</th>
                 <th>Account</th>
                 <th>Status</th>
-                <th>Processed at</th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody>
               {c2bRows.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="muted">
+                  <td colSpan={8} className="muted">
                     No C2B payments found.
                   </td>
                 </tr>
@@ -7187,23 +7727,20 @@ const SystemDashboard = () => {
                   const id = row.id || ''
                   const action = id ? c2bActions[id] : null
                   const rawState = id ? c2bRawState[id] : null
-                  const processed = !!row.processed
+                  const processed = row.status === 'CREDITED'
                   const open = !!rawState?.open
                   return (
-                    <Fragment key={id || row.mpesa_receipt || row.transaction_timestamp}>
+                    <Fragment key={id || row.receipt || row.created_at}>
                       <tr>
                         <td className="mono">
-                          {row.transaction_timestamp ? new Date(row.transaction_timestamp).toLocaleString() : '-'}
+                          {row.created_at ? new Date(row.created_at).toLocaleString() : '-'}
                         </td>
-                        <td className="mono">{row.mpesa_receipt || row.id || '-'}</td>
-                        <td>{row.phone_number || '-'}</td>
+                        <td className="mono">{row.receipt || row.id || '-'}</td>
+                        <td>{row.msisdn || '-'}</td>
                         <td>{formatKes(row.amount)}</td>
                         <td>{row.paybill_number || '-'}</td>
                         <td className="mono">{row.account_reference || '-'}</td>
-                        <td>{processed ? 'Processed' : 'Pending'}</td>
-                        <td className="mono">
-                          {row.processed_at ? new Date(row.processed_at).toLocaleString() : '-'}
-                        </td>
+                        <td>{row.status || '-'}</td>
                         <td>
                           <div style={{ display: 'grid', gap: 6 }}>
                             <button
@@ -7233,7 +7770,7 @@ const SystemDashboard = () => {
                       </tr>
                       {open ? (
                         <tr>
-                          <td colSpan={9}>
+                          <td colSpan={8}>
                             {rawState?.loading ? (
                               <div className="muted small">Loading raw payload...</div>
                             ) : rawState?.error ? (
@@ -7619,6 +8156,514 @@ const SystemDashboard = () => {
         </>
       ) : null}
 
+      {activeTab === 'reconciliation' ? (
+        <>
+      <section className="card">
+        <div className="topline">
+          <h3 style={{ margin: 0 }}>Daily reconciliation</h3>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn ghost" type="button" onClick={() => loadReconciliation()}>
+              Refresh
+            </button>
+          </div>
+        </div>
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+          <label className="muted small">
+            From
+            <input
+              type="date"
+              value={reconFrom}
+              onChange={(e) => setReconFrom(e.target.value)}
+              style={{ padding: 8, marginLeft: 6 }}
+            />
+          </label>
+          <label className="muted small">
+            To
+            <input
+              type="date"
+              value={reconTo}
+              onChange={(e) => setReconTo(e.target.value)}
+              style={{ padding: 8, marginLeft: 6 }}
+            />
+          </label>
+          <button className="btn ghost" type="button" onClick={() => loadReconciliation({ from: reconFrom, to: reconTo })}>
+            Apply
+          </button>
+          <label className="muted small">
+            View
+            <select
+              value={reconView}
+              onChange={(e) => setReconView(e.target.value as 'combined' | 'c2b' | 'stk')}
+              style={{ marginLeft: 6 }}
+            >
+              <option value="combined">Combined</option>
+              <option value="c2b">C2B only</option>
+              <option value="stk">STK only</option>
+            </select>
+          </label>
+        </div>
+        {reconError ? <div className="err">Reconciliation error: {reconError}</div> : null}
+        <div className="table-wrap" style={{ marginTop: 8 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                {reconView === 'combined' ? (
+                  <>
+                    <th>C2B 4814003 credited</th>
+                    <th>C2B 4814003 quarantined</th>
+                    <th>C2B 4814003 rejected</th>
+                    <th>STK credited</th>
+                    <th>STK quarantined</th>
+                    <th>STK rejected</th>
+                    <th>Combined credited</th>
+                    <th>Combined quarantined</th>
+                    <th>Combined rejected</th>
+                  </>
+                ) : (
+                  <>
+                    <th>Credited</th>
+                    <th>Quarantined</th>
+                    <th>Rejected</th>
+                  </>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {reconDates.length === 0 && reconView === 'combined' ? (
+                <tr>
+                  <td colSpan={10} className="muted">
+                    No reconciliation data found.
+                  </td>
+                </tr>
+              ) : reconView === 'c2b' && reconPaybillRows.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="muted">
+                    No reconciliation data found.
+                  </td>
+                </tr>
+              ) : reconView === 'stk' && reconChannelRows.filter((row) => row.channel === 'STK').length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="muted">
+                    No reconciliation data found.
+                  </td>
+                </tr>
+              ) : (
+                <>
+                  {reconView === 'combined'
+                    ? reconDates.map((date) => {
+                        const c2b = reconC2bMap[date] || {}
+                        const stk = reconStkMap[date] || {}
+                        const combined = reconCombinedMap[date] || {}
+                        return (
+                          <tr key={date}>
+                            <td className="mono">{date}</td>
+                            <td>
+                              {formatKes(c2b.credited_total)} ({c2b.credited_count || 0})
+                            </td>
+                            <td>
+                              {formatKes(c2b.quarantined_total)} ({c2b.quarantined_count || 0})
+                            </td>
+                            <td>
+                              {formatKes(c2b.rejected_total)} ({c2b.rejected_count || 0})
+                            </td>
+                            <td>
+                              {formatKes(stk.credited_total)} ({stk.credited_count || 0})
+                            </td>
+                            <td>
+                              {formatKes(stk.quarantined_total)} ({stk.quarantined_count || 0})
+                            </td>
+                            <td>
+                              {formatKes(stk.rejected_total)} ({stk.rejected_count || 0})
+                            </td>
+                            <td>
+                              {formatKes(combined.credited_total)} ({combined.credited_count || 0})
+                            </td>
+                            <td>
+                              {formatKes(combined.quarantined_total)} ({combined.quarantined_count || 0})
+                            </td>
+                            <td>
+                              {formatKes(combined.rejected_total)} ({combined.rejected_count || 0})
+                            </td>
+                          </tr>
+                        )
+                      })
+                    : null}
+                  {reconView === 'c2b'
+                    ? reconPaybillRows.map((row) => (
+                        <tr key={row.id || row.date}>
+                          <td className="mono">{row.date || '-'}</td>
+                          <td>
+                            {formatKes(row.credited_total)} ({row.credited_count || 0})
+                          </td>
+                          <td>
+                            {formatKes(row.quarantined_total)} ({row.quarantined_count || 0})
+                          </td>
+                          <td>
+                            {formatKes(row.rejected_total)} ({row.rejected_count || 0})
+                          </td>
+                        </tr>
+                      ))
+                    : null}
+                  {reconView === 'stk'
+                    ? reconChannelRows
+                        .filter((row) => row.channel === 'STK')
+                        .map((row) => (
+                          <tr key={row.id || row.date}>
+                            <td className="mono">{row.date || '-'}</td>
+                            <td>
+                              {formatKes(row.credited_total)} ({row.credited_count || 0})
+                            </td>
+                            <td>
+                              {formatKes(row.quarantined_total)} ({row.quarantined_count || 0})
+                            </td>
+                            <td>
+                              {formatKes(row.rejected_total)} ({row.rejected_count || 0})
+                            </td>
+                          </tr>
+                        ))
+                    : null}
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+        </>
+      ) : null}
+
+      {activeTab === 'quarantine' ? (
+        <>
+      <section className="card">
+        <div className="topline">
+          <h3 style={{ margin: 0 }}>Quarantined payments</h3>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn ghost" type="button" onClick={() => loadQuarantine({ page: 1 })}>
+              Refresh
+            </button>
+          </div>
+        </div>
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+          <label className="muted small">
+            Risk level
+            <select
+              value={quarantineRiskLevel}
+              onChange={(e) => loadQuarantine({ riskLevel: e.target.value, page: 1 })}
+              style={{ padding: 8, marginLeft: 6 }}
+            >
+              <option value="">Any</option>
+              <option value="LOW">LOW</option>
+              <option value="MEDIUM">MEDIUM</option>
+              <option value="HIGH">HIGH</option>
+            </select>
+          </label>
+          <label className="muted small">
+            Flag
+            <input
+              className="input"
+              value={quarantineFlag}
+              onChange={(e) => setQuarantineFlag(e.target.value)}
+              placeholder="e.g. PAYBILL_MISMATCH"
+              style={{ maxWidth: 220 }}
+            />
+          </label>
+          <input
+            className="input"
+            placeholder="Search receipt, phone, account"
+            value={quarantineSearch}
+            onChange={(e) => setQuarantineSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                void loadQuarantine({ search: (e.currentTarget as HTMLInputElement).value, page: 1 })
+              }
+            }}
+            style={{ maxWidth: 240 }}
+          />
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={() => loadQuarantine({ flag: quarantineFlag, search: quarantineSearch, page: 1 })}
+          >
+            Apply
+          </button>
+          <span className="muted small">
+            {quarantineTotal ? `Total ${quarantineTotal}` : '0 rows'}
+          </span>
+        </div>
+        <div className="row" style={{ marginTop: 8 }}>
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={() => loadQuarantine({ page: Math.max(1, quarantinePage - 1) })}
+            disabled={quarantinePage <= 1}
+          >
+            Prev
+          </button>
+          <span className="muted small">
+            Page {quarantinePage} of {Math.max(1, Math.ceil(quarantineTotal / quarantineLimit || 1))}
+          </span>
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={() =>
+              loadQuarantine({
+                page: Math.min(Math.max(1, Math.ceil(quarantineTotal / quarantineLimit || 1)), quarantinePage + 1),
+              })
+            }
+            disabled={quarantinePage >= Math.max(1, Math.ceil(quarantineTotal / quarantineLimit || 1))}
+          >
+            Next
+          </button>
+          <label className="muted small">
+            Page size:{' '}
+            <select
+              value={quarantineLimit}
+              onChange={(e) => loadQuarantine({ limit: Number(e.target.value), page: 1 })}
+            >
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={200}>200</option>
+            </select>
+          </label>
+        </div>
+        {quarantineError ? <div className="err">Quarantine error: {quarantineError}</div> : null}
+        <div className="table-wrap" style={{ marginTop: 8 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Receipt</th>
+                <th>Phone</th>
+                <th>Amount</th>
+                <th>Account</th>
+                <th>Risk</th>
+                <th>Flags</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {quarantineRows.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="muted">
+                    No quarantined payments found.
+                  </td>
+                </tr>
+              ) : (
+                quarantineRows.map((row) => {
+                  const id = row.id || ''
+                  const action = id ? quarantineActions[id] : null
+                  const rawState = id ? c2bRawState[id] : null
+                  const open = !!rawState?.open
+                  const flagKeys = row.risk_flags ? Object.keys(row.risk_flags) : []
+                  return (
+                    <Fragment key={id || row.receipt || row.created_at}>
+                      <tr>
+                        <td className="mono">
+                          {row.created_at ? new Date(row.created_at).toLocaleString() : '-'}
+                        </td>
+                        <td className="mono">{row.receipt || row.id || '-'}</td>
+                        <td>{row.msisdn || '-'}</td>
+                        <td>{formatKes(row.amount)}</td>
+                        <td className="mono">{row.account_reference || '-'}</td>
+                        <td>
+                          {row.risk_level || '-'} ({row.risk_score ?? 0})
+                        </td>
+                        <td>{flagKeys.length ? flagKeys.join(', ') : '-'}</td>
+                        <td>
+                          <div style={{ display: 'grid', gap: 6 }}>
+                            <button
+                              className="btn ghost"
+                              type="button"
+                              onClick={() => {
+                                if (!id) return
+                                toggleC2bRaw(id)
+                                if (!open) ensureC2bRaw(id)
+                              }}
+                              disabled={!id || !!rawState?.loading}
+                            >
+                              {open ? 'Hide raw' : 'View raw'}
+                            </button>
+                            <input
+                              className="input"
+                              placeholder="Wallet id (optional)"
+                              value={action?.wallet_id || ''}
+                              onChange={(e) =>
+                                updateQuarantineAction(id, { wallet_id: e.target.value })
+                              }
+                            />
+                            <input
+                              className="input"
+                              placeholder="Note"
+                              value={action?.note || ''}
+                              onChange={(e) => updateQuarantineAction(id, { note: e.target.value })}
+                            />
+                            <div className="row" style={{ gap: 6 }}>
+                              <button
+                                className="btn ghost"
+                                type="button"
+                                onClick={() => resolveQuarantine(id, 'CREDIT')}
+                                disabled={!id || !!action?.busy}
+                              >
+                                {action?.busy ? 'Resolving...' : 'Credit'}
+                              </button>
+                              <button
+                                className="btn ghost"
+                                type="button"
+                                onClick={() => resolveQuarantine(id, 'REJECT')}
+                                disabled={!id || !!action?.busy}
+                              >
+                                {action?.busy ? 'Resolving...' : 'Reject'}
+                              </button>
+                            </div>
+                            {action?.msg ? <span className="muted small">{action.msg}</span> : null}
+                            {action?.error ? <span className="err">Resolve error: {action.error}</span> : null}
+                          </div>
+                        </td>
+                      </tr>
+                      {open ? (
+                        <tr>
+                          <td colSpan={8}>
+                            {rawState?.loading ? (
+                              <div className="muted small">Loading raw payload...</div>
+                            ) : rawState?.error ? (
+                              <div className="err">Raw payload error: {rawState.error}</div>
+                            ) : (
+                              <pre className="mono" style={{ whiteSpace: 'pre-wrap' }}>
+                                {rawState?.payload || ''}
+                              </pre>
+                            )}
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+        </>
+      ) : null}
+
+      {activeTab === 'alerts' ? (
+        <>
+      <section className="card">
+        <div className="topline">
+          <h3 style={{ margin: 0 }}>Ops alerts</h3>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn ghost" type="button" onClick={() => loadAlerts({ page: 1 })}>
+              Refresh
+            </button>
+          </div>
+        </div>
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+          <label className="muted small">
+            Severity
+            <select
+              value={alertsSeverity}
+              onChange={(e) => loadAlerts({ severity: e.target.value, page: 1 })}
+              style={{ padding: 8, marginLeft: 6 }}
+            >
+              <option value="">Any</option>
+              <option value="INFO">INFO</option>
+              <option value="WARN">WARN</option>
+              <option value="CRITICAL">CRITICAL</option>
+            </select>
+          </label>
+          <label className="muted small">
+            Type
+            <input
+              className="input"
+              value={alertsType}
+              onChange={(e) => setAlertsType(e.target.value)}
+              placeholder="HIGH_RISK_PAYMENT"
+              style={{ maxWidth: 220 }}
+            />
+          </label>
+          <button className="btn ghost" type="button" onClick={() => loadAlerts({ type: alertsType, page: 1 })}>
+            Apply
+          </button>
+          <span className="muted small">
+            {alertsTotal ? `Total ${alertsTotal}` : '0 rows'}
+          </span>
+        </div>
+        <div className="row" style={{ marginTop: 8 }}>
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={() => loadAlerts({ page: Math.max(1, alertsPage - 1) })}
+            disabled={alertsPage <= 1}
+          >
+            Prev
+          </button>
+          <span className="muted small">
+            Page {alertsPage} of {Math.max(1, Math.ceil(alertsTotal / alertsLimit || 1))}
+          </span>
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={() =>
+              loadAlerts({ page: Math.min(Math.max(1, Math.ceil(alertsTotal / alertsLimit || 1)), alertsPage + 1) })
+            }
+            disabled={alertsPage >= Math.max(1, Math.ceil(alertsTotal / alertsLimit || 1))}
+          >
+            Next
+          </button>
+          <label className="muted small">
+            Page size:{' '}
+            <select value={alertsLimit} onChange={(e) => loadAlerts({ limit: Number(e.target.value), page: 1 })}>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={200}>200</option>
+            </select>
+          </label>
+        </div>
+        {alertsError ? <div className="err">Alerts error: {alertsError}</div> : null}
+        <div className="table-wrap" style={{ marginTop: 8 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Severity</th>
+                <th>Type</th>
+                <th>Entity</th>
+                <th>Payment</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody>
+              {alertsRows.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="muted">
+                    No alerts found.
+                  </td>
+                </tr>
+              ) : (
+                alertsRows.map((row) => (
+                  <tr key={row.id || row.created_at}>
+                    <td className="mono">
+                      {row.created_at ? new Date(row.created_at).toLocaleString() : '-'}
+                    </td>
+                    <td>{row.severity || '-'}</td>
+                    <td>{row.type || '-'}</td>
+                    <td>
+                      {row.entity_type || '-'} {row.entity_id || ''}
+                    </td>
+                    <td className="mono">{row.payment_id || '-'}</td>
+                    <td>{row.message || '-'}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+        </>
+      ) : null}
+
       {activeTab === 'paybill' ? (
         <>
       <section className="card">
@@ -7689,7 +8734,9 @@ const SystemDashboard = () => {
             <input
               className="input"
               value={paybillForm.paybill_account}
-              onChange={(e) => setPaybillForm((f) => ({ ...f, paybill_account: e.target.value }))}
+              onChange={(e) =>
+                setPaybillForm((f) => ({ ...f, paybill_account: normalizeDigitsInput(e.target.value) }))
+              }
               placeholder="Paybill account"
             />
           </label>
@@ -7715,18 +8762,16 @@ const SystemDashboard = () => {
       </section>
 
       <section className="card">
-        <div className="topline">
-          <h3 style={{ margin: 0 }}>Paybill accounts</h3>
-          <div className="row" style={{ gap: 8 }}>
-            <input
-              className="input"
-              placeholder="Search paybill or USSD"
-              value={paybillSearch}
-              onChange={(e) => setPaybillSearch(e.target.value)}
-              style={{ maxWidth: 240 }}
-            />
-            <span className="muted small">{filteredPaybillRows.length} row(s)</span>
-          </div>
+        <PaybillHeader title="PayBill Accounts (4814003)" />
+        <div className="row" style={{ gap: 8, marginTop: 10, alignItems: 'center' }}>
+          <input
+            className="input"
+            placeholder="Search paybill or USSD"
+            value={paybillSearch}
+            onChange={(e) => setPaybillSearch(e.target.value)}
+            style={{ maxWidth: 240 }}
+          />
+          <span className="muted small">{filteredPaybillRows.length} row(s)</span>
         </div>
         <div className="table-wrap">
           <table>
@@ -7738,13 +8783,14 @@ const SystemDashboard = () => {
                 <th>Paybill</th>
                 <th>USSD code</th>
                 <th>USSD assigned</th>
+                <th>Generated codes</th>
                 <th>ID</th>
               </tr>
             </thead>
             <tbody>
               {filteredPaybillRows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="muted">
+                  <td colSpan={8} className="muted">
                     No paybill records found.
                   </td>
                 </tr>
@@ -7757,6 +8803,29 @@ const SystemDashboard = () => {
                     <td>{row.paybill_account || '-'}</td>
                     <td>{row.ussd_code || '-'}</td>
                     <td>{row.ussd_assigned_at ? new Date(row.ussd_assigned_at).toLocaleString() : '-'}</td>
+                    <td>
+                      {row.type === 'MATATU' ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <PaybillCodeCard variant="inline" label="OWNER Account" code={row.owner_code || ''} />
+                          <PaybillCodeCard variant="inline" label="MATATU Account" code={row.vehicle_code || ''} />
+                          <PaybillCodeCard
+                            variant="inline"
+                            label="STK/USSD Reference (Plate)"
+                            code={row.plate_alias || ''}
+                          />
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <PaybillCodeCard variant="inline" label="SACCO FEE Account" code={row.fee_code || ''} />
+                          <PaybillCodeCard variant="inline" label="SACCO LOAN Account" code={row.loan_code || ''} />
+                          <PaybillCodeCard
+                            variant="inline"
+                            label="SACCO SAVINGS Account"
+                            code={row.savings_code || ''}
+                          />
+                        </div>
+                      )}
+                    </td>
                     <td className="mono">{row.id}</td>
                   </tr>
                 ))

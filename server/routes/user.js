@@ -1,6 +1,8 @@
 const express = require('express');
 const { requireUser } = require('../middleware/auth');
 const { supabaseAdmin } = require('../supabase');
+const pool = require('../db/pool');
+const { ensurePlateAlias } = require('../wallet/wallet.aliases');
 
 if (!supabaseAdmin) {
   throw new Error('SUPABASE_SERVICE_ROLE_KEY is required to serve mobile endpoints');
@@ -503,6 +505,81 @@ router.get('/my-saccos', async (req, res) => {
   }
 });
 
+// Wallet PayBill/Plate aliases scoped to the signed-in user.
+router.get('/paybill-codes', async (req, res) => {
+  try {
+    const role = await getRoleRow(req.user?.id);
+    if (!role) return res.status(401).json({ error: 'missing role' });
+
+    const roleName = String(role.role || '').trim().toUpperCase();
+    const entityTypeRaw = String(req.query.entity_type || '').trim().toUpperCase();
+    const entityIdRaw = String(req.query.entity_id || req.query.sacco_id || req.query.matatu_id || '').trim();
+
+    let entityType = entityTypeRaw;
+    let entityId = entityIdRaw;
+
+    if (!entityType) {
+      if (role.sacco_id) {
+        entityType = 'SACCO';
+        entityId = String(role.sacco_id);
+      } else if (role.matatu_id) {
+        entityType = roleName === 'TAXI' ? 'TAXI' : roleName === 'BODA' ? 'BODA' : 'MATATU';
+        entityId = String(role.matatu_id);
+      }
+    }
+
+    if (!entityType || !entityId) {
+      return res.status(400).json({ error: 'entity_type and entity_id required' });
+    }
+
+    if (entityType === 'SACCO') {
+      const access = await ensureSaccoAccess(req.user?.id, entityId);
+      if (!access.allowed) return res.status(403).json({ error: 'forbidden' });
+    } else if (entityType === 'MATATU') {
+      const access = await ensureMatatuAccess(req.user?.id, entityId);
+      if (!access.allowed) return res.status(403).json({ error: 'forbidden' });
+    } else if (entityType === 'TAXI') {
+      if (roleName !== 'TAXI' || String(role.matatu_id || '') !== String(entityId)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+    } else if (entityType === 'BODA' || entityType === 'BODABODA') {
+      if (roleName !== 'BODA' || String(role.matatu_id || '') !== String(entityId)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+    } else {
+      return res.status(400).json({ error: 'unsupported entity_type' });
+    }
+
+    const entityTypes =
+      entityType === 'BODA' || entityType === 'BODABODA' ? ['BODA', 'BODABODA'] : [entityType];
+
+    const { rows } = await pool.query(
+      `
+        SELECT
+          w.id AS wallet_id,
+          w.entity_type,
+          w.entity_id,
+          w.wallet_kind,
+          wa.alias,
+          wa.alias_type
+        FROM wallets w
+        JOIN wallet_aliases wa
+          ON wa.wallet_id = w.id
+        WHERE w.entity_type = ANY($1)
+          AND w.entity_id = $2
+          AND wa.is_active = true
+          AND wa.alias_type IN ('PAYBILL_CODE', 'PLATE')
+        ORDER BY wa.alias_type, wa.alias
+      `,
+      [entityTypes, entityId]
+    );
+
+    res.json({ items: rows || [] });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Failed to load paybill codes' });
+  }
+});
+
 // Return vehicles that the signed-in user can manage.
 router.get('/vehicles', async (req, res) => {
   try {
@@ -982,6 +1059,15 @@ router.patch('/matatu/:id', async (req,res)=>{
       throw error;
     }
     if (!data) return res.status(404).json({ error:'Matatu not found' });
+
+    if (updates.number_plate && data.wallet_id && data.number_plate !== matatu.number_plate) {
+      try {
+        await ensurePlateAlias({ walletId: data.wallet_id, plate: data.number_plate });
+      } catch (aliasErr) {
+        console.warn('Failed to update plate alias:', aliasErr.message);
+      }
+    }
+
     res.json(data);
   }catch(e){
     res.status(500).json({ error: e.message || 'Failed to update matatu' });

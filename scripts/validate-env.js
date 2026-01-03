@@ -8,7 +8,11 @@
  *
  * Fails with exit code 1 if required vars are missing.
  */
-require('dotenv').config();
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+dotenv.config();
 
 function bool(v, def) {
   if (v === undefined || v === null || v === '') return def;
@@ -69,7 +73,7 @@ function buildRequiredList() {
   return req;
 }
 
-function getMissingEnv(envObj) {
+export function getMissingEnv(envObj) {
   const required = buildRequiredList();
   return required.filter((k) => !envObj[k] || String(envObj[k]).trim() === '');
 }
@@ -91,8 +95,7 @@ function main() {
   );
 }
 
-if (require.main === module) {
+const isMain = path.resolve(process.argv[1] || '') === fileURLToPath(import.meta.url);
+if (isMain) {
   main();
 }
-
-module.exports = { getMissingEnv };

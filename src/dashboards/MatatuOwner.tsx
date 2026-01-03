@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import DashboardShell from '../components/DashboardShell'
+import PaybillCodeCard from '../components/PaybillCodeCard'
+import PaybillHeader from '../components/PaybillHeader'
+import StickerPrintModal from '../components/StickerPrintModal'
 import { useAuth } from '../state/auth'
 import { authFetch } from '../lib/auth'
+import { mapPaybillCodes, type PaybillAliasRow } from '../lib/paybill'
 import VehicleCarePage from '../modules/vehicleCare/VehicleCarePage'
 import { fetchAccessGrants, saveAccessGrant, type AccessGrant } from '../modules/vehicleCare/vehicleCare.api'
 
@@ -82,6 +86,9 @@ const MatatuOwnerDashboard = () => {
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [currentId, setCurrentId] = useState<string | null>(null)
   const [txs, setTxs] = useState<Tx[]>([])
+  const [paybillAliases, setPaybillAliases] = useState<PaybillAliasRow[]>([])
+  const [paybillError, setPaybillError] = useState<string | null>(null)
+  const [showPaybillSticker, setShowPaybillSticker] = useState(false)
   const [staff, setStaff] = useState<Staff[]>([])
   const [loanReqs, setLoanReqs] = useState<LoanRequest[]>([])
   const [loanDue, setLoanDue] = useState<LoanDue[]>([])
@@ -157,6 +164,8 @@ const MatatuOwnerDashboard = () => {
     () => vehicles.find((v) => v.id === currentId) || null,
     [vehicles, currentId],
   )
+  const paybillCodes = useMemo(() => mapPaybillCodes(paybillAliases), [paybillAliases])
+  const plateReference = paybillCodes.plate || currentVehicle?.number_plate || ''
   const ownerScopeId = user?.matatu_id || currentId || null
   const todayLabel = useMemo(
     () =>
@@ -251,6 +260,27 @@ const MatatuOwnerDashboard = () => {
       }
     }
     void load()
+  }, [currentId])
+
+  useEffect(() => {
+    if (!currentId) {
+      setPaybillAliases([])
+      setPaybillError(null)
+      return
+    }
+    async function loadPaybillCodes() {
+      try {
+        const res = await fetchJson<{ items?: PaybillAliasRow[] }>(
+          `/u/paybill-codes?entity_type=MATATU&entity_id=${encodeURIComponent(currentId)}`,
+        )
+        setPaybillAliases(res.items || [])
+        setPaybillError(null)
+      } catch (err) {
+        setPaybillAliases([])
+        setPaybillError(err instanceof Error ? err.message : 'Failed to load PayBill codes')
+      }
+    }
+    loadPaybillCodes()
   }, [currentId])
 
   useEffect(() => {
@@ -785,6 +815,37 @@ const MatatuOwnerDashboard = () => {
           </section>
 
           <section className="card">
+            <PaybillHeader
+              title="Matatu PayBill Accounts (4814003)"
+              actions={
+                <button className="btn ghost" type="button" onClick={() => setShowPaybillSticker(true)}>
+                  Print Sticker
+                </button>
+              }
+            />
+            {paybillError ? <div className="err">PayBill load error: {paybillError}</div> : null}
+            <div
+              className="grid"
+              style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginTop: 12 }}
+            >
+              <PaybillCodeCard
+                title="Matatu Owner Account"
+                label="OWNER Account"
+                code={paybillCodes.owner || ''}
+              />
+              <PaybillCodeCard
+                title="Matatu Vehicle Account"
+                label="MATATU Account"
+                code={paybillCodes.vehicle || ''}
+              />
+              <PaybillCodeCard title="STK/USSD Reference (Plate)" code={plateReference} />
+            </div>
+            <p className="muted small" style={{ marginTop: 10 }}>
+              For PayBill manual payments use the 7-digit Account Number. For STK/USSD use the plate reference.
+            </p>
+          </section>
+
+          <section className="card">
             <div className="topline">
               <h3 style={{ margin: 0 }}>Compliance dates</h3>
               <span className="muted small">{currentVehicle?.number_plate || ''}</span>
@@ -823,6 +884,17 @@ const MatatuOwnerDashboard = () => {
               </div>
             ) : null}
           </section>
+          <StickerPrintModal
+            open={showPaybillSticker}
+            title="Matatu PayBill Accounts (4814003)"
+            onClose={() => setShowPaybillSticker(false)}
+            note="For PayBill manual payments use the 7-digit Account Number. For STK/USSD use the plate reference."
+            lines={[
+              { label: 'Matatu Owner Account - OWNER Account', value: paybillCodes.owner },
+              { label: 'Matatu Vehicle Account - MATATU Account', value: paybillCodes.vehicle },
+              { label: 'STK/USSD Reference (Plate)', value: plateReference },
+            ]}
+          />
         </>
       ) : null}
 

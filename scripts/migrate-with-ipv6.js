@@ -1,7 +1,13 @@
-require('dotenv').config();
-const dns = require('dns').promises;
-const { spawn } = require('child_process');
-const path = require('path');
+import dotenv from 'dotenv';
+import { promises as dns } from 'dns';
+import { spawn } from 'child_process';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 async function main() {
   const urlStr = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL;
@@ -34,4 +40,3 @@ async function main() {
 }
 
 main();
-

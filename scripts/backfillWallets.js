@@ -1,8 +1,12 @@
 // scripts/backfillWallets.js
 // One-time helper to create wallets for entities missing wallet_id.
-require('dotenv').config();
-const pool = require('../server/db/pool');
-const { registerWalletForEntity } = require('../server/wallet/wallet.service');
+import dotenv from 'dotenv';
+import pool from '../server/db/pool.js';
+import walletService from '../server/wallet/wallet.service.js';
+
+const { registerWalletForEntity } = walletService;
+
+dotenv.config();
 
 function deriveNumericRefFromRow(row, fields) {
   for (const field of fields) {

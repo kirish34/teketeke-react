@@ -2,6 +2,7 @@
 // Handles wallet balance updates and transaction history.
 const pool = require('../db/pool');
 const { generateVirtualAccountCode } = require('./wallet.utils');
+const { ensureWalletAliasesForMatatu, ensurePaybillAlias } = require('./wallet.aliases');
 
 /**
  * Credit a wallet by virtualAccountCode.
@@ -281,42 +282,45 @@ async function getWalletTransactions({ virtualAccountCode, limit = 20, offset = 
  * Credit a matatu wallet for a fare, applying fee rules (SACCO + TekeTeke).
  * Calculates net to matatu and credits fee beneficiary wallets inside one transaction.
  */
-async function creditFareWithFees({
-  virtualAccountCode,
+async function creditFareWithFeesByWalletId({
+  walletId,
   amount,
   source = 'MPESA_C2B',
   sourceRef = null,
   description = null,
+  client = null,
 }) {
-  if (!virtualAccountCode) throw new Error('virtualAccountCode is required');
+  if (!walletId) throw new Error('walletId is required');
   if (!amount || Number(amount) <= 0) throw new Error('amount must be > 0');
 
-  const client = await pool.connect();
+  const useClient = client || (await pool.connect());
+  const ownTx = !client;
 
   try {
-    await client.query('BEGIN');
+    if (ownTx) await useClient.query('BEGIN');
 
     const grossAmount = Number(amount);
 
     // Lock matatu wallet
-    const matatuRes = await client.query(
+    const matatuRes = await useClient.query(
       `
-        SELECT id, balance
+        SELECT id, balance, virtual_account_code
         FROM wallets
-        WHERE virtual_account_code = $1
+        WHERE id = $1
         FOR UPDATE
       `,
-      [virtualAccountCode]
+      [walletId]
     );
 
     if (matatuRes.rows.length === 0) {
-      throw new Error(`Matatu wallet not found for virtualAccountCode=${virtualAccountCode}`);
+      throw new Error(`Matatu wallet not found for wallet_id=${walletId}`);
     }
 
     const matatuWallet = matatuRes.rows[0];
+    const virtualAccountCode = matatuWallet.virtual_account_code;
 
     // Active fees for matatu fare
-    const feesRes = await client.query(
+    const feesRes = await useClient.query(
       `
         SELECT id, name, fee_type, fee_value, beneficiary_wallet_id
         FROM fees_config
@@ -366,7 +370,7 @@ async function creditFareWithFees({
     const matatuBalanceBefore = Number(matatuWallet.balance);
     const matatuBalanceAfter = matatuBalanceBefore + netToMatatu;
 
-    await client.query(
+    await useClient.query(
       `
         UPDATE wallets
         SET balance = $1
@@ -375,7 +379,7 @@ async function creditFareWithFees({
       [matatuBalanceAfter, matatuWallet.id]
     );
 
-    await client.query(
+    await useClient.query(
       `
         INSERT INTO wallet_transactions
           (wallet_id, tx_type, amount, balance_before, balance_after, source, source_ref, description)
@@ -395,7 +399,7 @@ async function creditFareWithFees({
 
     // Credit fee beneficiary wallets
     for (const fee of feeDetails) {
-      const benRes = await client.query(
+      const benRes = await useClient.query(
         `
           SELECT id, balance
           FROM wallets
@@ -414,12 +418,12 @@ async function creditFareWithFees({
       const benBalanceBefore = Number(benWallet.balance);
       const benBalanceAfter = benBalanceBefore + fee.amount;
 
-      await client.query(
+      await useClient.query(
         `UPDATE wallets SET balance = $1 WHERE id = $2`,
         [benBalanceAfter, benWallet.id]
       );
 
-      await client.query(
+      await useClient.query(
         `
           INSERT INTO wallet_transactions
             (wallet_id, tx_type, amount, balance_before, balance_after, source, source_ref, description)
@@ -433,12 +437,12 @@ async function creditFareWithFees({
           benBalanceAfter,
           'FEE_MATATU_FARE',
           sourceRef,
-          `Fee: ${fee.name} from fare on ${virtualAccountCode}`,
+          `Fee: ${fee.name} from fare on ${virtualAccountCode || walletId}`,
         ]
       );
     }
 
-    await client.query('COMMIT');
+    if (ownTx) await useClient.query('COMMIT');
 
     return {
       virtualAccountCode,
@@ -451,12 +455,44 @@ async function creditFareWithFees({
       matatuBalanceAfter,
     };
   } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Error in creditFareWithFees:', err.message);
+    if (ownTx) await useClient.query('ROLLBACK');
+    console.error('Error in creditFareWithFeesByWalletId:', err.message);
     throw err;
   } finally {
-    client.release();
+    if (ownTx) useClient.release();
   }
+}
+
+async function creditFareWithFees({
+  virtualAccountCode,
+  amount,
+  source = 'MPESA_C2B',
+  sourceRef = null,
+  description = null,
+}) {
+  if (!virtualAccountCode) throw new Error('virtualAccountCode is required');
+
+  const res = await pool.query(
+    `
+      SELECT id
+      FROM wallets
+      WHERE virtual_account_code = $1
+      LIMIT 1
+    `,
+    [virtualAccountCode]
+  );
+
+  if (!res.rows.length) {
+    throw new Error(`Matatu wallet not found for virtualAccountCode=${virtualAccountCode}`);
+  }
+
+  return creditFareWithFeesByWalletId({
+    walletId: res.rows[0].id,
+    amount,
+    source,
+    sourceRef,
+    description,
+  });
 }
 
 module.exports = {
@@ -465,12 +501,79 @@ module.exports = {
   getWalletByVirtualAccountCode,
   getWalletTransactions,
   creditFareWithFees,
+  creditFareWithFeesByWalletId,
 };
+
+async function createWalletRecord({
+  entityType,
+  entityId,
+  walletType,
+  walletKind = null,
+  saccoId = null,
+  matatuId = null,
+  numericRef,
+  client = null,
+}) {
+  if (!entityType) throw new Error('entityType is required');
+  if (!entityId) throw new Error('entityId is required');
+  if (!walletType) throw new Error('walletType is required');
+
+  const useClient = client || (await pool.connect());
+  const ownTx = !client;
+
+  try {
+    if (ownTx) await useClient.query('BEGIN');
+
+    const baseRef = Number(numericRef) || Date.now() % 100000;
+    let walletRow = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const code = generateVirtualAccountCode(entityType, baseRef + attempt);
+      try {
+        const walletRes = await useClient.query(
+          `
+            INSERT INTO wallets
+              (entity_type, entity_id, virtual_account_code, balance, wallet_type, wallet_code, sacco_id, matatu_id, wallet_kind)
+            VALUES
+              ($1, $2, $3, 0, $4, $5, $6, $7, $8)
+            RETURNING id, virtual_account_code, wallet_code, wallet_type, wallet_kind, balance
+          `,
+          [entityType, entityId, code, walletType, code, saccoId, matatuId, walletKind]
+        );
+        walletRow = walletRes.rows[0];
+        break;
+      } catch (e) {
+        const msg = String(e.message || '').toLowerCase();
+        if (msg.includes('duplicate') || msg.includes('unique')) continue;
+        throw e;
+      }
+    }
+
+    if (!walletRow) {
+      throw new Error('Could not generate a unique virtual account code');
+    }
+
+    if (ownTx) await useClient.query('COMMIT');
+    return walletRow;
+  } catch (err) {
+    if (ownTx) await useClient.query('ROLLBACK');
+    throw err;
+  } finally {
+    if (ownTx) useClient.release();
+  }
+}
 
 /**
  * Create a wallet for a given entity and attach wallet_id on the entity table.
  */
-async function registerWalletForEntity({ entityType, entityId, numericRef }) {
+async function registerWalletForEntity({
+  entityType,
+  entityId,
+  numericRef,
+  walletKind = null,
+  paybillKey = null,
+  plate = null,
+  attachToEntity = true,
+} = {}) {
   if (!entityType) throw new Error('entityType is required');
   if (!entityId) throw new Error('entityId is required');
 
@@ -509,38 +612,55 @@ async function registerWalletForEntity({ entityType, entityId, numericRef }) {
   try {
     await client.query('BEGIN');
 
-    const baseRef = Number(numericRef) || Date.now() % 100000;
-    let walletRow = null;
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const code = generateVirtualAccountCode(type, baseRef + attempt);
-      try {
-        const walletRes = await client.query(
+    let effectivePaybillKey = paybillKey;
+    if (!effectivePaybillKey) {
+      if (type === 'SACCO') effectivePaybillKey = '30';
+      if (type === 'MATATU') effectivePaybillKey = '11';
+      if (type === 'TAXI') effectivePaybillKey = '40';
+      if (type === 'BODABODA' || type === 'BODA') effectivePaybillKey = '50';
+    }
+
+    const walletRow = await createWalletRecord({
+      entityType: type,
+      entityId,
+      walletType,
+      walletKind,
+      saccoId,
+      matatuId,
+      numericRef,
+      client,
+    });
+
+    if (attachToEntity) {
+      await client.query(
+        `UPDATE ${tableName} SET wallet_id = $1 WHERE id = $2`,
+        [walletRow.id, entityId]
+      );
+    }
+
+    if (type === 'MATATU') {
+      let plateValue = plate || null;
+      if (!plateValue) {
+        const plateRes = await client.query(
           `
-            INSERT INTO wallets
-              (entity_type, entity_id, virtual_account_code, balance, wallet_type, wallet_code, sacco_id, matatu_id)
-            VALUES
-              ($1, $2, $3, 0, $4, $5, $6, $7)
-            RETURNING id, virtual_account_code, wallet_code, wallet_type, balance
+            SELECT number_plate
+            FROM matatus
+            WHERE id = $1
+            LIMIT 1
           `,
-          [type, entityId, code, walletType, code, saccoId, matatuId]
+          [entityId]
         );
-        walletRow = walletRes.rows[0];
-        break;
-      } catch (e) {
-        const msg = String(e.message || '').toLowerCase();
-        if (msg.includes('duplicate') || msg.includes('unique')) continue;
-        throw e;
+        plateValue = plateRes.rows[0]?.number_plate || null;
       }
+      await ensureWalletAliasesForMatatu({
+        walletId: walletRow.id,
+        plate: plateValue,
+        client,
+        paybillKey: effectivePaybillKey || '11',
+      });
+    } else if (effectivePaybillKey) {
+      await ensurePaybillAlias({ walletId: walletRow.id, client, key: effectivePaybillKey });
     }
-
-    if (!walletRow) {
-      throw new Error('Could not generate a unique virtual account code');
-    }
-
-    await client.query(
-      `UPDATE ${tableName} SET wallet_id = $1 WHERE id = $2`,
-      [walletRow.id, entityId]
-    );
 
     await client.query('COMMIT');
     return walletRow;
@@ -665,6 +785,8 @@ module.exports = {
   getWalletByVirtualAccountCode,
   getWalletTransactions,
   creditFareWithFees,
+  creditFareWithFeesByWalletId,
   createBankWithdrawal,
+  createWalletRecord,
   registerWalletForEntity,
 };

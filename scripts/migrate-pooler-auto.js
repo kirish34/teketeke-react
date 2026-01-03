@@ -1,6 +1,12 @@
-require('dotenv').config();
-const { spawnSync } = require('child_process');
-const path = require('path');
+import dotenv from 'dotenv';
+import { spawnSync } from 'child_process';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 function runWithUrl(url) {
   const env = { ...process.env, SUPABASE_DB_URL: url, NODE_TLS_REJECT_UNAUTHORIZED: '0' };
@@ -35,4 +41,3 @@ if (code === 0) process.exit(0);
 const txUrl = `postgresql://postgres:${encodeURIComponent(pass)}@${hostBase}:5432/postgres?sslmode=require`;
 code = runWithUrl(txUrl);
 process.exit(code);
-

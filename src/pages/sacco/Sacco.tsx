@@ -121,7 +121,7 @@ export default function SaccoDashboard() {
   const [feeMsg, setFeeMsg] = useState('')
   const [routes, setRoutes] = useState<SaccoRoute[]>([])
   const [routesMsg, setRoutesMsg] = useState('')
-  const [stkForm, setStkForm] = useState({ code: '*001*', amount: '', phone: '' })
+  const [stkForm, setStkForm] = useState({ code: '', amount: '', phone: '' })
   const [stkResp, setStkResp] = useState('')
   const [loans, setLoans] = useState<Loan[]>([])
   const [loanMsg, setLoanMsg] = useState('')
@@ -632,11 +632,12 @@ export default function SaccoDashboard() {
   async function sendStk() {
     setStkResp('Sending...')
     try {
+      const plate = stkForm.code.trim().toUpperCase().replace(/\s+/g, '')
       const res = await fetch('/api/pay/stk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          code: stkForm.code.trim(),
+          code: plate,
           amount: Number(stkForm.amount || 0),
           phone: stkForm.phone.trim(),
         }),
@@ -1331,7 +1332,7 @@ export default function SaccoDashboard() {
         </div>
         <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
           <input
-            placeholder="*001*USSD#"
+            placeholder="Plate e.g. KDE123A"
             value={stkForm.code}
             onChange={(e) => setStkForm((f) => ({ ...f, code: e.target.value }))}
             style={{ flex: '1 1 160px' }}

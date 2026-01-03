@@ -1,6 +1,10 @@
 const express = require('express');
 const fetch = require('node-fetch');
 const { supabaseAdmin } = require('../supabase');
+const pool = require('../db/pool');
+const { creditFareWithFeesByWalletId } = require('../wallet/wallet.service');
+const { normalizeRef, isPlateRef, resolveWalletByRef } = require('../wallet/wallet.aliases');
+const { applyRiskRules } = require('../mpesa/c2bRisk');
 const router = express.Router();
 const WEBHOOK_SECRET = process.env.DARAJA_WEBHOOK_SECRET || null;
 
@@ -32,17 +36,29 @@ router.get('/status', (_req, res) => {
 });
 
 router.post('/stk', async (req,res)=>{
-  const { phone, amount, code } = req.body||{};
+  const { phone, amount, code, plate } = req.body||{};
   const env = process.env.DARAJA_ENV || 'sandbox';
   const shortcode = process.env.DARAJA_SHORTCODE;
   const passkey = process.env.DARAJA_PASSKEY;
   const callback = process.env.DARAJA_CALLBACK_URL || 'https://example.com/callback';
   const timestamp = new Date().toISOString().replace(/[-:TZ.]/g,'').slice(0,14);
   const password = base64(shortcode + passkey + timestamp);
+  const plateRef = normalizeRef(plate || code || '');
+
+  if (!isPlateRef(plateRef)) {
+    return res.status(400).json({ error: 'Valid matatu plate is required for STK' });
+  }
 
   if (!shortcode || !passkey) {
     // Fallback mock
-    return res.json({ phone, amount:Number(amount||0), ussd_code:code||null, checkout_request_id:'CHK_'+Math.random().toString(36).slice(2,10).toUpperCase(), status:'QUEUED' });
+    return res.json({
+      phone,
+      amount: Number(amount || 0),
+      plate: plateRef,
+      ussd_code: plateRef,
+      checkout_request_id: 'CHK_' + Math.random().toString(36).slice(2,10).toUpperCase(),
+      status: 'QUEUED',
+    });
   }
   try{
     const token = await getAccessToken();
@@ -57,7 +73,7 @@ router.post('/stk', async (req,res)=>{
       PartyB: shortcode,
       PhoneNumber: phone,
       CallBackURL: callback,
-      AccountReference: code || 'TEKETEKE',
+      AccountReference: plateRef,
       TransactionDesc: 'TekeTeke STK'
     };
     const r = await fetch(host + '/mpesa/stkpush/v1/processrequest', {
@@ -67,56 +83,392 @@ router.post('/stk', async (req,res)=>{
     });
     const j = await r.json();
     if(!r.ok) return res.status(500).json(j);
-    res.json({ phone, amount:Number(amount||0), ussd_code:code||null, checkout_request_id:j.CheckoutRequestID||null, status:'QUEUED' });
+    const checkoutRequestId = j.CheckoutRequestID || null;
+    if (checkoutRequestId) {
+      try {
+        await pool.query(
+          `
+            INSERT INTO mpesa_c2b_payments
+              (paybill_number, account_reference, amount, msisdn, receipt, status, raw, checkout_request_id)
+            VALUES
+              ($1, $2, $3, $4, null, 'RECEIVED', $5, $6)
+          `,
+          [shortcode || null, plateRef, Number(amount || 0), phone || null, { request: payload, response: j }, checkoutRequestId]
+        );
+      } catch (err) {
+        console.warn('Failed to record STK request:', err.message);
+      }
+    }
+    res.json({
+      phone,
+      amount: Number(amount || 0),
+      plate: plateRef,
+      ussd_code: plateRef,
+      checkout_request_id: checkoutRequestId,
+      status: 'QUEUED',
+    });
   }catch(e){
     res.status(500).json({ error: e.message });
   }
 });
 
 router.post('/stk/callback', async (req,res)=>{
-  if (WEBHOOK_SECRET) {
-    const got = req.headers['x-webhook-secret'] || '';
-    if (got !== WEBHOOK_SECRET) return res.status(401).json({ ok:false, error:'bad signature' });
-  }
-  // Parse common Daraja STK callback shape
   const body = req.body || {};
-  const cb = body?.Body?.stkCallback;
-  if (!cb) return res.json({ ok: true });
+  const got = req.headers['x-webhook-secret'] || '';
+  const secretMismatch = WEBHOOK_SECRET ? got !== WEBHOOK_SECRET : false;
 
-  const resultCode = cb?.ResultCode;
-  const items = Array.isArray(cb?.CallbackMetadata?.Item) ? cb.CallbackMetadata.Item : [];
-  const getItem = (name) => items.find(i => i?.Name === name)?.Value;
+  try {
+    // Parse common Daraja STK callback shape
+    const cb = body?.Body?.stkCallback;
+    if (!cb) return res.status(200).json({ ok: true });
 
-  const receipt = getItem('MpesaReceiptNumber') || null;
-  const amount  = Number(getItem('Amount') || 0);
-  const msisdn  = String(getItem('PhoneNumber') || '');
+    const resultCode = cb?.ResultCode;
+    const checkoutRequestId = cb?.CheckoutRequestID || null;
+    const items = Array.isArray(cb?.CallbackMetadata?.Item) ? cb.CallbackMetadata.Item : [];
+    const getItem = (name) => items.find(i => i?.Name === name)?.Value;
 
-  const tx = {
-    sacco_id: null,
-    matatu_id: null,
-    kind: 'SACCO_FEE',
-    fare_amount_kes: amount,
-    service_fee_kes: 0,
-    status: (resultCode === 0 ? 'SUCCESS' : 'FAILED'),
-    passenger_msisdn: msisdn || null,
-    notes: `STK callback code=${resultCode}`,
-    external_id: receipt || null,
-    checkout_request_id: cb?.CheckoutRequestID || null
-  };
+    const receipt = getItem('MpesaReceiptNumber') || null;
+    const amount  = Number(getItem('Amount') || 0);
+    const msisdn  = String(getItem('PhoneNumber') || '');
 
-  if (supabaseAdmin) {
-    const { error } = await supabaseAdmin
-      .from('transactions')
-      .insert(tx)
-      .select('id')
-      .single();
-    // Ignore duplicates if unique index present
-    if (error && !String(error.message||'').toLowerCase().includes('duplicate')) {
-      return res.status(500).json({ ok:false, error: error.message });
+    let paymentRow = null;
+    if (checkoutRequestId) {
+      const existing = await pool.query(
+        `
+          SELECT id, account_reference, status, raw
+          FROM mpesa_c2b_payments
+          WHERE checkout_request_id = $1
+          LIMIT 1
+        `,
+        [checkoutRequestId]
+      );
+      if (existing.rows.length) paymentRow = existing.rows[0];
     }
-  }
 
-  return res.json({ ok:true });
+    const mergedRaw =
+      paymentRow && paymentRow.raw && typeof paymentRow.raw === 'object'
+        ? { ...paymentRow.raw, callback: body }
+        : { callback: body };
+
+    if (secretMismatch) {
+      console.warn('STK callback rejected: bad webhook secret');
+      try {
+        let paymentId = null;
+        let paymentStatus = null;
+
+        if (checkoutRequestId) {
+          const insertRes = await pool.query(
+            `
+              INSERT INTO mpesa_c2b_payments
+                (receipt, msisdn, amount, status, raw, checkout_request_id)
+              VALUES
+                ($1, $2, $3, 'QUARANTINED', $4, $5)
+              ON CONFLICT (checkout_request_id) DO UPDATE
+                SET receipt = COALESCE(EXCLUDED.receipt, mpesa_c2b_payments.receipt),
+                    msisdn = COALESCE(EXCLUDED.msisdn, mpesa_c2b_payments.msisdn),
+                    amount = COALESCE(EXCLUDED.amount, mpesa_c2b_payments.amount),
+                    raw = EXCLUDED.raw,
+                    status = CASE
+                      WHEN mpesa_c2b_payments.status IN ('CREDITED', 'REJECTED', 'QUARANTINED') THEN mpesa_c2b_payments.status
+                      ELSE 'QUARANTINED'
+                    END
+              RETURNING id, status
+            `,
+            [receipt, msisdn || null, amount, mergedRaw, checkoutRequestId]
+          );
+          paymentId = insertRes.rows[0]?.id || null;
+          paymentStatus = insertRes.rows[0]?.status || null;
+        } else {
+          const insertRes = await pool.query(
+            `
+              INSERT INTO mpesa_c2b_payments
+                (receipt, msisdn, amount, status, raw, checkout_request_id)
+              VALUES
+                ($1, $2, $3, 'QUARANTINED', $4, $5)
+              RETURNING id, status
+            `,
+            [receipt, msisdn || null, amount, mergedRaw, null]
+          );
+          paymentId = insertRes.rows[0]?.id || null;
+          paymentStatus = insertRes.rows[0]?.status || null;
+        }
+
+        if (paymentStatus === 'QUARANTINED' || paymentStatus === 'RECEIVED') {
+          await pool.query(
+            `
+              INSERT INTO mpesa_c2b_quarantine
+                (paybill_number, account_reference, amount, msisdn, raw, reason)
+              VALUES
+                ($1, $2, $3, $4, $5, 'WEBHOOK_SECRET_MISMATCH')
+            `,
+            [null, paymentRow?.account_reference || null, amount, msisdn || null, mergedRaw]
+          );
+        }
+
+        if (paymentId) {
+          try {
+            await applyRiskRules({ paymentId, reasonCodes: ['WEBHOOK_SECRET_MISMATCH'] });
+          } catch (err) {
+            console.warn('Risk engine failed for webhook secret mismatch:', err.message);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to quarantine STK webhook mismatch:', err.message);
+      }
+
+      return res.status(200).json({ ok: true });
+    }
+
+    if (paymentRow) {
+      const nextStatus = resultCode === 0 ? 'RECEIVED' : 'REJECTED';
+      const updateRes = await pool.query(
+        `
+          UPDATE mpesa_c2b_payments
+          SET receipt = COALESCE($1, receipt),
+              msisdn = COALESCE($2, msisdn),
+              amount = COALESCE($3, amount),
+              status = CASE
+                WHEN status IN ('CREDITED', 'REJECTED', 'QUARANTINED') THEN status
+                ELSE $4
+              END,
+              raw = $5
+          WHERE id = $6
+          RETURNING id, account_reference, status, raw
+        `,
+        [receipt, msisdn || null, amount, nextStatus, mergedRaw, paymentRow.id]
+      );
+      paymentRow = updateRes.rows[0] || paymentRow;
+    } else if (checkoutRequestId) {
+      const insertRes = await pool.query(
+        `
+          INSERT INTO mpesa_c2b_payments
+            (receipt, msisdn, amount, status, raw, checkout_request_id)
+          VALUES
+            ($1, $2, $3, $4, $5, $6)
+          ON CONFLICT (checkout_request_id) DO UPDATE
+            SET receipt = COALESCE(EXCLUDED.receipt, mpesa_c2b_payments.receipt),
+                msisdn = COALESCE(EXCLUDED.msisdn, mpesa_c2b_payments.msisdn),
+                amount = COALESCE(EXCLUDED.amount, mpesa_c2b_payments.amount),
+                raw = EXCLUDED.raw,
+                status = CASE
+                  WHEN mpesa_c2b_payments.status IN ('CREDITED', 'REJECTED', 'QUARANTINED') THEN mpesa_c2b_payments.status
+                  ELSE EXCLUDED.status
+                END
+          RETURNING id, account_reference, status, raw
+        `,
+        [receipt, msisdn || null, amount, resultCode === 0 ? 'RECEIVED' : 'REJECTED', mergedRaw, checkoutRequestId]
+      );
+      paymentRow = insertRes.rows[0];
+    }
+
+    const tx = {
+      sacco_id: null,
+      matatu_id: null,
+      kind: 'SACCO_FEE',
+      fare_amount_kes: amount,
+      service_fee_kes: 0,
+      status: (resultCode === 0 ? 'SUCCESS' : 'FAILED'),
+      passenger_msisdn: msisdn || null,
+      notes: `STK callback code=${resultCode}`,
+      external_id: receipt || null,
+      checkout_request_id: cb?.CheckoutRequestID || null
+    };
+
+    if (supabaseAdmin) {
+      const { error } = await supabaseAdmin
+        .from('transactions')
+        .insert(tx)
+        .select('id')
+        .single();
+      if (error && !String(error.message||'').toLowerCase().includes('duplicate')) {
+        console.warn('STK callback transaction insert failed:', error.message);
+      }
+    }
+
+    if (resultCode !== 0) {
+      return res.status(200).json({ ok: true });
+    }
+
+    if (paymentRow && paymentRow.status && paymentRow.status !== 'RECEIVED') {
+      return res.status(200).json({ ok: true });
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      console.warn('STK callback invalid amount', { checkoutRequestId, receipt, amount });
+      if (paymentRow) {
+        await pool.query(
+          `UPDATE mpesa_c2b_payments SET status = 'REJECTED' WHERE id = $1 AND status = 'RECEIVED'`,
+          [paymentRow.id]
+        );
+      }
+      return res.status(200).json({ ok: true });
+    }
+
+    const plateRef = normalizeRef(paymentRow?.account_reference || '');
+    if (!isPlateRef(plateRef)) {
+      console.warn('STK callback missing/invalid plate reference', { checkoutRequestId, receipt });
+      if (paymentRow) {
+        const updateRes = await pool.query(
+          `UPDATE mpesa_c2b_payments SET status = 'QUARANTINED' WHERE id = $1 AND status = 'RECEIVED'`,
+          [paymentRow.id]
+        );
+        if (updateRes.rowCount) {
+          await pool.query(
+            `
+              INSERT INTO mpesa_c2b_quarantine
+                (paybill_number, account_reference, amount, msisdn, raw, reason)
+              VALUES
+                ($1, $2, $3, $4, $5, 'INVALID_PLATE_REF')
+            `,
+            [null, paymentRow.account_reference || null, amount, msisdn || null, mergedRaw]
+          );
+        }
+        try {
+          await applyRiskRules({ paymentId: paymentRow.id, reasonCodes: ['UNKNOWN_ACCOUNT_REF'] });
+        } catch (err) {
+          console.warn('Risk engine failed for STK invalid plate:', err.message);
+        }
+      }
+      return res.status(200).json({ ok: true });
+    }
+
+    const walletId = await resolveWalletByRef(plateRef);
+    if (!walletId) {
+      console.warn('STK callback unknown plate reference', { checkoutRequestId, plateRef });
+      if (paymentRow) {
+        const updateRes = await pool.query(
+          `UPDATE mpesa_c2b_payments SET status = 'QUARANTINED' WHERE id = $1 AND status = 'RECEIVED'`,
+          [paymentRow.id]
+        );
+        if (updateRes.rowCount) {
+          await pool.query(
+            `
+              INSERT INTO mpesa_c2b_quarantine
+                (paybill_number, account_reference, amount, msisdn, raw, reason)
+              VALUES
+                ($1, $2, $3, $4, $5, 'UNKNOWN_ACCOUNT_REF')
+            `,
+            [null, paymentRow.account_reference || null, amount, msisdn || null, mergedRaw]
+          );
+        }
+        try {
+          await applyRiskRules({ paymentId: paymentRow.id, reasonCodes: ['UNKNOWN_ACCOUNT_REF'] });
+        } catch (err) {
+          console.warn('Risk engine failed for STK unknown plate:', err.message);
+        }
+      }
+      return res.status(200).json({ ok: true });
+    }
+
+    if (paymentRow) {
+      try {
+        const risk = await applyRiskRules({ paymentId: paymentRow.id, reasonCodes: [] });
+        if (risk && risk.risk_level === 'HIGH') {
+          const updateRes = await pool.query(
+            `UPDATE mpesa_c2b_payments SET status = 'QUARANTINED' WHERE id = $1 AND status = 'RECEIVED'`,
+            [paymentRow.id]
+          );
+          if (updateRes.rowCount) {
+            await pool.query(
+              `
+                INSERT INTO mpesa_c2b_quarantine
+                  (paybill_number, account_reference, amount, msisdn, raw, reason)
+                VALUES
+                  ($1, $2, $3, $4, $5, 'HIGH_RISK')
+              `,
+              [null, paymentRow.account_reference || null, amount, msisdn || null, mergedRaw]
+            );
+          }
+          return res.status(200).json({ ok: true });
+        }
+      } catch (err) {
+        console.warn('Risk engine failed for STK payment:', err.message);
+      }
+    }
+
+    const sourceRef = receipt || checkoutRequestId || (paymentRow ? String(paymentRow.id) : null);
+    if (sourceRef) {
+      const existing = await pool.query(
+        `
+          SELECT id
+          FROM wallet_transactions
+          WHERE source = 'MPESA_STK' AND source_ref = $1
+          LIMIT 1
+        `,
+        [sourceRef]
+      );
+      if (existing.rows.length) {
+        if (paymentRow) {
+          await pool.query(
+            `UPDATE mpesa_c2b_payments SET status = 'CREDITED' WHERE id = $1 AND status = 'RECEIVED'`,
+            [paymentRow.id]
+          );
+          try {
+            await applyRiskRules({ paymentId: paymentRow.id, reasonCodes: ['IDEMPOTENT_REPLAY'] });
+          } catch (err) {
+            console.warn('Risk engine failed for STK duplicate:', err.message);
+          }
+        }
+        return res.status(200).json({ ok: true });
+      }
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      if (paymentRow?.id) {
+        const locked = await client.query(
+          `
+            SELECT status
+            FROM mpesa_c2b_payments
+            WHERE id = $1
+            FOR UPDATE
+          `,
+          [paymentRow.id]
+        );
+        const lockedStatus = locked.rows[0]?.status;
+        if (lockedStatus !== 'RECEIVED') {
+          await client.query('ROLLBACK');
+          return res.status(200).json({ ok: true });
+        }
+      }
+      await creditFareWithFeesByWalletId({
+        walletId,
+        amount,
+        source: 'MPESA_STK',
+        sourceRef: sourceRef || null,
+        description: `STK payment from ${msisdn || 'unknown'}`,
+        client,
+      });
+      if (paymentRow) {
+        const updated = await client.query(
+          `UPDATE mpesa_c2b_payments SET status = 'CREDITED' WHERE id = $1 AND status = 'RECEIVED'`,
+          [paymentRow.id]
+        );
+        if (!updated.rowCount) {
+          await client.query('ROLLBACK');
+          return res.status(200).json({ ok: true });
+        }
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('Error crediting wallet for STK:', err.message);
+      if (paymentRow) {
+        await pool.query(
+          `UPDATE mpesa_c2b_payments SET status = 'REJECTED' WHERE id = $1 AND status = 'RECEIVED'`,
+          [paymentRow.id]
+        );
+      }
+    } finally {
+      client.release();
+    }
+
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('STK callback error:', err.message);
+    return res.status(200).json({ ok: true });
+  }
 });
 
 module.exports = router;

@@ -1,6 +1,10 @@
-import { useEffect, useMemo, useState } from "react"
+ï»¿import { useEffect, useMemo, useState } from "react"
 import DashboardShell from "../components/DashboardShell"
+import PaybillCodeCard from "../components/PaybillCodeCard"
+import PaybillHeader from "../components/PaybillHeader"
+import StickerPrintModal from "../components/StickerPrintModal"
 import { authFetch } from "../lib/auth"
+import { mapPaybillCodes, type PaybillAliasRow } from "../lib/paybill"
 import { useAuth } from "../state/auth"
 import VehicleCarePage from "../modules/vehicleCare/VehicleCarePage"
 import { fetchAccessGrants, type AccessGrant } from "../modules/vehicleCare/vehicleCare.api"
@@ -63,6 +67,9 @@ const TaxiDashboard = () => {
   const { user, logout } = useAuth()
 
   const [summary, setSummary] = useState<Summary | null>(null)
+  const [paybillAliases, setPaybillAliases] = useState<PaybillAliasRow[]>([])
+  const [paybillError, setPaybillError] = useState<string | null>(null)
+  const [showPaybillSticker, setShowPaybillSticker] = useState(false)
   const [weekTotals, setWeekTotals] = useState<InsightTotals | null>(null)
   const [monthTotals, setMonthTotals] = useState<InsightTotals | null>(null)
   const [trend, setTrend] = useState<InsightRow[]>([])
@@ -101,6 +108,8 @@ const TaxiDashboard = () => {
     const d = new Date()
     return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10)
   }, [])
+  const paybillCodes = useMemo(() => mapPaybillCodes(paybillAliases), [paybillAliases])
+  const taxiCode = paybillCodes.driver || ""
 
   const filterToday = (rows: Array<{ created_at?: string; time?: string; timestamp?: string }>) => {
     const today = new Date()
@@ -147,6 +156,28 @@ const TaxiDashboard = () => {
     }
     void loadAll()
   }, [todayISO, weekStartISO, monthStartISO])
+
+  useEffect(() => {
+    const entityId = user?.matatu_id || ""
+    if (!entityId) {
+      setPaybillAliases([])
+      setPaybillError(null)
+      return
+    }
+    async function loadPaybillCodes() {
+      try {
+        const res = await fetchJson<{ items?: PaybillAliasRow[] }>(
+          `/u/paybill-codes?entity_type=TAXI&entity_id=${encodeURIComponent(entityId)}`,
+        )
+        setPaybillAliases(res.items || [])
+        setPaybillError(null)
+      } catch (err) {
+        setPaybillAliases([])
+        setPaybillError(err instanceof Error ? err.message : "Failed to load PayBill code")
+      }
+    }
+    loadPaybillCodes()
+  }, [user?.matatu_id])
 
   useEffect(() => {
     void (async () => {
@@ -347,27 +378,50 @@ const TaxiDashboard = () => {
       </nav>
 
       {activeTab === "today" ? (
-        <section className="card">
-          <h3 style={{ marginTop: 0 }}>Today</h3>
-          <div className="grid metrics">
-            <div className="metric">
-              <div className="k">Till today (KSH)</div>
-              <div className="v">{formatKes(summary?.till_today)}</div>
+        <>
+          <section className="card">
+            <PaybillHeader
+              title="Taxi PayBill Account (4814003)"
+              actions={
+                <button className="btn ghost" type="button" onClick={() => setShowPaybillSticker(true)}>
+                  Print Sticker
+                </button>
+              }
+            />
+            {paybillError ? <div className="err">PayBill load error: {paybillError}</div> : null}
+            <div style={{ marginTop: 12 }}>
+              <PaybillCodeCard title="Taxi Driver Account" label="TAXI Account (Driver)" code={taxiCode} />
             </div>
-            <div className="metric">
-              <div className="k">Cash today (KSH)</div>
-              <div className="v">{formatKes(summary?.cash_today)}</div>
+          </section>
+
+          <section className="card">
+            <h3 style={{ marginTop: 0 }}>Today</h3>
+            <div className="grid metrics">
+              <div className="metric">
+                <div className="k">Till today (KSH)</div>
+                <div className="v">{formatKes(summary?.till_today)}</div>
+              </div>
+              <div className="metric">
+                <div className="k">Cash today (KSH)</div>
+                <div className="v">{formatKes(summary?.cash_today)}</div>
+              </div>
+              <div className="metric">
+                <div className="k">Expenses today</div>
+                <div className="v">{formatKes(summary?.expenses_today)}</div>
+              </div>
+              <div className="metric">
+                <div className="k">Net today</div>
+                <div className="v">{formatKes(summary?.net_today)}</div>
+              </div>
             </div>
-            <div className="metric">
-              <div className="k">Expenses today</div>
-              <div className="v">{formatKes(summary?.expenses_today)}</div>
-            </div>
-            <div className="metric">
-              <div className="k">Net today</div>
-              <div className="v">{formatKes(summary?.net_today)}</div>
-            </div>
-          </div>
-        </section>
+          </section>
+          <StickerPrintModal
+            open={showPaybillSticker}
+            title="Taxi PayBill Account (4814003)"
+            onClose={() => setShowPaybillSticker(false)}
+            lines={[{ label: "Taxi Driver Account - TAXI Account (Driver)", value: taxiCode }]}
+          />
+        </>
       ) : null}
 
       {activeTab === "cash" ? (
@@ -614,19 +668,19 @@ const TaxiDashboard = () => {
             <div className="metric">
               <div className="k">This week (KSH)</div>
               <div className="v">{formatKes(weekTotals?.net)}</div>
-              <div className="muted small">Income {formatKes(weekTotals?.income)} · Expenses {formatKes(weekTotals?.expenses)}</div>
+              <div className="muted small">Income {formatKes(weekTotals?.income)} Â· Expenses {formatKes(weekTotals?.expenses)}</div>
             </div>
             <div className="metric">
               <div className="k">This month (KSH)</div>
               <div className="v">{formatKes(monthTotals?.net)}</div>
-              <div className="muted small">Income {formatKes(monthTotals?.income)} · Expenses {formatKes(monthTotals?.expenses)}</div>
+              <div className="muted small">Income {formatKes(monthTotals?.income)} Â· Expenses {formatKes(monthTotals?.expenses)}</div>
             </div>
             <div className="metric">
               <div className="k">Expense ratio</div>
               <div className="v">
                 {monthTotals?.expense_pct_of_income != null
                   ? `${Math.round(Number(monthTotals.expense_pct_of_income || 0))}%`
-                  : "—"}
+                  : "â€”"}
               </div>
               <div className="muted small">Expenses as % of income (month)</div>
             </div>
@@ -761,3 +815,4 @@ const TaxiDashboard = () => {
 }
 
 export default TaxiDashboard
+

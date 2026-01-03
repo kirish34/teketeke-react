@@ -2,7 +2,22 @@ const express = require('express');
 const crypto = require('crypto');
 const { supabaseAdmin } = require('../supabase');
 const pool = require('../db/pool');
-const { creditFareWithFees, creditWallet, registerWalletForEntity } = require('../wallet/wallet.service');
+const {
+  creditFareWithFees,
+  creditFareWithFeesByWalletId,
+  creditWallet,
+  createWalletRecord,
+  registerWalletForEntity,
+} = require('../wallet/wallet.service');
+const { runDailyReconciliation, formatDateISO } = require('../services/reconciliation.service');
+const {
+  normalizeRef,
+  resolveWalletByRef,
+  ensurePlateAlias,
+  ensurePaybillAlias,
+  isPlateRef,
+} = require('../wallet/wallet.aliases');
+const { validatePaybillCode } = require('../wallet/paybillCode.util');
 const { requireUser } = require('../middleware/auth');
 const router = express.Router();
 
@@ -85,6 +100,23 @@ function normalizeDateBounds(fromRaw, toRaw) {
   return { from, to };
 }
 
+function normalizeDateOnly(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+function defaultDateOnlyRange(days = 7) {
+  const today = new Date();
+  const start = new Date(today);
+  start.setDate(today.getDate() - Math.max(days - 1, 0));
+  return {
+    from: formatDateISO(start),
+    to: formatDateISO(today),
+  };
+}
+
 function deriveNumericRef(...values) {
   for (const v of values) {
     if (!v) continue;
@@ -96,6 +128,16 @@ function deriveNumericRef(...values) {
   }
   return Date.now() % 100000;
 }
+
+const PAYBILL_KEY_BY_KIND = {
+  SACCO_DAILY_FEE: '30',
+  SACCO_LOAN: '31',
+  SACCO_SAVINGS: '32',
+  MATATU_OWNER: '10',
+  MATATU_VEHICLE: '11',
+  TAXI_DRIVER: '40',
+  BODA_RIDER: '50',
+};
 
 // Simple ping for UI testing
 router.get('/ping', (_req,res)=> res.json({ ok:true }));
@@ -323,7 +365,8 @@ router.get('/withdrawals', async (req, res) => {
 
 // C2B payments log
 router.get('/c2b-payments', async (req, res) => {
-  const status = String(req.query.status || '').toLowerCase();
+  const statusRaw = String(req.query.status || '').trim();
+  const statusLower = statusRaw.toLowerCase();
   const q = String(req.query.q || '').trim();
   const { from, to } = normalizeDateBounds(req.query.from, req.query.to);
   const limitRaw = Number(req.query.limit);
@@ -339,22 +382,30 @@ router.get('/c2b-payments', async (req, res) => {
 
   const params = [];
   const where = [];
-  if (status === 'processed') where.push('processed = true');
-  if (status === 'pending') where.push('(processed = false OR processed IS NULL)');
+  let normalizedStatus = null;
+  if (statusLower === 'processed') normalizedStatus = 'CREDITED';
+  if (statusLower === 'pending') normalizedStatus = 'RECEIVED';
+  if (['RECEIVED', 'CREDITED', 'REJECTED', 'QUARANTINED'].includes(statusRaw.toUpperCase())) {
+    normalizedStatus = statusRaw.toUpperCase();
+  }
+  if (normalizedStatus) {
+    params.push(normalizedStatus);
+    where.push(`status = $${params.length}`);
+  }
   if (q) {
     params.push(`%${q}%`);
     const idx = params.length;
     where.push(
-      `(mpesa_receipt ILIKE $${idx} OR phone_number ILIKE $${idx} OR account_reference ILIKE $${idx} OR paybill_number ILIKE $${idx})`
+      `(receipt ILIKE $${idx} OR msisdn ILIKE $${idx} OR account_reference ILIKE $${idx} OR paybill_number ILIKE $${idx})`
     );
   }
   if (from) {
     params.push(from.toISOString());
-    where.push(`transaction_timestamp >= $${params.length}`);
+    where.push(`created_at >= $${params.length}`);
   }
   if (to) {
     params.push(to.toISOString());
-    where.push(`transaction_timestamp <= $${params.length}`);
+    where.push(`created_at <= $${params.length}`);
   }
 
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -362,7 +413,7 @@ router.get('/c2b-payments', async (req, res) => {
     const countRes = await pool.query(
       `
         SELECT COUNT(*)::int AS total
-        FROM paybill_payments_raw
+        FROM mpesa_c2b_payments
         ${whereClause}
       `,
       params
@@ -375,17 +426,16 @@ router.get('/c2b-payments', async (req, res) => {
       `
         SELECT
           id,
-          mpesa_receipt,
-          phone_number,
+          receipt,
+          msisdn,
           amount,
           paybill_number,
           account_reference,
-          transaction_timestamp,
-          processed,
-          processed_at
-        FROM paybill_payments_raw
+          status,
+          created_at
+        FROM mpesa_c2b_payments
         ${whereClause}
-        ORDER BY transaction_timestamp DESC NULLS LAST, id DESC
+        ORDER BY created_at DESC NULLS LAST, id DESC
         LIMIT $${params.length - 1}
         OFFSET $${params.length}
       `,
@@ -397,6 +447,42 @@ router.get('/c2b-payments', async (req, res) => {
   }
 });
 
+// Wallet PayBill/Plate aliases (admin UI helper)
+router.get('/paybill-codes', async (req, res) => {
+  const entityType = String(req.query.entity_type || '').trim().toUpperCase();
+  try {
+    const params = [];
+    const where = [`wa.is_active = true`, `wa.alias_type IN ('PAYBILL_CODE', 'PLATE')`];
+    if (entityType) {
+      params.push(entityType);
+      where.push(`w.entity_type = $${params.length}`);
+    }
+    const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const { rows } = await pool.query(
+      `
+        SELECT
+          w.id AS wallet_id,
+          w.entity_type,
+          w.entity_id,
+          w.wallet_kind,
+          w.sacco_id,
+          w.matatu_id,
+          wa.alias,
+          wa.alias_type
+        FROM wallets w
+        JOIN wallet_aliases wa
+          ON wa.wallet_id = w.id
+        ${whereClause}
+        ORDER BY w.entity_type, w.entity_id
+      `,
+      params
+    );
+    res.json({ items: rows || [] });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Failed to load paybill codes' });
+  }
+});
+
 // Fetch raw C2B payload
 router.get('/c2b-payments/:id/raw', async (req, res) => {
   const id = req.params.id;
@@ -404,15 +490,15 @@ router.get('/c2b-payments/:id/raw', async (req, res) => {
   try {
     const { rows } = await pool.query(
       `
-        SELECT raw_payload
-        FROM paybill_payments_raw
+        SELECT raw
+        FROM mpesa_c2b_payments
         WHERE id = $1
         LIMIT 1
       `,
       [id]
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: 'not found' });
-    res.json({ ok: true, payload: rows[0].raw_payload });
+    res.json({ ok: true, payload: rows[0].raw });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
@@ -427,12 +513,13 @@ router.post('/c2b-payments/:id/reprocess', async (req, res) => {
       `
         SELECT
           id,
-          mpesa_receipt,
-          phone_number,
+          receipt,
+          msisdn,
           amount,
           account_reference,
-          processed
-        FROM paybill_payments_raw
+          paybill_number,
+          status
+        FROM mpesa_c2b_payments
         WHERE id = $1
         LIMIT 1
       `,
@@ -440,18 +527,43 @@ router.post('/c2b-payments/:id/reprocess', async (req, res) => {
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: 'not found' });
     const row = rows[0];
-    if (row.processed) {
-      return res.status(400).json({ ok: false, error: 'already processed' });
+    if (row.status !== 'RECEIVED') {
+      return res.status(400).json({ ok: false, error: 'payment not in RECEIVED state' });
     }
-    if (!row.account_reference) {
-      return res.status(400).json({ ok: false, error: 'missing account reference' });
+
+    const expectedPaybill = '4814003';
+    if (String(row.paybill_number || '') !== expectedPaybill) {
+      await pool.query(`UPDATE mpesa_c2b_payments SET status = 'QUARANTINED' WHERE id = $1 AND status = 'RECEIVED'`, [
+        row.id,
+      ]);
+      return res.status(400).json({ ok: false, error: 'paybill mismatch' });
     }
+
+    const normalizedRef = normalizeRef(row.account_reference);
+    if (!validatePaybillCode(normalizedRef)) {
+      await pool.query(`UPDATE mpesa_c2b_payments SET status = 'QUARANTINED' WHERE id = $1 AND status = 'RECEIVED'`, [
+        row.id,
+      ]);
+      return res.status(400).json({ ok: false, error: 'invalid account reference' });
+    }
+
     const amount = Number(row.amount || 0);
     if (!Number.isFinite(amount) || amount <= 0) {
+      await pool.query(`UPDATE mpesa_c2b_payments SET status = 'REJECTED' WHERE id = $1 AND status = 'RECEIVED'`, [
+        row.id,
+      ]);
       return res.status(400).json({ ok: false, error: 'invalid amount' });
     }
 
-    const sourceRef = row.mpesa_receipt || String(row.id);
+    const walletId = await resolveWalletByRef(normalizedRef);
+    if (!walletId) {
+      await pool.query(`UPDATE mpesa_c2b_payments SET status = 'QUARANTINED' WHERE id = $1 AND status = 'RECEIVED'`, [
+        row.id,
+      ]);
+      return res.status(400).json({ ok: false, error: 'unknown account reference' });
+    }
+
+    const sourceRef = row.receipt || String(row.id);
     const existing = await pool.query(
       `
         SELECT id
@@ -462,28 +574,471 @@ router.post('/c2b-payments/:id/reprocess', async (req, res) => {
       [sourceRef]
     );
     if (existing.rows.length) {
-      await pool.query(
-        `UPDATE paybill_payments_raw SET processed = true, processed_at = now() WHERE id = $1`,
-        [row.id]
-      );
-      return res.json({ ok: true, message: 'Already credited; marked processed' });
+      await pool.query(`UPDATE mpesa_c2b_payments SET status = 'CREDITED' WHERE id = $1 AND status = 'RECEIVED'`, [
+        row.id,
+      ]);
+      return res.json({ ok: true, message: 'Already credited; marked credited' });
     }
 
-    const result = await creditFareWithFees({
-      virtualAccountCode: row.account_reference,
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await creditFareWithFeesByWalletId({
+        walletId,
+        amount,
+        source: 'MPESA_C2B',
+        sourceRef,
+        description: `M-Pesa fare from ${row.msisdn || 'unknown'}`,
+        client,
+      });
+      const updated = await client.query(
+        `UPDATE mpesa_c2b_payments SET status = 'CREDITED' WHERE id = $1 AND status = 'RECEIVED'`,
+        [row.id]
+      );
+      if (!updated.rowCount) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ ok: false, error: 'payment status changed; retry' });
+      }
+      await client.query('COMMIT');
+      return res.json({ ok: true, message: 'Reprocessed', data: result });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      await pool.query(`UPDATE mpesa_c2b_payments SET status = 'REJECTED' WHERE id = $1 AND status = 'RECEIVED'`, [
+        row.id,
+      ]);
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Daily reconciliation (admin-triggered)
+router.post('/reconciliation/run', async (req, res) => {
+  const date = normalizeDateOnly(req.query.date || req.body?.date || null);
+  try {
+    const result = await runDailyReconciliation({ date: date || undefined });
+    res.json({ ok: true, result });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.get('/reconciliation', async (req, res) => {
+  const defaults = defaultDateOnlyRange(14);
+  const from = normalizeDateOnly(req.query.from) || defaults.from;
+  const to = normalizeDateOnly(req.query.to) || defaults.to;
+  try {
+    const paybillRes = await pool.query(
+      `
+        SELECT
+          id,
+          date,
+          paybill_number,
+          credited_total,
+          credited_count,
+          quarantined_total,
+          quarantined_count,
+          rejected_total,
+          rejected_count,
+          created_at,
+          updated_at
+        FROM reconciliation_daily
+        WHERE date >= $1 AND date <= $2
+        ORDER BY date DESC
+      `,
+      [from, to]
+    );
+    const channelRes = await pool.query(
+      `
+        SELECT
+          id,
+          date,
+          channel,
+          paybill_number,
+          credited_total,
+          credited_count,
+          quarantined_total,
+          quarantined_count,
+          rejected_total,
+          rejected_count,
+          created_at,
+          updated_at
+        FROM reconciliation_daily_channels
+        WHERE date >= $1 AND date <= $2
+        ORDER BY date DESC, channel
+      `,
+      [from, to]
+    );
+
+    const paybillRows = paybillRes.rows || [];
+    const channelRows = channelRes.rows || [];
+
+    const c2bByDate = {};
+    paybillRows.forEach((row) => {
+      if (!row?.date) return;
+      c2bByDate[row.date] = {
+        credited_total: Number(row.credited_total || 0),
+        credited_count: Number(row.credited_count || 0),
+        quarantined_total: Number(row.quarantined_total || 0),
+        quarantined_count: Number(row.quarantined_count || 0),
+        rejected_total: Number(row.rejected_total || 0),
+        rejected_count: Number(row.rejected_count || 0),
+      };
+    });
+
+    const stkByDate = {};
+    channelRows.forEach((row) => {
+      if (!row?.date || row.channel !== 'STK') return;
+      stkByDate[row.date] = {
+        credited_total: Number(row.credited_total || 0),
+        credited_count: Number(row.credited_count || 0),
+        quarantined_total: Number(row.quarantined_total || 0),
+        quarantined_count: Number(row.quarantined_count || 0),
+        rejected_total: Number(row.rejected_total || 0),
+        rejected_count: Number(row.rejected_count || 0),
+      };
+    });
+
+    const dateSet = new Set([
+      ...paybillRows.map((row) => row.date).filter(Boolean),
+      ...Object.keys(stkByDate),
+    ]);
+
+    const combined = Array.from(dateSet)
+      .map((date) => {
+        const c2b = c2bByDate[date] || {};
+        const stk = stkByDate[date] || {};
+        return {
+          date,
+          credited_total: Number(c2b.credited_total || 0) + Number(stk.credited_total || 0),
+          credited_count: Number(c2b.credited_count || 0) + Number(stk.credited_count || 0),
+          quarantined_total: Number(c2b.quarantined_total || 0) + Number(stk.quarantined_total || 0),
+          quarantined_count: Number(c2b.quarantined_count || 0) + Number(stk.quarantined_count || 0),
+          rejected_total: Number(c2b.rejected_total || 0) + Number(stk.rejected_total || 0),
+          rejected_count: Number(c2b.rejected_count || 0) + Number(stk.rejected_count || 0),
+        };
+      })
+      .sort((a, b) => (a.date < b.date ? 1 : -1));
+
+    res.json({ ok: true, paybill_c2b: paybillRows, channels: channelRows, combined });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Quarantine listing (admin)
+router.get('/c2b/quarantine', async (req, res) => {
+  const status = String(req.query.status || 'QUARANTINED').trim().toUpperCase();
+  const riskLevel = String(req.query.risk_level || '').trim().toUpperCase();
+  const flag = String(req.query.flag || '').trim().toUpperCase();
+  const q = String(req.query.q || '').trim();
+  const limitRaw = Number(req.query.limit);
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+  const offsetRaw = Number(req.query.offset);
+  const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
+
+  const params = [];
+  const where = [];
+  if (status) {
+    params.push(status);
+    where.push(`status = $${params.length}`);
+  }
+  if (riskLevel) {
+    params.push(riskLevel);
+    where.push(`risk_level = $${params.length}`);
+  }
+  if (flag) {
+    params.push(flag);
+    where.push(`risk_flags ? $${params.length}`);
+  }
+  if (q) {
+    params.push(`%${q}%`);
+    const idx = params.length;
+    where.push(
+      `(receipt ILIKE $${idx} OR msisdn ILIKE $${idx} OR account_reference ILIKE $${idx})`
+    );
+  }
+  const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  try {
+    const countRes = await pool.query(
+      `
+        SELECT COUNT(*)::int AS total
+        FROM mpesa_c2b_payments
+        ${whereClause}
+      `,
+      params
+    );
+    const total = countRes.rows[0]?.total || 0;
+
+    params.push(limit);
+    params.push(offset);
+    const { rows } = await pool.query(
+      `
+        SELECT
+          id,
+          receipt,
+          msisdn,
+          amount,
+          paybill_number,
+          account_reference,
+          status,
+          risk_level,
+          risk_score,
+          risk_flags,
+          created_at
+        FROM mpesa_c2b_payments
+        ${whereClause}
+        ORDER BY created_at DESC NULLS LAST, id DESC
+        LIMIT $${params.length - 1}
+        OFFSET $${params.length}
+      `,
+      params
+    );
+    res.json({ ok: true, items: rows || [], total, limit, offset });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+async function auditC2bAction({ client, adminUserId, paymentId, action, note, meta }) {
+  await client.query(
+    `
+      INSERT INTO c2b_actions_audit
+        (admin_user_id, payment_id, action, note, meta)
+      VALUES
+        ($1, $2, $3, $4, $5)
+    `,
+    [adminUserId || null, paymentId, action, note || null, meta || {}]
+  );
+}
+
+router.post('/c2b/:id/resolve', async (req, res) => {
+  const id = req.params.id;
+  if (!id) return res.status(400).json({ ok: false, error: 'id required' });
+
+  const action = String(req.body?.action || '').trim().toUpperCase();
+  const walletIdInput = req.body?.wallet_id || null;
+  const note = req.body?.note || null;
+  if (!['CREDIT', 'REJECT'].includes(action)) {
+    return res.status(400).json({ ok: false, error: 'action must be CREDIT or REJECT' });
+  }
+
+  const adminUserId = req.user?.id || null;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const paymentRes = await client.query(
+      `
+        SELECT id, status, receipt, msisdn, amount, account_reference
+        FROM mpesa_c2b_payments
+        WHERE id = $1
+        FOR UPDATE
+      `,
+      [id]
+    );
+    if (!paymentRes.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: 'payment not found' });
+    }
+
+    const payment = paymentRes.rows[0];
+    if (action === 'REJECT') {
+      if (payment.status === 'CREDITED') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ ok: false, error: 'cannot reject a credited payment' });
+      }
+      if (payment.status === 'REJECTED') {
+        await auditC2bAction({
+          client,
+          adminUserId,
+          paymentId: id,
+          action: 'REJECT',
+          note,
+          meta: { previous_status: payment.status, idempotent: true },
+        });
+        await client.query('COMMIT');
+        return res.json({ ok: true, message: 'Already rejected' });
+      }
+      const updated = await client.query(
+        `UPDATE mpesa_c2b_payments SET status = 'REJECTED' WHERE id = $1 AND status IN ('RECEIVED', 'QUARANTINED')`,
+        [id]
+      );
+      if (!updated.rowCount) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ ok: false, error: 'payment status changed; retry' });
+      }
+      await auditC2bAction({
+        client,
+        adminUserId,
+        paymentId: id,
+        action: 'REJECT',
+        note,
+        meta: { previous_status: payment.status },
+      });
+      await client.query('COMMIT');
+      return res.json({ ok: true, message: 'Payment rejected' });
+    }
+
+    if (payment.status === 'CREDITED') {
+      await auditC2bAction({
+        client,
+        adminUserId,
+        paymentId: id,
+        action: 'CREDIT',
+        note,
+        meta: { previous_status: payment.status, idempotent: true },
+      });
+      await client.query('COMMIT');
+      return res.json({ ok: true, message: 'Already credited' });
+    }
+
+    if (payment.status === 'REJECTED') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ ok: false, error: 'cannot credit a rejected payment' });
+    }
+
+    let resolvedWalletId = walletIdInput;
+    if (!resolvedWalletId) {
+      const normalized = normalizeRef(payment.account_reference || '');
+      resolvedWalletId = await resolveWalletByRef(normalized, { client });
+    }
+
+    if (!resolvedWalletId) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ ok: false, error: 'wallet_id required or alias unresolved' });
+    }
+
+    const amount = Number(payment.amount || 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ ok: false, error: 'invalid amount' });
+    }
+
+    const sourceRef = payment.receipt || String(payment.id);
+    const existingTx = await client.query(
+      `
+        SELECT id
+        FROM wallet_transactions
+        WHERE source = 'MPESA_C2B' AND source_ref = $1
+        LIMIT 1
+      `,
+      [sourceRef]
+    );
+
+    if (existingTx.rows.length) {
+      await client.query(
+        `UPDATE mpesa_c2b_payments SET status = 'CREDITED' WHERE id = $1 AND status IN ('RECEIVED', 'QUARANTINED')`,
+        [id]
+      );
+      await auditC2bAction({
+        client,
+        adminUserId,
+        paymentId: id,
+        action: 'CREDIT',
+        note,
+        meta: { previous_status: payment.status, idempotent: true },
+      });
+      await client.query('COMMIT');
+      return res.json({ ok: true, message: 'Already credited (idempotent)' });
+    }
+
+    const result = await creditFareWithFeesByWalletId({
+      walletId: resolvedWalletId,
       amount,
       source: 'MPESA_C2B',
       sourceRef,
-      description: `M-Pesa fare from ${row.phone_number || 'unknown'}`,
+      description: `Manual C2B resolve from ${payment.msisdn || 'unknown'}`,
+      client,
     });
 
-    await pool.query(
-      `UPDATE paybill_payments_raw SET processed = true, processed_at = now() WHERE id = $1`,
-      [row.id]
+    const updated = await client.query(
+      `UPDATE mpesa_c2b_payments SET status = 'CREDITED' WHERE id = $1 AND status IN ('RECEIVED', 'QUARANTINED')`,
+      [id]
     );
-    return res.json({ ok: true, message: 'Reprocessed', data: result });
+    if (!updated.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ ok: false, error: 'payment status changed; retry' });
+    }
+    await auditC2bAction({
+      client,
+      adminUserId,
+      paymentId: id,
+      action: 'CREDIT',
+      note,
+      meta: { previous_status: payment.status, wallet_id: resolvedWalletId },
+    });
+    await client.query('COMMIT');
+    return res.json({ ok: true, message: 'Credited', data: result });
   } catch (e) {
+    await client.query('ROLLBACK');
     return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    client.release();
+  }
+});
+
+// Ops alerts (admin)
+router.get('/ops-alerts', async (req, res) => {
+  const severity = String(req.query.severity || '').trim().toUpperCase();
+  const type = String(req.query.type || '').trim();
+  const limitRaw = Number(req.query.limit);
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+  const offsetRaw = Number(req.query.offset);
+  const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
+
+  const params = [];
+  const where = [];
+  if (severity) {
+    params.push(severity);
+    where.push(`severity = $${params.length}`);
+  }
+  if (type) {
+    params.push(type);
+    where.push(`type = $${params.length}`);
+  }
+
+  const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  try {
+    const countRes = await pool.query(
+      `
+        SELECT COUNT(*)::int AS total
+        FROM ops_alerts
+        ${whereClause}
+      `,
+      params
+    );
+    const total = countRes.rows[0]?.total || 0;
+
+    params.push(limit);
+    params.push(offset);
+    const { rows } = await pool.query(
+      `
+        SELECT
+          id,
+          created_at,
+          type,
+          severity,
+          entity_type,
+          entity_id,
+          payment_id,
+          message,
+          meta
+        FROM ops_alerts
+        ${whereClause}
+        ORDER BY created_at DESC, id DESC
+        LIMIT $${params.length - 1}
+        OFFSET $${params.length}
+      `,
+      params
+    );
+    res.json({ ok: true, items: rows || [], total, limit, offset });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 
@@ -796,15 +1351,76 @@ router.post('/register-sacco', async (req,res)=>{
       result.login_error = e.message || 'Failed to create operator login';
     }
   }
-  try{
-    const wallet = await registerWalletForEntity({
-      entityType: 'SACCO',
-      entityId: result.id,
-      numericRef: deriveNumericRef(result.default_till, result.id)
-    });
-    result.wallet_id = wallet.id;
-    result.virtual_account_code = wallet.virtual_account_code;
-  }catch(e){
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const baseRef = deriveNumericRef(result.default_till, result.id);
+      const feeWallet = await createWalletRecord({
+        entityType: 'SACCO',
+        entityId: result.id,
+        walletType: 'sacco',
+        walletKind: 'SACCO_DAILY_FEE',
+        saccoId: result.id,
+        numericRef: baseRef,
+        client,
+      });
+      const loanWallet = await createWalletRecord({
+        entityType: 'SACCO',
+        entityId: result.id,
+        walletType: 'sacco',
+        walletKind: 'SACCO_LOAN',
+        saccoId: result.id,
+        numericRef: baseRef + 10000,
+        client,
+      });
+      const savingsWallet = await createWalletRecord({
+        entityType: 'SACCO',
+        entityId: result.id,
+        walletType: 'sacco',
+        walletKind: 'SACCO_SAVINGS',
+        saccoId: result.id,
+        numericRef: baseRef + 20000,
+        client,
+      });
+
+      const feeCode = await ensurePaybillAlias({
+        walletId: feeWallet.id,
+        key: PAYBILL_KEY_BY_KIND.SACCO_DAILY_FEE,
+        client,
+      });
+      const loanCode = await ensurePaybillAlias({
+        walletId: loanWallet.id,
+        key: PAYBILL_KEY_BY_KIND.SACCO_LOAN,
+        client,
+      });
+      const savingsCode = await ensurePaybillAlias({
+        walletId: savingsWallet.id,
+        key: PAYBILL_KEY_BY_KIND.SACCO_SAVINGS,
+        client,
+      });
+
+      await client.query(`UPDATE saccos SET wallet_id = $1 WHERE id = $2`, [feeWallet.id, result.id]);
+      await client.query('COMMIT');
+
+      result.wallet_id = feeWallet.id;
+      result.wallet_ids = {
+        daily_fee: feeWallet.id,
+        loan: loanWallet.id,
+        savings: savingsWallet.id,
+      };
+      result.paybill_codes = {
+        daily_fee: feeCode,
+        loan: loanCode,
+        savings: savingsCode,
+      };
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (e) {
     return res.status(500).json({ error: 'SACCO created but wallet failed: ' + e.message });
   }
   res.json(result);
@@ -856,18 +1472,141 @@ router.post('/register-matatu', async (req,res)=>{
   if (needsSacco && !row.sacco_id) return res.status(400).json({error:`sacco_id required for ${vehicleType}`});
   const { data, error } = await supabaseAdmin.from('matatus').insert(row).select().single();
   if (error) return res.status(500).json({ error: error.message });
-  try{
-    const wallet = await registerWalletForEntity({
-      entityType: vehicleType === 'MATATU' ? 'MATATU' : vehicleType,
-      entityId: data.id,
-      numericRef: deriveNumericRef(data.number_plate, data.tlb_number, data.id)
-    });
-    res.json({
-      ...data,
-      wallet_id: wallet.id,
-      virtual_account_code: wallet.virtual_account_code,
-    });
-  }catch(e){
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const baseRef = deriveNumericRef(data.number_plate, data.tlb_number, data.id);
+      const normalizedType = vehicleType === 'BODA' ? 'BODABODA' : vehicleType;
+      let primaryWallet = null;
+      let walletIds = null;
+      let paybillCodes = null;
+      let plateAlias = null;
+
+      if (normalizedType === 'MATATU') {
+        const ownerWallet = await createWalletRecord({
+          entityType: 'MATATU',
+          entityId: data.id,
+          walletType: 'owner',
+          walletKind: 'MATATU_OWNER',
+          saccoId: data.sacco_id || null,
+          matatuId: data.id,
+          numericRef: baseRef + 10000,
+          client,
+        });
+        const vehicleWallet = await createWalletRecord({
+          entityType: 'MATATU',
+          entityId: data.id,
+          walletType: 'matatu',
+          walletKind: 'MATATU_VEHICLE',
+          saccoId: data.sacco_id || null,
+          matatuId: data.id,
+          numericRef: baseRef,
+          client,
+        });
+
+        const ownerCode = await ensurePaybillAlias({
+          walletId: ownerWallet.id,
+          key: PAYBILL_KEY_BY_KIND.MATATU_OWNER,
+          client,
+        });
+        const vehicleCode = await ensurePaybillAlias({
+          walletId: vehicleWallet.id,
+          key: PAYBILL_KEY_BY_KIND.MATATU_VEHICLE,
+          client,
+        });
+
+        const normalizedPlate = normalizeRef(data.number_plate || '');
+        if (normalizedPlate && isPlateRef(normalizedPlate)) {
+          plateAlias = await ensurePlateAlias({
+            walletId: vehicleWallet.id,
+            plate: normalizedPlate,
+            client,
+          });
+        }
+
+        primaryWallet = vehicleWallet;
+        walletIds = { owner: ownerWallet.id, vehicle: vehicleWallet.id };
+        paybillCodes = { owner: ownerCode, vehicle: vehicleCode };
+      } else if (normalizedType === 'TAXI') {
+        const taxiWallet = await createWalletRecord({
+          entityType: 'TAXI',
+          entityId: data.id,
+          walletType: 'matatu',
+          walletKind: 'TAXI_DRIVER',
+          saccoId: data.sacco_id || null,
+          matatuId: data.id,
+          numericRef: baseRef,
+          client,
+        });
+        const taxiCode = await ensurePaybillAlias({
+          walletId: taxiWallet.id,
+          key: PAYBILL_KEY_BY_KIND.TAXI_DRIVER,
+          client,
+        });
+        primaryWallet = taxiWallet;
+        walletIds = { driver: taxiWallet.id };
+        paybillCodes = { driver: taxiCode };
+      } else if (normalizedType === 'BODABODA') {
+        const bodaWallet = await createWalletRecord({
+          entityType: 'BODABODA',
+          entityId: data.id,
+          walletType: 'matatu',
+          walletKind: 'BODA_RIDER',
+          saccoId: data.sacco_id || null,
+          matatuId: data.id,
+          numericRef: baseRef,
+          client,
+        });
+        const bodaCode = await ensurePaybillAlias({
+          walletId: bodaWallet.id,
+          key: PAYBILL_KEY_BY_KIND.BODA_RIDER,
+          client,
+        });
+        primaryWallet = bodaWallet;
+        walletIds = { rider: bodaWallet.id };
+        paybillCodes = { rider: bodaCode };
+      } else {
+        const vehicleWallet = await createWalletRecord({
+          entityType: 'MATATU',
+          entityId: data.id,
+          walletType: 'matatu',
+          walletKind: 'MATATU_VEHICLE',
+          saccoId: data.sacco_id || null,
+          matatuId: data.id,
+          numericRef: baseRef,
+          client,
+        });
+        const vehicleCode = await ensurePaybillAlias({
+          walletId: vehicleWallet.id,
+          key: PAYBILL_KEY_BY_KIND.MATATU_VEHICLE,
+          client,
+        });
+        primaryWallet = vehicleWallet;
+        walletIds = { vehicle: vehicleWallet.id };
+        paybillCodes = { vehicle: vehicleCode };
+      }
+
+      if (primaryWallet?.id) {
+        await client.query(`UPDATE matatus SET wallet_id = $1 WHERE id = $2`, [primaryWallet.id, data.id]);
+      }
+      await client.query('COMMIT');
+
+      res.json({
+        ...data,
+        wallet_id: primaryWallet?.id || null,
+        virtual_account_code: primaryWallet?.virtual_account_code || null,
+        wallet_ids: walletIds,
+        paybill_codes: paybillCodes,
+        plate_alias: plateAlias,
+      });
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (e) {
     res.status(500).json({ error: 'Matatu created but wallet failed: ' + e.message });
   }
 });
@@ -875,8 +1614,26 @@ router.post('/update-matatu', async (req,res)=>{
   const { id, ...rest } = req.body||{};
   if(!id) return res.status(400).json({error:'id required'});
   if (rest.number_plate) rest.number_plate = String(rest.number_plate).toUpperCase();
+  const { data: existing, error: existingErr } = await supabaseAdmin
+    .from('matatus')
+    .select('number_plate, wallet_id')
+    .eq('id', id)
+    .maybeSingle();
+  if (existingErr) return res.status(500).json({ error: existingErr.message });
+  if (!existing) return res.status(404).json({ error: 'matatu not found' });
+
   const { data, error } = await supabaseAdmin.from('matatus').update(rest).eq('id',id).select().single();
   if (error) return res.status(500).json({ error: error.message });
+
+  const nextPlate = data?.number_plate || null;
+  if (rest.number_plate && nextPlate && existing.wallet_id && nextPlate !== existing.number_plate) {
+    try {
+      await ensurePlateAlias({ walletId: existing.wallet_id, plate: nextPlate });
+    } catch (aliasErr) {
+      console.warn('Failed to update plate alias:', aliasErr.message);
+    }
+  }
+
   res.json(data);
 });
 router.delete('/delete-matatu/:id', async (req,res)=>{
@@ -1146,7 +1903,44 @@ router.post('/register-taxi', async (req,res)=>{
   };
   const { data, error } = await supabaseAdmin.from('taxis').insert(taxiRow).select().single();
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ ...data, owner: ownerData });
+
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const baseRef = deriveNumericRef(data.plate, data.id);
+      const taxiWallet = await createWalletRecord({
+        entityType: 'TAXI',
+        entityId: data.id,
+        walletType: 'matatu',
+        walletKind: 'TAXI_DRIVER',
+        saccoId: operatorId,
+        numericRef: baseRef,
+        client,
+      });
+      const taxiCode = await ensurePaybillAlias({
+        walletId: taxiWallet.id,
+        key: PAYBILL_KEY_BY_KIND.TAXI_DRIVER,
+        client,
+      });
+      await client.query(`UPDATE taxis SET wallet_id = $1 WHERE id = $2`, [taxiWallet.id, data.id]);
+      await client.query('COMMIT');
+      return res.json({
+        ...data,
+        owner: ownerData,
+        wallet_id: taxiWallet.id,
+        virtual_account_code: taxiWallet.virtual_account_code,
+        paybill_codes: { driver: taxiCode },
+      });
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (e) {
+    return res.status(500).json({ error: 'Taxi created but wallet failed: ' + e.message });
+  }
 });
 router.post('/update-taxi', async (req,res)=>{
   const { id, owner_id, owner, taxi } = req.body||{};
@@ -1285,7 +2079,44 @@ router.post('/register-boda', async (req,res)=>{
   };
   const { data, error } = await supabaseAdmin.from('boda_bikes').insert(bikeRow).select().single();
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ ...data, rider: riderData });
+
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const baseRef = deriveNumericRef(data.identifier, data.id);
+      const bodaWallet = await createWalletRecord({
+        entityType: 'BODA',
+        entityId: data.id,
+        walletType: 'matatu',
+        walletKind: 'BODA_RIDER',
+        saccoId: operatorId,
+        numericRef: baseRef,
+        client,
+      });
+      const bodaCode = await ensurePaybillAlias({
+        walletId: bodaWallet.id,
+        key: PAYBILL_KEY_BY_KIND.BODA_RIDER,
+        client,
+      });
+      await client.query(`UPDATE boda_bikes SET wallet_id = $1 WHERE id = $2`, [bodaWallet.id, data.id]);
+      await client.query('COMMIT');
+      return res.json({
+        ...data,
+        rider: riderData,
+        wallet_id: bodaWallet.id,
+        virtual_account_code: bodaWallet.virtual_account_code,
+        paybill_codes: { rider: bodaCode },
+      });
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (e) {
+    return res.status(500).json({ error: 'Boda created but wallet failed: ' + e.message });
+  }
 });
 router.post('/update-boda', async (req,res)=>{
   const { id, rider_id, rider, bike } = req.body||{};

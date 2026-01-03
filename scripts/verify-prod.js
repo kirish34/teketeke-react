@@ -1,6 +1,8 @@
-require('dotenv').config();
-const { createClient } = require('@supabase/supabase-js');
-const fetch = require('node-fetch');
+import dotenv from 'dotenv';
+import { createClient } from '@supabase/supabase-js';
+import fetch from 'node-fetch';
+
+dotenv.config();
 
 async function getToken(email, password) {
   const url = process.env.SUPABASE_URL;
@@ -37,4 +39,3 @@ async function main() {
 }
 
 main().catch(e=>{ console.error('[verify-prod] Failed:', e.message || String(e)); process.exit(1); });
-

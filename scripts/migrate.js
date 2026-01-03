@@ -6,11 +6,16 @@
  *  - npm install
  *  - npm run migrate
  */
+import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { Client } from 'pg';
 
-require('dotenv').config();
-const fs = require('fs');
-const path = require('path');
-const { Client } = require('pg');
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const DB_URL = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL;
 if (!DB_URL) {

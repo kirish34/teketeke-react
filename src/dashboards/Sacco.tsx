@@ -1,6 +1,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import DashboardShell from '../components/DashboardShell'
+import PaybillCodeCard from '../components/PaybillCodeCard'
+import PaybillHeader from '../components/PaybillHeader'
+import StickerPrintModal from '../components/StickerPrintModal'
 import { authFetch } from '../lib/auth'
+import { mapPaybillCodes, type PaybillAliasRow } from '../lib/paybill'
 import { getOperatorConfig, normalizeOperatorType } from '../lib/operatorConfig'
 import VehicleCarePage from '../modules/vehicleCare/VehicleCarePage'
 import { fetchAccessGrants, saveAccessGrant, type AccessGrant } from '../modules/vehicleCare/vehicleCare.api'
@@ -174,6 +178,9 @@ export default function SaccoDashboard() {
 
   const [matatus, setMatatus] = useState<Matatu[]>([])
   const [matatuFilter, setMatatuFilter] = useState('')
+  const [paybillAliases, setPaybillAliases] = useState<PaybillAliasRow[]>([])
+  const [paybillError, setPaybillError] = useState<string | null>(null)
+  const [showPaybillSticker, setShowPaybillSticker] = useState(false)
   const [memberMsg, setMemberMsg] = useState('')
   const [tlbEdits, setTlbEdits] = useState<Record<string, string>>({})
   const [txs, setTxs] = useState<Tx[]>([])
@@ -228,7 +235,7 @@ export default function SaccoDashboard() {
   const [feeMsg, setFeeMsg] = useState('')
   const [routes, setRoutes] = useState<SaccoRoute[]>([])
   const [routesMsg, setRoutesMsg] = useState('')
-  const [stkForm, setStkForm] = useState({ code: '*001*', amount: '', phone: '' })
+  const [stkForm, setStkForm] = useState({ code: '', amount: '', phone: '' })
   const [stkResp, setStkResp] = useState('')
   const [loans, setLoans] = useState<Loan[]>([])
   const [loanMsg, setLoanMsg] = useState('')
@@ -313,6 +320,8 @@ export default function SaccoDashboard() {
     })
     return map
   }, [matatus])
+
+  const paybillCodes = useMemo(() => mapPaybillCodes(paybillAliases), [paybillAliases])
 
   const grantsByUserId = useMemo(() => {
     const map = new Map<string, AccessGrant>()
@@ -525,6 +534,27 @@ export default function SaccoDashboard() {
       }
     }
     load()
+  }, [currentSacco])
+
+  useEffect(() => {
+    if (!currentSacco) {
+      setPaybillAliases([])
+      setPaybillError(null)
+      return
+    }
+    async function loadPaybillCodes() {
+      try {
+        const res = await fetchJson<{ items?: PaybillAliasRow[] }>(
+          `/u/paybill-codes?entity_type=SACCO&entity_id=${encodeURIComponent(currentSacco)}`,
+        )
+        setPaybillAliases(res.items || [])
+        setPaybillError(null)
+      } catch (err) {
+        setPaybillAliases([])
+        setPaybillError(err instanceof Error ? err.message : 'Failed to load PayBill codes')
+      }
+    }
+    loadPaybillCodes()
   }, [currentSacco])
 
   useEffect(() => {
@@ -1348,11 +1378,12 @@ export default function SaccoDashboard() {
   async function sendStk() {
     setStkResp('Sending...')
     try {
+      const plate = stkForm.code.trim().toUpperCase().replace(/\s+/g, '')
       const res = await fetch('/api/pay/stk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          code: stkForm.code.trim(),
+          code: plate,
           amount: Number(stkForm.amount || 0),
           phone: stkForm.phone.trim(),
         }),
@@ -1380,7 +1411,7 @@ export default function SaccoDashboard() {
         ) : null}
         <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
           <input
-            placeholder="*001*USSD#"
+            placeholder="Plate e.g. KDE123A"
             value={stkForm.code}
             onChange={(e) => setStkForm((f) => ({ ...f, code: e.target.value }))}
             style={{ flex: '1 1 160px' }}
@@ -1486,6 +1517,38 @@ export default function SaccoDashboard() {
 
       {activeTab === 'overview' ? (
         <>
+          <section className="card">
+            <PaybillHeader
+              title="SACCO PayBill Accounts (4814003)"
+              actions={
+                <button className="btn ghost" type="button" onClick={() => setShowPaybillSticker(true)}>
+                  Print Sticker
+                </button>
+              }
+            />
+            {paybillError ? <div className="err">PayBill load error: {paybillError}</div> : null}
+            <div
+              className="grid"
+              style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginTop: 12 }}
+            >
+              <PaybillCodeCard
+                title="Daily Fee Collection Account"
+                label="SACCO FEE Account"
+                code={paybillCodes.fee || ''}
+              />
+              <PaybillCodeCard
+                title="Loan Repayment Account"
+                label="SACCO LOAN Account"
+                code={paybillCodes.loan || ''}
+              />
+              <PaybillCodeCard
+                title="Savings Deposit Account"
+                label="SACCO SAVINGS Account"
+                code={paybillCodes.savings || ''}
+              />
+            </div>
+          </section>
+
           <section className="card">
             <h3 style={{ marginTop: 0 }}>Performance summary</h3>
             <div className="grid metrics">
@@ -1637,6 +1700,16 @@ export default function SaccoDashboard() {
               </table>
             </div>
           </section>
+          <StickerPrintModal
+            open={showPaybillSticker}
+            title="SACCO PayBill Accounts (4814003)"
+            onClose={() => setShowPaybillSticker(false)}
+            lines={[
+              { label: 'Daily Fee Collection Account - SACCO FEE Account', value: paybillCodes.fee },
+              { label: 'Loan Repayment Account - SACCO LOAN Account', value: paybillCodes.loan },
+              { label: 'Savings Deposit Account - SACCO SAVINGS Account', value: paybillCodes.savings },
+            ]}
+          />
 
           <section className="card">
             <div className="topline">

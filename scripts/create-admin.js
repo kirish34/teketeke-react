@@ -7,9 +7,10 @@
  * Requires in .env:
  *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
  */
+import dotenv from 'dotenv';
+import { createClient } from '@supabase/supabase-js';
 
-require('dotenv').config();
-const { createClient } = require('@supabase/supabase-js');
+dotenv.config();
 
 async function main() {
   const email = process.env.ADMIN_EMAIL || process.argv[2];
@@ -92,4 +93,3 @@ main().catch((e) => {
   console.error('[create-admin] Failed:', e.message || String(e));
   process.exit(1);
 });
-

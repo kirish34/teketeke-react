@@ -10,9 +10,10 @@
  * then upsert rows into public.user_roles so the mobile dashboards
  * show data scoped to seeded sacco/matatu entries.
  */
+import dotenv from 'dotenv';
+import { createClient } from '@supabase/supabase-js';
 
-require('dotenv').config();
-const { createClient } = require('@supabase/supabase-js');
+dotenv.config();
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -172,4 +173,3 @@ main().catch((err) => {
   console.error('[seed-role-users] Failed:', err.message || err);
   process.exit(1);
 });
-
