@@ -1124,7 +1124,10 @@ async function ensureMatatuForVehicle({ plate, vehicleType, saccoId = null, owne
 
   if (existing) {
     const existingType = String(existing.vehicle_type || '').trim().toUpperCase();
-    if (existingType && existingType !== normalizedType) {
+    const compatible =
+      (existingType === 'MATATU' && normalizedType === 'SHUTTLE') ||
+      (existingType === 'SHUTTLE' && normalizedType === 'MATATU');
+    if (existingType && existingType !== normalizedType && !compatible) {
       throw new Error('Vehicle plate already registered as ' + existingType);
     }
     return existing.id;
@@ -1731,7 +1734,94 @@ router.post('/register-shuttle', async (req,res)=>{
   };
   const { data, error } = await supabaseAdmin.from('shuttles').insert(shuttleRow).select().single();
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ ...data, owner: ownerData });
+
+  let paybillCodes = null;
+  let plateAlias = null;
+  try {
+    const matatuId = await ensureMatatuForVehicle({
+      plate,
+      vehicleType: 'SHUTTLE',
+      saccoId: operatorId || null,
+      ownerName: ownerData.full_name || null,
+      ownerPhone: ownerData.phone || null,
+    });
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows: walletRows } = await client.query(
+        `
+          SELECT id, wallet_kind
+          FROM wallets
+          WHERE entity_type = 'MATATU'
+            AND entity_id = $1
+        `,
+        [matatuId]
+      );
+
+      let ownerWallet = walletRows.find((row) => row.wallet_kind === 'MATATU_OWNER') || null;
+      let vehicleWallet = walletRows.find((row) => row.wallet_kind === 'MATATU_VEHICLE') || null;
+      const baseRef = deriveNumericRef(plate, matatuId);
+
+      if (!ownerWallet) {
+        ownerWallet = await createWalletRecord({
+          entityType: 'MATATU',
+          entityId: matatuId,
+          walletType: 'owner',
+          walletKind: 'MATATU_OWNER',
+          saccoId: operatorId || null,
+          matatuId,
+          numericRef: baseRef + 10000,
+          client,
+        });
+      }
+      if (!vehicleWallet) {
+        vehicleWallet = await createWalletRecord({
+          entityType: 'MATATU',
+          entityId: matatuId,
+          walletType: 'matatu',
+          walletKind: 'MATATU_VEHICLE',
+          saccoId: operatorId || null,
+          matatuId,
+          numericRef: baseRef,
+          client,
+        });
+      }
+
+      const ownerCode = await ensurePaybillAlias({
+        walletId: ownerWallet.id,
+        key: PAYBILL_KEY_BY_KIND.MATATU_OWNER,
+        client,
+      });
+      const vehicleCode = await ensurePaybillAlias({
+        walletId: vehicleWallet.id,
+        key: PAYBILL_KEY_BY_KIND.MATATU_VEHICLE,
+        client,
+      });
+
+      const normalizedPlate = normalizeRef(plate);
+      if (normalizedPlate && isPlateRef(normalizedPlate)) {
+        plateAlias = await ensurePlateAlias({
+          walletId: vehicleWallet.id,
+          plate: normalizedPlate,
+          client,
+        });
+      }
+
+      await client.query(`UPDATE matatus SET wallet_id = $1 WHERE id = $2`, [vehicleWallet.id, matatuId]);
+      await client.query('COMMIT');
+      paybillCodes = { owner: ownerCode, vehicle: vehicleCode };
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (e) {
+    return res.status(500).json({ error: 'Shuttle created but wallet failed: ' + e.message });
+  }
+
+  res.json({ ...data, owner: ownerData, paybill_codes: paybillCodes, plate_alias: plateAlias });
 });
 router.post('/update-shuttle', async (req,res)=>{
   const { id, owner_id, owner, shuttle } = req.body||{};

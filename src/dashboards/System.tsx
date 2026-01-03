@@ -1985,6 +1985,18 @@ const SystemDashboard = () => {
     return map
   }, [paybillAliases])
 
+  const paybillMatatuIdByPlate = useMemo(() => {
+    const map = new Map<string, string>()
+    paybillAliases.forEach((row) => {
+      if (String(row.alias_type || '').toUpperCase() !== 'PLATE') return
+      const plate = normalizePlateInput(row.alias || '')
+      const entityId = row.entity_id || ''
+      if (!plate || !entityId) return
+      map.set(plate, entityId)
+    })
+    return map
+  }, [paybillAliases])
+
   const paybillCodesByTaxiId = useMemo(() => {
     const map = new Map<string, { code?: string }>()
     paybillAliases.forEach((row) => {
@@ -2338,6 +2350,7 @@ const SystemDashboard = () => {
       setShuttleMsg('Shuttle registered')
       resetShuttleFormState()
       await loadShuttles()
+      await loadPaybillAliases()
     } catch (err) {
       setShuttleMsg(err instanceof Error ? err.message : 'Create failed')
     }
@@ -2436,6 +2449,7 @@ const SystemDashboard = () => {
       setShuttleEditMsg('Shuttle updated')
       resetShuttleEditState()
       await loadShuttles()
+      await loadPaybillAliases()
     } catch (err) {
       setShuttleEditMsg('')
       setShuttleEditError(err instanceof Error ? err.message : 'Update failed')
@@ -5037,7 +5051,12 @@ const SystemDashboard = () => {
                       : row.load_capacity_kg
                         ? `${row.load_capacity_kg} kg`
                         : '-'
+                    const plateKey = normalizePlateInput(row.plate || '')
+                    const matatuIdFromPlate = plateKey ? paybillMatatuIdByPlate.get(plateKey) : null
                     const paybillCodes = row.id ? paybillCodesByMatatuId.get(row.id) : null
+                    const resolvedCodes =
+                      paybillCodes || (matatuIdFromPlate ? paybillCodesByMatatuId.get(matatuIdFromPlate) : null)
+                    const plateAlias = resolvedCodes?.plate || plateKey
                     const age = getVehicleAge(row.year)
                     const riskScore = getRiskScoreForAge(age)
                     const maintenanceCount = row.id ? maintenanceCountsByShuttle.get(row.id) || 0 : 0
@@ -5119,23 +5138,19 @@ const SystemDashboard = () => {
                           <td>{row.till_number || '-'}</td>
                           <td>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                              <PaybillCodeCard
-                                variant="inline"
-                                label="OWNER Account"
-                                code={paybillCodes?.owner || ''}
-                              />
-                              <PaybillCodeCard
-                                variant="inline"
-                                label="MATATU Account"
-                                code={paybillCodes?.vehicle || ''}
-                              />
-                              <PaybillCodeCard
-                                variant="inline"
-                                label="STK/USSD Reference (Plate)"
-                                code={paybillCodes?.plate || ''}
-                              />
-                            </div>
-                          </td>
+                            <PaybillCodeCard variant="inline" label="OWNER Account" code={resolvedCodes?.owner || ''} />
+                            <PaybillCodeCard
+                              variant="inline"
+                              label="MATATU Account"
+                              code={resolvedCodes?.vehicle || ''}
+                            />
+                            <PaybillCodeCard
+                              variant="inline"
+                              label="STK/USSD Reference (Plate)"
+                              code={plateAlias || ''}
+                            />
+                          </div>
+                        </td>
                           <td>
                             <div className="row" style={{ gap: 6 }}>
                               <button className="btn ghost" type="button" onClick={() => startShuttleEdit(row)}>
