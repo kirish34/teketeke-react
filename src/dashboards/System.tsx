@@ -541,32 +541,7 @@ async function deleteJson(url: string) {
 }
 
 const formatKes = (val?: number | null) => `KES ${(Number(val || 0)).toLocaleString('en-KE')}`
-const formatPercent = (val?: number | null) => `${(Number(val || 0) * 100).toFixed(1)}%`
-
 const WITHDRAW_STATUS_OPTIONS = ['PENDING', 'PROCESSING', 'SENT', 'SUCCESS', 'FAILED']
-
-function copyToClipboard(value: string) {
-  if (!value) return
-  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-    void navigator.clipboard.writeText(value)
-    return
-  }
-  if (typeof document === 'undefined') return
-  const area = document.createElement('textarea')
-  area.value = value
-  area.style.position = 'fixed'
-  area.style.left = '-9999px'
-  document.body.appendChild(area)
-  area.focus()
-  area.select()
-  try {
-    document.execCommand('copy')
-  } catch {
-    // ignore
-  } finally {
-    document.body.removeChild(area)
-  }
-}
 
 function parseAmountInput(value: string) {
   const num = Number(value)
@@ -1016,7 +991,6 @@ const SystemDashboard = () => {
 
   const [matatus, setMatatus] = useState<VehicleRow[]>([])
   const [paybillAliases, setPaybillAliases] = useState<PaybillAliasRow[]>([])
-  const [paybillAliasesError, setPaybillAliasesError] = useState<string | null>(null)
 
   const [finance, setFinance] = useState<FinanceOverview | null>(null)
   const [financeError, setFinanceError] = useState<string | null>(null)
@@ -4032,10 +4006,8 @@ const SystemDashboard = () => {
     try {
       const rows = await fetchList<PaybillAliasRow>('/api/admin/paybill-codes')
       setPaybillAliases(rows)
-      setPaybillAliasesError(null)
     } catch (err) {
       setPaybillAliases([])
-      setPaybillAliasesError(err instanceof Error ? err.message : String(err))
     }
   }
 

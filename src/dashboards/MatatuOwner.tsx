@@ -268,10 +268,11 @@ const MatatuOwnerDashboard = () => {
       setPaybillError(null)
       return
     }
+    const entityId = currentId
     async function loadPaybillCodes() {
       try {
         const res = await fetchJson<{ items?: PaybillAliasRow[] }>(
-          `/u/paybill-codes?entity_type=MATATU&entity_id=${encodeURIComponent(currentId)}`,
+          `/u/paybill-codes?entity_type=MATATU&entity_id=${encodeURIComponent(entityId)}`,
         )
         setPaybillAliases(res.items || [])
         setPaybillError(null)

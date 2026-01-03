@@ -542,10 +542,11 @@ export default function SaccoDashboard() {
       setPaybillError(null)
       return
     }
+    const saccoId = currentSacco
     async function loadPaybillCodes() {
       try {
         const res = await fetchJson<{ items?: PaybillAliasRow[] }>(
-          `/u/paybill-codes?entity_type=SACCO&entity_id=${encodeURIComponent(currentSacco)}`,
+          `/u/paybill-codes?entity_type=SACCO&entity_id=${encodeURIComponent(saccoId)}`,
         )
         setPaybillAliases(res.items || [])
         setPaybillError(null)
