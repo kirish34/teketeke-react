@@ -73,8 +73,10 @@ describeIf('C2B/STK + ops smoke', () => {
     const { rows } = await pool.query(
       `
         SELECT COUNT(*)::int AS total
-        FROM wallet_transactions
-        WHERE source = $1 AND source_ref = $2
+        FROM wallet_ledger
+        WHERE reference_type = 'MPESA_C2B'
+          AND reference_id = $2
+          AND direction = 'CREDIT'
       `,
       [source, sourceRef],
     )
@@ -202,7 +204,6 @@ describeIf('C2B/STK + ops smoke', () => {
       }
       if (receipts.length) {
         await pool.query(`DELETE FROM ops_alerts WHERE meta->>'receipt' = ANY($1)`, [receipts])
-        await pool.query(`DELETE FROM wallet_transactions WHERE source_ref = ANY($1)`, [receipts])
         await pool.query(`DELETE FROM mpesa_c2b_payments WHERE receipt = ANY($1)`, [receipts])
       }
       if (checkoutIds.length) {
@@ -211,22 +212,6 @@ describeIf('C2B/STK + ops smoke', () => {
       await pool.query(`DELETE FROM mpesa_c2b_quarantine WHERE raw->>'TestRunId' = $1`, [runId])
       await pool.query(`DELETE FROM reconciliation_daily WHERE date IN ('2025-01-15', '2025-01-16')`)
       await pool.query(`DELETE FROM reconciliation_daily_channels WHERE date IN ('2025-01-15', '2025-01-16')`)
-      if (walletId) {
-        await pool.query(`DELETE FROM wallet_aliases WHERE wallet_id = $1`, [walletId])
-        await pool.query(`DELETE FROM wallets WHERE id = $1`, [walletId])
-      }
-      if (extraWalletIds.length) {
-        await pool.query(`DELETE FROM wallet_aliases WHERE wallet_id = ANY($1)`, [extraWalletIds])
-        await pool.query(`DELETE FROM wallets WHERE id = ANY($1)`, [extraWalletIds])
-      }
-      if (matatuId) await pool.query(`DELETE FROM matatus WHERE id = $1`, [matatuId])
-      if (extraMatatuIds.length) {
-        await pool.query(`DELETE FROM matatus WHERE id = ANY($1)`, [extraMatatuIds])
-      }
-      if (extraSaccoIds.length) {
-        await pool.query(`DELETE FROM saccos WHERE id = ANY($1)`, [extraSaccoIds])
-      }
-      if (saccoId) await pool.query(`DELETE FROM saccos WHERE id = $1`, [saccoId])
       if (adminUserId) {
         await pool.query(`DELETE FROM staff_profiles WHERE user_id = $1`, [adminUserId])
         if (supabaseAdmin) {
@@ -255,21 +240,20 @@ describeIf('C2B/STK + ops smoke', () => {
 
     const payment = await getPaymentByReceipt(receipt)
     expect(payment?.status).toBe('CREDITED')
-    if (payment?.id) paymentIds.push(payment.id)
+    if (!payment?.id) throw new Error('Missing payment id for credited receipt')
+    paymentIds.push(payment.id)
 
-    const firstTx = await getWalletTxCount('MPESA_C2B', receipt)
+    const firstTx = await getWalletTxCount('MPESA_C2B', payment.id)
     expect(firstTx).toBe(1)
 
     const dup = await fetchJson('/mpesa/callback', payload, webhookHeader)
     expect(dup.res.status).toBe(200)
 
-    const secondTx = await getWalletTxCount('MPESA_C2B', receipt)
+    const secondTx = await getWalletTxCount('MPESA_C2B', payment.id)
     expect(secondTx).toBe(1)
 
-    if (payment?.id) {
-      const dupAlert = await getOpsAlertCount(payment.id, 'DUPLICATE_RECEIPT')
-      expect(dupAlert).toBeGreaterThan(0)
-    }
+    const dupAlert = await getOpsAlertCount(payment.id, 'DUPLICATE_RECEIPT')
+    expect(dupAlert).toBeGreaterThan(0)
   })
 
   it('registers sacco paybill codes with correct prefixes and checksum', async () => {
@@ -340,17 +324,16 @@ describeIf('C2B/STK + ops smoke', () => {
 
     const payment = await getPaymentByReceipt(receipt)
     expect(payment?.status).toBe('QUARANTINED')
-    if (payment?.id) paymentIds.push(payment.id)
+    if (!payment?.id) throw new Error('Missing payment id for quarantined receipt')
+    paymentIds.push(payment.id)
     expect(payment?.risk_level).toBe('HIGH')
     expect(Number(payment?.risk_score || 0)).toBeGreaterThanOrEqual(80)
 
-    const txCount = await getWalletTxCount('MPESA_C2B', receipt)
+    const txCount = await getWalletTxCount('MPESA_C2B', payment.id)
     expect(txCount).toBe(0)
 
-    if (payment?.id) {
-      const alertCount = await getOpsAlertCount(payment.id, 'PAYBILL_MISMATCH')
-      expect(alertCount).toBeGreaterThan(0)
-    }
+    const alertCount = await getOpsAlertCount(payment.id, 'PAYBILL_MISMATCH')
+    expect(alertCount).toBeGreaterThan(0)
 
     const replay = await fetchJson(
       '/mpesa/callback',
@@ -382,15 +365,14 @@ describeIf('C2B/STK + ops smoke', () => {
 
     const payment = await getPaymentByReceipt(receipt)
     expect(payment?.status).toBe('QUARANTINED')
-    if (payment?.id) paymentIds.push(payment.id)
+    if (!payment?.id) throw new Error('Missing payment id for checksum quarantine')
+    paymentIds.push(payment.id)
 
-    const txCount = await getWalletTxCount('MPESA_C2B', receipt)
+    const txCount = await getWalletTxCount('MPESA_C2B', payment.id)
     expect(txCount).toBe(0)
 
-    if (payment?.id) {
-      const alertCount = await getOpsAlertCount(payment.id, 'INVALID_CHECKSUM_REF')
-      expect(alertCount).toBeGreaterThan(0)
-    }
+    const alertCount = await getOpsAlertCount(payment.id, 'INVALID_CHECKSUM_REF')
+    expect(alertCount).toBeGreaterThan(0)
   })
 
   it('returns 200 on webhook secret mismatch without crediting', async () => {
@@ -409,15 +391,14 @@ describeIf('C2B/STK + ops smoke', () => {
 
     const payment = await getPaymentByReceipt(receipt)
     expect(payment?.status).toBe('QUARANTINED')
-    if (payment?.id) paymentIds.push(payment.id)
+    if (!payment?.id) throw new Error('Missing payment id for webhook secret test')
+    paymentIds.push(payment.id)
 
-    const txCount = await getWalletTxCount('MPESA_C2B', receipt)
+    const txCount = await getWalletTxCount('MPESA_C2B', payment.id)
     expect(txCount).toBe(0)
 
-    if (payment?.id) {
-      const alertCount = await getOpsAlertCount(payment.id, 'WEBHOOK_SECRET_MISMATCH')
-      expect(alertCount).toBeGreaterThan(0)
-    }
+    const alertCount = await getOpsAlertCount(payment.id, 'WEBHOOK_SECRET_MISMATCH')
+    expect(alertCount).toBeGreaterThan(0)
   })
 
   it('flags multiple aliases for the same MSISDN', async () => {
@@ -518,7 +499,7 @@ describeIf('C2B/STK + ops smoke', () => {
     const { res } = await fetchJson('/api/pay/stk/callback', callbackPayload, webhookHeader)
     expect(res.status).toBe(200)
 
-    const txCount = await getWalletTxCount('MPESA_STK', receipt)
+    const txCount = await getWalletTxCount('MPESA_STK', insertRes.rows[0].id)
     expect(txCount).toBe(1)
   })
 
@@ -606,7 +587,7 @@ describeIf('C2B/STK + ops smoke', () => {
     )
     expect(second.res.status).toBe(200)
 
-    const txCount = await getWalletTxCount('MPESA_C2B', receipt)
+    const txCount = await getWalletTxCount('MPESA_C2B', paymentId)
     expect(txCount).toBe(1)
 
     const auditRes = await pool.query(

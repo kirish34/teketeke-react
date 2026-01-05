@@ -70,6 +70,29 @@ type Loan = {
   status?: string
 }
 
+type LedgerRow = {
+  id?: string
+  wallet_id?: string
+  direction?: 'CREDIT' | 'DEBIT' | string
+  amount?: number
+  balance_before?: number
+  balance_after?: number
+  entry_type?: string
+  reference_type?: string
+  reference_id?: string
+  description?: string | null
+  created_at?: string
+}
+
+type LedgerWallet = {
+  wallet_id?: string
+  wallet_kind?: string
+  virtual_account_code?: string
+  balance?: number
+  total?: number
+  items?: LedgerRow[]
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await authFetch(url, init)
   if (!res.ok) {
@@ -103,6 +126,13 @@ const MatatuOwnerDashboard = () => {
   const [insuranceDate, setInsuranceDate] = useState('')
   const [inspectionDate, setInspectionDate] = useState('')
   const [complianceMsg, setComplianceMsg] = useState('')
+  const ledgerStart = toDateInput(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
+  const ledgerEnd = toDateInput(new Date().toISOString())
+  const [ledgerWallets, setLedgerWallets] = useState<LedgerWallet[]>([])
+  const [ledgerLoading, setLedgerLoading] = useState(false)
+  const [ledgerError, setLedgerError] = useState<string | null>(null)
+  const [ledgerFrom, setLedgerFrom] = useState(ledgerStart)
+  const [ledgerTo, setLedgerTo] = useState(ledgerEnd)
 
   const [accessGrants, setAccessGrants] = useState<AccessGrant[]>([])
   const [grantTarget, setGrantTarget] = useState('')
@@ -224,6 +254,13 @@ const MatatuOwnerDashboard = () => {
   useEffect(() => {
     setLoanHist({ loanId: null, items: [], total: 0, msg: 'Select a loan' })
   }, [currentId])
+
+  useEffect(() => {
+    if (activeTab === 'overview') {
+      void loadOwnerLedger()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, currentId])
 
   useEffect(() => {
     async function loadVehicles() {
@@ -705,6 +742,48 @@ const MatatuOwnerDashboard = () => {
   const baseInspectionDate = toDateInput(currentVehicle?.inspection_expiry_date)
   const complianceDirty = insuranceDate !== baseInsuranceDate || inspectionDate !== baseInspectionDate
 
+  async function loadOwnerLedger() {
+    setLedgerLoading(true)
+    setLedgerError(null)
+    try {
+      const params = new URLSearchParams()
+      params.set('limit', '200')
+      if (ledgerFrom) params.set('from', ledgerFrom)
+      if (ledgerTo) params.set('to', ledgerTo)
+      const res = await fetchJson<{ wallets?: LedgerWallet[] }>(`/api/wallets/owner-ledger?${params.toString()}`)
+      setLedgerWallets(res.wallets || [])
+    } catch (err) {
+      setLedgerError(err instanceof Error ? err.message : 'Failed to load wallet ledger')
+    } finally {
+      setLedgerLoading(false)
+    }
+  }
+
+  function exportOwnerLedgerCsv(wallet: LedgerWallet) {
+    if (!wallet.items?.length) return
+    const header = ['created_at', 'direction', 'entry_type', 'reference_type', 'reference_id', 'amount', 'balance_after']
+    const rows = wallet.items.map((row) =>
+      [
+        row.created_at,
+        row.direction,
+        row.entry_type,
+        row.reference_type,
+        row.reference_id,
+        row.amount,
+        row.balance_after,
+      ]
+        .map((v) => `"${String(v ?? '')}"`)
+        .join(','),
+    )
+    const csv = [header.join(','), ...rows].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = `${wallet.wallet_kind || 'ledger'}-${ledgerFrom || 'from'}-${ledgerTo || 'to'}.csv`
+    link.click()
+    URL.revokeObjectURL(link.href)
+  }
+
   const tabs = [
     { id: 'overview' as const, label: 'Overview' },
     { id: 'staff' as const, label: 'Staff' },
@@ -773,6 +852,91 @@ const MatatuOwnerDashboard = () => {
 
       {activeTab === 'overview' ? (
         <>
+          <section className="card" style={{ marginBottom: 12 }}>
+            <div className="topline" style={{ flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                <h3 style={{ margin: 0 }}>Wallet statements</h3>
+                <div className="muted small">Owner + vehicle wallet ledger (read-only)</div>
+              </div>
+              <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                <label className="muted small">
+                  From
+                  <input type="date" value={ledgerFrom} onChange={(e) => setLedgerFrom(e.target.value)} />
+                </label>
+                <label className="muted small">
+                  To
+                  <input type="date" value={ledgerTo} onChange={(e) => setLedgerTo(e.target.value)} />
+                </label>
+                <button className="btn" type="button" onClick={() => loadOwnerLedger()}>
+                  Refresh
+                </button>
+                {ledgerLoading ? <span className="muted small">Loading...</span> : null}
+                {ledgerError ? <span className="err">{ledgerError}</span> : null}
+              </div>
+            </div>
+            <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 12 }}>
+              {ledgerWallets.length === 0 ? (
+                <div className="muted">No ledger entries available yet.</div>
+              ) : (
+                ledgerWallets.map((wallet) => (
+                  <div
+                    key={wallet.wallet_id}
+                    className="table-wrap"
+                    style={{ border: '1px solid #e2e8f0', borderRadius: 8 }}
+                  >
+                    <div className="topline" style={{ padding: '8px 12px' }}>
+                      <div>
+                        <div className="muted small">{wallet.wallet_kind || 'Wallet'}</div>
+                        <strong>{formatKes(wallet.balance)}</strong>
+                        <div className="muted small">Account: {wallet.virtual_account_code || '-'}</div>
+                      </div>
+                      <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                        <button className="btn ghost" type="button" onClick={() => exportOwnerLedgerCsv(wallet)}>
+                          Export CSV
+                        </button>
+                        <span className="muted small">Entries: {wallet.total || 0}</span>
+                      </div>
+                    </div>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Type</th>
+                          <th>Source</th>
+                          <th>Amount</th>
+                          <th>Balance</th>
+                          <th>Reference</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {!wallet.items?.length ? (
+                          <tr>
+                            <td colSpan={6} className="muted">
+                              No ledger rows.
+                            </td>
+                          </tr>
+                        ) : (
+                          (wallet.items || []).map((row) => (
+                            <tr key={row.id}>
+                              <td className="muted small">{row.created_at ? new Date(row.created_at).toLocaleString() : '-'}</td>
+                              <td>{row.direction}</td>
+                              <td>{row.entry_type}</td>
+                              <td style={{ color: row.direction === 'CREDIT' ? '#15803d' : '#b91c1c' }}>
+                                {formatKes(row.amount)}
+                              </td>
+                              <td>{formatKes(row.balance_after)}</td>
+                              <td className="mono">{row.reference_id || '-'}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+
           {alerts.length ? (
             <section className="card" style={{ background: '#f8fafc' }}>
               <div className="topline">

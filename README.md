@@ -84,7 +84,7 @@ Endpoints:
 - SACCO:
   - `GET /api/sacco/payout-destinations`
   - `POST /api/sacco/payout-destinations`
-  - `POST /api/sacco/payout-batches`
+  - `POST /api/sacco/payout-batches` (partial amounts per wallet_kind via `items[]`)
   - `POST /api/sacco/payout-batches/:id/submit`
   - `GET /api/sacco/payout-batches`
 - System admin:
@@ -102,6 +102,18 @@ Payout B2C env (required for payouts/readiness):
 - `MPESA_B2C_MOCK=1` (tests only; skips real Daraja calls)
 Locked settings:
 - `MPESA_B2C_SHORTCODE` must be `3020891` for all B2C payouts (PartyA).
+
+## Wallet ledger (append-only)
+- Schema: `wallet_ledger` (idempotent migration 069) with RLS allowing wallet members and system admins; update/delete are blocked by trigger.
+- Write via services only:
+  - Credits: `creditWalletWithLedger` (entry_type `C2B_CREDIT`/`STK_CREDIT` etc.)
+  - Debits: `debitWalletWithLedger` (entry_type `PAYOUT_DEBIT` for payouts)
+- Read APIs:
+  - `GET /api/wallets/:id/ledger` (access checks applied)
+  - `GET /api/sacco/wallet-ledger?wallet_kind=&from=&to=` (SACCO admins)
+  - `GET /api/wallets/owner-ledger?from=&to=` (Matatu owner wallets)
+  - `GET /api/admin/wallet-ledger?wallet_id=...`
+- Backfill helper: `node scripts/backfillWalletLedger.js` (use `APPLY=1` to write; default dry-run).
 
 ## Running locally
 - API/Express: `npm run server` (serves `/api`, `/u`, `/mpesa`, `/public`, `/app` if built)

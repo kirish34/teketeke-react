@@ -144,6 +144,8 @@ async function handlePayoutB2CResult({
           client,
         });
       } catch (err) {
+        const insufficient = String(err.message || '').toUpperCase().includes('INSUFFICIENT_BALANCE');
+        const failureReason = insufficient ? 'INSUFFICIENT_BALANCE_AT_CONFIRM' : err.message || 'Wallet debit failed';
         await client.query(
           `
             UPDATE payout_items
@@ -154,7 +156,7 @@ async function handlePayoutB2CResult({
                 provider_conversation_id = COALESCE(provider_conversation_id, $5)
             WHERE id = $1
           `,
-          [item.id, err.message || 'Wallet debit failed', providerReceipt, providerRequestId, conversationId || null],
+          [item.id, failureReason, providerReceipt, providerRequestId, conversationId || null],
         );
         await insertPayoutEvent({
           batchId: item.batch_id,
@@ -162,7 +164,7 @@ async function handlePayoutB2CResult({
           actorId: null,
           eventType: 'ITEM_FAILED',
           message: 'Wallet debit failed',
-          meta: { error: err.message },
+          meta: { error: failureReason },
           client,
         });
         await createOpsAlert({
@@ -172,7 +174,7 @@ async function handlePayoutB2CResult({
           entity_id: String(item.wallet_id || ''),
           payment_id: null,
           message: 'Wallet debit failed on payout confirmation.',
-          meta: { item_id: item.id, batch_id: item.batch_id, error: err.message },
+          meta: { item_id: item.id, batch_id: item.batch_id, error: failureReason },
           client,
         });
         await updateBatchStatusFromItems({ batchId: item.batch_id, client });

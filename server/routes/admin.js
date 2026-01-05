@@ -221,23 +221,31 @@ router.get('/platform-overview', async (req, res) => {
       `
         SELECT
           COALESCE((
-            SELECT SUM(amount) FROM wallet_transactions
-            WHERE tx_type = 'CREDIT' AND source = 'MPESA_C2B'
-              AND created_at BETWEEN $1 AND $2
+            SELECT SUM(wl.amount)
+            FROM wallet_ledger wl
+            JOIN wallets w ON w.id = wl.wallet_id
+            WHERE wl.direction = 'CREDIT'
+              AND wl.entry_type IN ('C2B_CREDIT','STK_CREDIT')
+              AND w.entity_type IN ('MATATU','TAXI','BODA','BODABODA')
+              AND wl.created_at BETWEEN $1 AND $2
           ), 0) AS matatu_net,
           COALESCE((
-            SELECT SUM(wt.amount) FROM wallet_transactions wt
-            JOIN wallets w ON w.id = wt.wallet_id
-            WHERE wt.tx_type = 'CREDIT' AND wt.source = 'FEE_MATATU_FARE'
+            SELECT SUM(wl.amount)
+            FROM wallet_ledger wl
+            JOIN wallets w ON w.id = wl.wallet_id
+            WHERE wl.direction = 'CREDIT'
+              AND wl.entry_type IN ('C2B_CREDIT','STK_CREDIT')
               AND w.entity_type = 'SACCO'
-              AND wt.created_at BETWEEN $1 AND $2
+              AND wl.created_at BETWEEN $1 AND $2
           ), 0) AS sacco_fee_income,
           COALESCE((
-            SELECT SUM(wt.amount) FROM wallet_transactions wt
-            JOIN wallets w ON w.id = wt.wallet_id
-            WHERE wt.tx_type = 'CREDIT' AND wt.source = 'FEE_MATATU_FARE'
+            SELECT SUM(wl.amount)
+            FROM wallet_ledger wl
+            JOIN wallets w ON w.id = wl.wallet_id
+            WHERE wl.direction = 'CREDIT'
+              AND wl.entry_type IN ('C2B_CREDIT','STK_CREDIT')
               AND w.entity_type = 'SYSTEM'
-              AND wt.created_at BETWEEN $1 AND $2
+              AND wl.created_at BETWEEN $1 AND $2
           ), 0) AS platform_fee_income
       `,
       [range.from, range.to]
@@ -273,28 +281,28 @@ router.get('/platform-saccos-summary', async (req, res) => {
           SELECT
             m.sacco_id,
             COUNT(DISTINCT m.id) AS matatus,
-            COALESCE(SUM(wt.amount), 0) AS matatu_net
+            COALESCE(SUM(wl.amount), 0) AS matatu_net
           FROM matatus m
           LEFT JOIN wallets w ON w.entity_type = 'MATATU' AND w.entity_id = m.id
-          LEFT JOIN wallet_transactions wt
-            ON wt.wallet_id = w.id
-           AND wt.tx_type = 'CREDIT'
-           AND wt.source = 'MPESA_C2B'
-           AND wt.created_at BETWEEN $1 AND $2
+          LEFT JOIN wallet_ledger wl
+            ON wl.wallet_id = w.id
+           AND wl.direction = 'CREDIT'
+           AND wl.entry_type IN ('C2B_CREDIT','STK_CREDIT')
+           AND wl.created_at BETWEEN $1 AND $2
           GROUP BY m.sacco_id
         ),
         sacco_fees AS (
           SELECT
-            w.entity_id AS sacco_id,
-            COALESCE(SUM(wt.amount), 0) AS sacco_fee_income
+            w.sacco_id AS sacco_id,
+            COALESCE(SUM(wl.amount), 0) AS sacco_fee_income
           FROM wallets w
-          LEFT JOIN wallet_transactions wt
-            ON wt.wallet_id = w.id
-           AND wt.tx_type = 'CREDIT'
-           AND wt.source = 'FEE_MATATU_FARE'
-           AND wt.created_at BETWEEN $1 AND $2
+          LEFT JOIN wallet_ledger wl
+            ON wl.wallet_id = w.id
+           AND wl.direction = 'CREDIT'
+           AND wl.entry_type IN ('C2B_CREDIT','STK_CREDIT')
+           AND wl.created_at BETWEEN $1 AND $2
           WHERE w.entity_type = 'SACCO'
-          GROUP BY w.entity_id
+          GROUP BY w.sacco_id
         )
         SELECT
           s.id AS sacco_id,
@@ -1124,8 +1132,10 @@ router.get('/payout-batches/:id', async (req, res) => {
       `
         SELECT
           pi.*,
-          wl.id AS ledger_entry_id
+          wl.id AS ledger_entry_id,
+          w.balance AS wallet_balance
         FROM payout_items pi
+        LEFT JOIN wallets w ON w.id = pi.wallet_id
         LEFT JOIN wallet_ledger wl
           ON wl.reference_type = 'PAYOUT_ITEM'
          AND wl.reference_id = pi.id::text

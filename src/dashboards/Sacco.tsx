@@ -144,6 +144,7 @@ type PayoutItem = {
   id?: string
   wallet_kind?: string
   amount?: number
+  wallet_balance?: number
   destination_type?: string
   destination_ref?: string
   status?: string
@@ -208,6 +209,32 @@ type BatchReadiness = {
   }
   issues?: ReadinessIssue[]
 }
+
+type LedgerRow = {
+  id?: string
+  wallet_id?: string
+  direction?: 'CREDIT' | 'DEBIT' | string
+  amount?: number
+  balance_before?: number
+  balance_after?: number
+  entry_type?: string
+  reference_type?: string
+  reference_id?: string
+  description?: string | null
+  created_at?: string
+}
+
+type LedgerWallet = {
+  wallet_id?: string
+  wallet_kind?: string
+  virtual_account_code?: string
+  balance?: number
+  total?: number
+  items?: LedgerRow[]
+}
+
+const SACCO_LEDGER_KINDS = ['SACCO_FEE', 'SACCO_LOAN', 'SACCO_SAVINGS'] as const
+
 type SaccoTabId =
   | 'overview'
   | 'members'
@@ -357,11 +384,21 @@ export default function SaccoDashboard() {
     include_wallet_kinds: { SACCO_FEE: true, SACCO_LOAN: true, SACCO_SAVINGS: true },
     destination_by_kind: { SACCO_FEE: '', SACCO_LOAN: '', SACCO_SAVINGS: '' },
   })
+  const [payoutAmountByKind, setPayoutAmountByKind] = useState<Record<string, string>>({
+    SACCO_FEE: '',
+    SACCO_LOAN: '',
+    SACCO_SAVINGS: '',
+  })
   const [selectedPayoutBatchId, setSelectedPayoutBatchId] = useState('')
   const [payoutBatchDetail, setPayoutBatchDetail] = useState<PayoutBatch | null>(null)
   const [payoutItems, setPayoutItems] = useState<PayoutItem[]>([])
   const [payoutEvents, setPayoutEvents] = useState<PayoutEvent[]>([])
   const [payoutBatchReadiness, setPayoutBatchReadiness] = useState<BatchReadiness | null>(null)
+  const [ledgerData, setLedgerData] = useState<Record<string, LedgerWallet>>({})
+  const [ledgerLoading, setLedgerLoading] = useState(false)
+  const [ledgerError, setLedgerError] = useState<string | null>(null)
+  const [ledgerFrom, setLedgerFrom] = useState(todayIso())
+  const [ledgerTo, setLedgerTo] = useState(todayIso())
   const [loans, setLoans] = useState<Loan[]>([])
   const [loanMsg, setLoanMsg] = useState('')
   const [loanForm, setLoanForm] = useState({
@@ -467,6 +504,19 @@ export default function SaccoDashboard() {
     return map
   }, [payoutReadiness])
 
+  useEffect(() => {
+    setPayoutAmountByKind((prev) => {
+      const next = { ...prev }
+      ;(['SACCO_FEE', 'SACCO_LOAN', 'SACCO_SAVINGS'] as const).forEach((kind) => {
+        if (!next[kind] || Number(next[kind]) <= 0) {
+          const bal = payoutBalancesByKind.get(kind) || 0
+          if (bal > 0) next[kind] = String(bal)
+        }
+      })
+      return next
+    })
+  }, [payoutBalancesByKind])
+
   const payoutReadinessChecks = payoutReadiness?.checks || null
   const payoutReadinessBlocking = payoutReadinessChecks
     ? Object.values(payoutReadinessChecks).some((check) => check && check.pass === false)
@@ -512,6 +562,23 @@ export default function SaccoDashboard() {
     })
     return previews
   }, [payoutBatchForm, payoutDestinationById, payoutBalancesByKind])
+
+  const payoutAmountErrors = useMemo(() => {
+    const map = new Map<string, string>()
+    Object.entries(payoutBatchForm.include_wallet_kinds)
+      .filter(([, enabled]) => enabled)
+      .forEach(([kind]) => {
+        const raw = payoutAmountByKind[kind] || ''
+        const amount = Number(raw)
+        const balance = payoutBalancesByKind.get(kind) || 0
+        if (!Number.isFinite(amount) || amount <= 0) {
+          map.set(kind, 'Amount must be greater than 0')
+        } else if (amount > balance) {
+          map.set(kind, 'Amount exceeds available balance')
+        }
+      })
+    return map
+  }, [payoutAmountByKind, payoutBalancesByKind, payoutBatchForm.include_wallet_kinds])
 
   const batchSubmitCheck = payoutBatchReadiness?.checks?.can_submit
 
@@ -815,6 +882,13 @@ export default function SaccoDashboard() {
     if (activeTab === 'routes' && showRouteMap) syncRouteMap()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, routePoints, routeLive, showRouteMap])
+
+  useEffect(() => {
+    if (activeTab === 'overview') {
+      loadLedger()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab])
 
   const filteredTx = useMemo(() => {
     return txs.filter((tx) => {
@@ -1706,6 +1780,19 @@ export default function SaccoDashboard() {
       }
       destByKind[kind] = dest
     }
+    for (const kind of includeKinds) {
+      const err = payoutAmountErrors.get(kind)
+      if (err) {
+        setPayoutBatchMsg(err)
+        return
+      }
+    }
+    const items = includeKinds.map((kind) => ({
+      wallet_kind: kind,
+      destination_id: destByKind[kind],
+      amount: Number(payoutAmountByKind[kind] || 0),
+    }))
+
     setPayoutBatchMsg('Creating batch...')
     try {
       const res = await fetchJson<{ batch_id?: string }>('/api/sacco/payout-batches', {
@@ -1714,8 +1801,7 @@ export default function SaccoDashboard() {
         body: JSON.stringify({
           date_from: payoutBatchForm.date_from,
           date_to: payoutBatchForm.date_to,
-          wallet_kinds: includeKinds,
-          destination_id_by_kind: destByKind,
+          items,
         }),
       })
       setPayoutBatchMsg('Batch created')
@@ -1769,6 +1855,82 @@ export default function SaccoDashboard() {
     } catch (err) {
       setPayoutBatchMsg(err instanceof Error ? err.message : 'Copy failed')
     }
+  }
+
+  function formatLedgerSource(row: LedgerRow) {
+    const entry = String(row.entry_type || '').toUpperCase()
+    if (entry === 'C2B_CREDIT') return 'PayBill'
+    if (entry === 'STK_CREDIT') return 'STK'
+    if (entry === 'PAYOUT_DEBIT') return 'Payout'
+    if (entry === 'REVERSAL') return 'Reversal'
+    return row.reference_type || entry || '-'
+  }
+
+  async function loadLedger(kind?: string) {
+    setLedgerLoading(true)
+    setLedgerError(null)
+    try {
+      const params = new URLSearchParams()
+      params.set('limit', '200')
+      if (ledgerFrom) params.set('from', ledgerFrom)
+      if (ledgerTo) params.set('to', ledgerTo)
+      if (kind) params.set('wallet_kind', kind)
+      const res = await authFetch(`/api/sacco/wallet-ledger?${params.toString()}`)
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(text || 'Failed to load wallet ledger')
+      }
+      const payload = await res.json()
+      const wallets = (payload.wallets || []) as LedgerWallet[]
+      setLedgerData((prev) => {
+        const next = { ...prev }
+        wallets.forEach((w) => {
+          if (!w.wallet_kind) return
+          next[w.wallet_kind] = w
+        })
+        return next
+      })
+    } catch (err) {
+      setLedgerError(err instanceof Error ? err.message : 'Failed to load wallet ledger')
+    } finally {
+      setLedgerLoading(false)
+    }
+  }
+
+  function exportLedgerCsv(kind: string) {
+    const entry = ledgerData[kind]
+    if (!entry || !entry.items || !entry.items.length) return
+    const header = [
+      'created_at',
+      'direction',
+      'entry_type',
+      'reference_type',
+      'reference_id',
+      'amount',
+      'balance_after',
+      'description',
+    ]
+    const rows = entry.items.map((row) =>
+      [
+        row.created_at,
+        row.direction,
+        row.entry_type,
+        row.reference_type,
+        row.reference_id,
+        row.amount,
+        row.balance_after,
+        (row.description || '').replace(/,/g, ';'),
+      ]
+        .map((v) => `"${String(v ?? '')}"`)
+        .join(','),
+    )
+    const csv = [header.join(','), ...rows].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = `${kind || 'ledger'}-${ledgerFrom || 'from'}-${ledgerTo || 'to'}.csv`
+    link.click()
+    URL.revokeObjectURL(link.href)
   }
 
   function renderStkSection(title: string, helperText?: string) {
@@ -1922,6 +2084,86 @@ export default function SaccoDashboard() {
                 label="SACCO SAVINGS Account"
                 code={paybillCodes.savings || ''}
               />
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="topline" style={{ flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                <h3 style={{ margin: 0 }}>Wallet statements</h3>
+                <div className="muted small">Audit trail for SACCO fee, loan, and savings wallets</div>
+              </div>
+              <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                <label className="muted small">
+                  From
+                  <input type="date" value={ledgerFrom} onChange={(e) => setLedgerFrom(e.target.value)} />
+                </label>
+                <label className="muted small">
+                  To
+                  <input type="date" value={ledgerTo} onChange={(e) => setLedgerTo(e.target.value)} />
+                </label>
+                <button className="btn" type="button" onClick={() => loadLedger()}>
+                  Refresh
+                </button>
+                {ledgerLoading ? <span className="muted small">Loading...</span> : null}
+                {ledgerError ? <span className="err">{ledgerError}</span> : null}
+              </div>
+            </div>
+            <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 12 }}>
+              {SACCO_LEDGER_KINDS.map((kind) => {
+                const entry = ledgerData[kind] || {}
+                return (
+                  <div key={kind} className="table-wrap" style={{ border: '1px solid #e2e8f0', borderRadius: 8 }}>
+                    <div className="topline" style={{ padding: '8px 12px' }}>
+                      <div>
+                        <div className="muted small">{formatPayoutKind(kind, feeLabel)}</div>
+                        <strong>{fmtKES(entry.balance || 0)}</strong>
+                        <div className="muted small">Account: {entry.virtual_account_code || '-'}</div>
+                      </div>
+                      <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                        <button className="btn ghost" type="button" onClick={() => exportLedgerCsv(kind)}>
+                          Export CSV
+                        </button>
+                        <span className="muted small">Entries: {entry.total || 0}</span>
+                      </div>
+                    </div>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Type</th>
+                          <th>Source</th>
+                          <th>Amount</th>
+                          <th>Balance</th>
+                          <th>Reference</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {!entry.items?.length ? (
+                          <tr>
+                            <td colSpan={6} className="muted">
+                              No ledger entries.
+                            </td>
+                          </tr>
+                        ) : (
+                          (entry.items || []).map((row) => (
+                            <tr key={row.id}>
+                              <td className="muted small">{row.created_at ? new Date(row.created_at).toLocaleString() : '-'}</td>
+                              <td>{row.direction}</td>
+                              <td>{formatLedgerSource(row)}</td>
+                              <td style={{ color: row.direction === 'CREDIT' ? '#15803d' : '#b91c1c' }}>
+                                {fmtKES(row.amount)}
+                              </td>
+                              <td>{fmtKES(row.balance_after)}</td>
+                              <td className="mono">{row.reference_id || '-'}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              })}
             </div>
           </section>
 
@@ -4033,4 +4275,5 @@ export default function SaccoDashboard() {
     </DashboardShell>
   )
 }
+
 

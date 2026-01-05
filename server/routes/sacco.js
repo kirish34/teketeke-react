@@ -23,19 +23,19 @@ router.get('/saccos/:saccoId/overview', async (req, res) => {
         SELECT
           s.id as sacco_id,
           s.name as sacco_name,
-          COALESCE(SUM(wt.amount), 0) AS matatu_net
-        FROM wallet_transactions wt
+          COALESCE(SUM(wl.amount), 0) AS matatu_net
+        FROM wallet_ledger wl
         JOIN wallets w
-          ON w.id = wt.wallet_id
+          ON w.id = wl.wallet_id
         JOIN matatus m
           ON m.id = w.entity_id
          AND w.entity_type = 'MATATU'
         JOIN saccos s
           ON s.id = m.sacco_id
         WHERE s.id = $1
-          AND wt.tx_type = 'CREDIT'
-          AND wt.source = 'MPESA_C2B'
-          AND wt.created_at BETWEEN $2 AND $3
+          AND wl.direction = 'CREDIT'
+          AND wl.entry_type IN ('C2B_CREDIT','STK_CREDIT')
+          AND wl.created_at BETWEEN $2 AND $3
         GROUP BY s.id, s.name
       `,
       [saccoId, from.toISOString(), to.toISOString()]
@@ -50,16 +50,16 @@ router.get('/saccos/:saccoId/overview', async (req, res) => {
     const saccoFeeRes = await pool.query(
       `
         SELECT
-          COALESCE(SUM(wt.amount), 0) AS sacco_fee_income
-        FROM wallet_transactions wt
+          COALESCE(SUM(wl.amount), 0) AS sacco_fee_income
+        FROM wallet_ledger wl
         JOIN wallets w
-          ON w.id = wt.wallet_id
+          ON w.id = wl.wallet_id
         JOIN saccos s
           ON s.wallet_id = w.id
         WHERE s.id = $1
-          AND wt.tx_type = 'CREDIT'
-          AND wt.source = 'FEE_MATATU_FARE'
-          AND wt.created_at BETWEEN $2 AND $3
+          AND wl.direction = 'CREDIT'
+          AND wl.entry_type IN ('C2B_CREDIT','STK_CREDIT')
+          AND wl.created_at BETWEEN $2 AND $3
       `,
       [saccoId, from.toISOString(), to.toISOString()]
     );
@@ -69,14 +69,14 @@ router.get('/saccos/:saccoId/overview', async (req, res) => {
     const platformFeeRes = await pool.query(
       `
         SELECT
-          COALESCE(SUM(wt.amount), 0) AS platform_fee_income
-        FROM wallet_transactions wt
+          COALESCE(SUM(wl.amount), 0) AS platform_fee_income
+        FROM wallet_ledger wl
         JOIN wallets w
-          ON w.id = wt.wallet_id
+          ON w.id = wl.wallet_id
         WHERE w.entity_type = 'SYSTEM'
-          AND wt.tx_type = 'CREDIT'
-          AND wt.source = 'FEE_MATATU_FARE'
-          AND wt.created_at BETWEEN $1 AND $2
+          AND wl.direction = 'CREDIT'
+          AND wl.entry_type IN ('C2B_CREDIT','STK_CREDIT')
+          AND wl.created_at BETWEEN $1 AND $2
       `,
       [from.toISOString(), to.toISOString()]
     );
@@ -125,18 +125,18 @@ router.get('/saccos/:saccoId/matatus/summary', async (req, res) => {
         SELECT
           m.id as matatu_id,
           m.plate as plate,
-          COALESCE(SUM(wt.amount), 0) AS total_net,
-          COUNT(wt.id)::int AS trips_count
-        FROM wallet_transactions wt
+          COALESCE(SUM(wl.amount), 0) AS total_net,
+          COUNT(wl.id)::int AS trips_count
+        FROM wallet_ledger wl
         JOIN wallets w
-          ON w.id = wt.wallet_id
+          ON w.id = wl.wallet_id
         JOIN matatus m
           ON m.id = w.entity_id
          AND w.entity_type = 'MATATU'
         WHERE m.sacco_id = $1
-          AND wt.tx_type = 'CREDIT'
-          AND wt.source = 'MPESA_C2B'
-          AND wt.created_at BETWEEN $2 AND $3
+          AND wl.direction = 'CREDIT'
+          AND wl.entry_type IN ('C2B_CREDIT','STK_CREDIT')
+          AND wl.created_at BETWEEN $2 AND $3
         GROUP BY m.id, m.plate
         ORDER BY total_net DESC
       `,

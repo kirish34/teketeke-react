@@ -91,6 +91,7 @@ app.use('/api', require('./routes/telemetry'));
 app.use('/api', require('./routes/daraja-b2c'));
 app.use('/api', require('./routes/payout-readiness'));
 app.use('/api/sacco', require('./routes/sacco-payouts'));
+app.use('/api', require('./routes/wallet-ledger'));
 app.use('/test', require('./routes/wallet'));
 app.use('/', require('./routes/wallet-withdraw'));
 app.use('/mpesa', require('./routes/mpesa'));

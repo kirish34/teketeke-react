@@ -216,13 +216,6 @@ describeIf('SACCO payouts smoke', () => {
       if (aliasIds.length) {
         await pool.query(`DELETE FROM wallet_aliases WHERE id = ANY($1)`, [aliasIds])
       }
-      if (walletIds.length) {
-        await pool.query(`DELETE FROM wallet_transactions WHERE wallet_id = ANY($1)`, [walletIds])
-        await pool.query(`DELETE FROM wallets WHERE id = ANY($1)`, [walletIds])
-      }
-      if (saccoIds.length) {
-        await pool.query(`DELETE FROM saccos WHERE id = ANY($1)`, [saccoIds])
-      }
       if (userIds.length) {
         await pool.query(`DELETE FROM user_roles WHERE user_id = ANY($1)`, [userIds])
         await pool.query(`DELETE FROM staff_profiles WHERE user_id = ANY($1)`, [userIds])
@@ -242,8 +235,10 @@ describeIf('SACCO payouts smoke', () => {
       {
         date_from: todayDate,
         date_to: todayDate,
-        wallet_kinds: ['SACCO_FEE', 'SACCO_LOAN'],
-        destination_id_by_kind: { SACCO_FEE: destinationId, SACCO_LOAN: paybillDestinationId },
+        items: [
+          { wallet_kind: 'SACCO_FEE', amount: 500, destination_id: destinationId },
+          { wallet_kind: 'SACCO_LOAN', amount: 100, destination_id: paybillDestinationId },
+        ],
       },
       { Authorization: `Bearer ${saccoToken}` },
     )
@@ -264,6 +259,20 @@ describeIf('SACCO payouts smoke', () => {
     batchIds.push(res.payload.batch_id)
     itemIds.push(msisdnItem.id)
     if (paybillItem?.id) itemIds.push(paybillItem.id)
+  })
+
+  it('rejects payout batch when amount exceeds balance', async () => {
+    const res = await fetchJson(
+      '/api/sacco/payout-batches',
+      {
+        date_from: todayDate,
+        date_to: todayDate,
+        items: [{ wallet_kind: 'SACCO_FEE', amount: 999999, destination_id: destinationId }],
+      },
+      { Authorization: `Bearer ${saccoToken}` },
+    )
+    expect(res.res.status).toBe(400)
+    expect(res.payload.error || res.payload.message || '').toMatch(/balance/i)
   })
 
   it('submits payout batch', async () => {
@@ -383,8 +392,11 @@ describeIf('SACCO payouts smoke', () => {
     const txRes = await pool.query(
       `
         SELECT COUNT(*)::int AS total
-        FROM wallet_transactions
-        WHERE wallet_id = $1 AND source = 'SACCO_PAYOUT' AND source_ref = $2
+        FROM wallet_ledger
+        WHERE wallet_id = $1
+          AND reference_type = 'PAYOUT_ITEM'
+          AND reference_id = $2
+          AND direction = 'DEBIT'
       `,
       [feeWalletId, payoutItemId],
     )
@@ -441,5 +453,17 @@ describeIf('SACCO payouts smoke', () => {
     const itemRes = await pool.query(`SELECT status, failure_reason FROM payout_items WHERE id = $1`, [itemFailId])
     expect(itemRes.rows[0].status).toBe('FAILED')
     expect(itemRes.rows[0].failure_reason || '').toContain('Failed')
+
+    const ledgerRes = await pool.query(
+      `
+        SELECT COUNT(*)::int AS total
+        FROM wallet_ledger
+        WHERE wallet_id = $1
+          AND reference_type = 'PAYOUT_ITEM'
+          AND reference_id = $2
+      `,
+      [feeWalletId, itemFailId],
+    )
+    expect(ledgerRes.rows[0].total).toBe(0)
   })
 })

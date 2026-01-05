@@ -169,12 +169,14 @@ type PayoutItemRow = {
   id?: string
   wallet_kind?: string
   amount?: number
+  wallet_balance?: number
   destination_type?: string
   destination_ref?: string
   status?: string
   block_reason?: string | null
   provider_receipt?: string | null
   failure_reason?: string | null
+  ledger_entry_id?: string | null
   created_at?: string
 }
 
@@ -8209,13 +8211,14 @@ const SystemDashboard = () => {
                           <th>Status</th>
                           <th>Block reason</th>
                           <th>Receipt</th>
+                          <th>Ledger</th>
                           <th>Failure</th>
                         </tr>
                       </thead>
                       <tbody>
                         {payoutApprovalItems.length === 0 ? (
                           <tr>
-                            <td colSpan={7} className="muted">
+                            <td colSpan={8} className="muted">
                               No items.
                             </td>
                           </tr>
@@ -8253,6 +8256,22 @@ const SystemDashboard = () => {
                                     Copy
                                   </button>
                                 ) : null}
+                              </td>
+                              <td className="mono">
+                                {item.ledger_entry_id ? (
+                                  <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                                    <span>{item.ledger_entry_id}</span>
+                                    <button
+                                      type="button"
+                                      className="btn ghost"
+                                      onClick={() => copyPayoutValue(item.ledger_entry_id || '', 'Copied ledger id')}
+                                    >
+                                      Copy
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="muted">-</span>
+                                )}
                               </td>
                               <td>{item.failure_reason || '-'}</td>
                             </tr>

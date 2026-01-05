@@ -312,30 +312,50 @@ router.post('/payout-batches', requireSaccoAdmin, async (req, res) => {
     return res.status(400).json({ ok: false, error: 'date_to cannot be before date_from' });
   }
 
-  const kindsInput = Array.isArray(req.body?.wallet_kinds)
-    ? req.body.wallet_kinds
-    : Array.isArray(req.body?.include_wallet_kinds)
-      ? req.body.include_wallet_kinds
-      : [];
-  const kinds = (kindsInput.length ? kindsInput : WALLET_KINDS)
-    .map(normalizePayoutWalletKind)
-    .filter((k) => WALLET_KINDS.includes(k));
-  if (!kinds.length) {
-    return res.status(400).json({ ok: false, error: 'No wallet kinds selected' });
-  }
+  const minPayout = Number(process.env.MIN_PAYOUT_AMOUNT_KES || 10);
+  const maxPayout = Number(process.env.MAX_PAYOUT_AMOUNT_KES || 150000);
 
-  const rawDestMap = req.body?.destination_id_by_kind || {};
+  const itemsInput = Array.isArray(req.body?.items) ? req.body.items : [];
+  let normalizedItems = [];
+  if (itemsInput.length) {
+    normalizedItems = itemsInput
+      .map((row) => ({
+        wallet_kind: normalizePayoutWalletKind(row.wallet_kind),
+        amount: Number(row.amount),
+        destination_id: row.destination_id,
+      }))
+      .filter((row) => WALLET_KINDS.includes(row.wallet_kind));
+  } else {
+    const kindsInput = Array.isArray(req.body?.wallet_kinds)
+      ? req.body.wallet_kinds
+      : Array.isArray(req.body?.include_wallet_kinds)
+        ? req.body.include_wallet_kinds
+        : [];
+    const kinds = (kindsInput.length ? kindsInput : WALLET_KINDS)
+      .map(normalizePayoutWalletKind)
+      .filter((k) => WALLET_KINDS.includes(k));
+    const rawDestMap = req.body?.destination_id_by_kind || {};
+    normalizedItems = kinds.map((kind) => ({
+      wallet_kind: kind,
+      destination_id: rawDestMap[kind],
+      amount: NaN,
+    }));
+  }
   const destMap = {};
-  Object.entries(rawDestMap).forEach(([key, value]) => {
-    const normalizedKey = normalizePayoutWalletKind(key);
-    if (WALLET_KINDS.includes(normalizedKey)) {
-      destMap[normalizedKey] = value;
+  normalizedItems.forEach((row) => {
+    if (row.wallet_kind && row.destination_id) {
+      destMap[row.wallet_kind] = row.destination_id;
     }
   });
+  const kinds = normalizedItems.map((row) => row.wallet_kind).filter(Boolean);
+  if (!normalizedItems.length) {
+    return res.status(400).json({ ok: false, error: 'No payout items provided' });
+  }
+
   const destIds = Array.from(
     new Set(
-      kinds
-        .map((kind) => destMap[kind] || null)
+      normalizedItems
+        .map((item) => item.destination_id || null)
         .filter((value) => typeof value === 'string' && value.trim()),
     ),
   );
@@ -376,19 +396,44 @@ router.post('/payout-batches', requireSaccoAdmin, async (req, res) => {
     let totalAmount = 0;
     const items = [];
 
-    for (const kind of kinds) {
+    for (const itemInput of normalizedItems) {
+      const kind = itemInput.wallet_kind;
       const wallet = walletByKind.get(kind);
       if (!wallet) {
         throw new Error(`Missing wallet for ${kind}`);
       }
-      const destinationId = destMap[kind];
+      const destinationId = itemInput.destination_id;
       const destination = destById.get(destinationId);
       if (!destination) {
         throw new Error(`Missing destination for ${kind}`);
       }
-      const amount = Number(wallet.balance || 0);
+      const walletBalance = Number(wallet.balance || 0);
+      let amount = Number.isFinite(itemInput.amount) ? Number(itemInput.amount) : walletBalance;
+      amount = Math.round(amount * 100) / 100;
       if (!Number.isFinite(amount) || amount <= 0) {
-        continue;
+        await client.query('ROLLBACK');
+        return res.status(400).json({ ok: false, error: 'amount must be > 0', code: 'INVALID_AMOUNT' });
+      }
+      if (amount < minPayout) {
+        await client.query('ROLLBACK');
+        return res
+          .status(400)
+          .json({ ok: false, error: `Amount below minimum (${minPayout})`, code: 'MIN_PAYOUT_AMOUNT' });
+      }
+      if (amount > maxPayout) {
+        await client.query('ROLLBACK');
+        return res
+          .status(400)
+          .json({ ok: false, error: `Amount exceeds maximum (${maxPayout})`, code: 'MAX_PAYOUT_AMOUNT' });
+      }
+      if (amount > walletBalance) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          ok: false,
+          error: 'Insufficient wallet balance',
+          code: 'INSUFFICIENT_BALANCE',
+          details: { wallet_kind: kind, balance: walletBalance, amount },
+        });
       }
       const itemId = crypto.randomUUID();
       const idempotencyKey = `BATCH:${batchId}:${kind}:${amount}:${destination.destination_ref}`;
@@ -406,6 +451,7 @@ router.post('/payout-batches', requireSaccoAdmin, async (req, res) => {
         idempotency_key: idempotencyKey,
         status,
         block_reason: blockReason,
+        wallet_balance: walletBalance,
       });
     }
 
@@ -436,7 +482,7 @@ router.post('/payout-batches', requireSaccoAdmin, async (req, res) => {
       actorId: createdBy,
       eventType: 'BATCH_CREATED',
       message: 'Batch created',
-      meta: { total_amount: totalAmount, wallet_kinds: kinds },
+      meta: { total_amount: totalAmount, wallet_kinds: Array.from(new Set(kinds)) },
       client,
     });
 
@@ -569,8 +615,10 @@ router.get('/payout-batches/:id', requireSaccoAdmin, async (req, res) => {
       `
         SELECT
           pi.*,
-          wl.id AS ledger_entry_id
+          wl.id AS ledger_entry_id,
+          w.balance AS wallet_balance
         FROM payout_items pi
+        LEFT JOIN wallets w ON w.id = pi.wallet_id
         LEFT JOIN wallet_ledger wl
           ON wl.reference_type = 'PAYOUT_ITEM'
          AND wl.reference_id = pi.id::text

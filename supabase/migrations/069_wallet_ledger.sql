@@ -52,6 +52,7 @@ for select
 to authenticated
 using (
   public.is_wallet_member(wallet_id)
+  or public.is_system_admin(auth.uid())
 );
 
 drop policy if exists "wallet_ledger_no_client_write" on public.wallet_ledger;
