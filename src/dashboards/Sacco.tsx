@@ -234,6 +234,13 @@ type LedgerWallet = {
   items?: LedgerRow[]
 }
 
+type NotificationItem = {
+  id: string
+  message: string
+  severity: 'INFO' | 'WARN' | 'CRITICAL'
+  is_read?: boolean
+}
+
 const SACCO_LEDGER_KINDS = ['SACCO_FEE', 'SACCO_LOAN', 'SACCO_SAVINGS'] as const
 
 type SaccoTabId =
@@ -346,7 +353,10 @@ export default function SaccoDashboard() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const [notifications, setNotifications] = useState<string[]>([])
+  const [notifications, setNotifications] = useState<NotificationItem[]>([])
+  const [notificationFilter, setNotificationFilter] = useState<'ALL' | 'WARN' | 'CRITICAL'>('ALL')
+  const [notificationSearch, setNotificationSearch] = useState('')
+  const [notificationUnreadOnly, setNotificationUnreadOnly] = useState(false)
   const [loanRequests, setLoanRequests] = useState<LoanRequest[]>([])
   const [loanReqMsg, setLoanReqMsg] = useState('')
   const [loanDisb, setLoanDisb] = useState<LoanRequest[]>([])
@@ -507,6 +517,26 @@ export default function SaccoDashboard() {
     })
     return map
   }, [payoutReadiness])
+
+  const unreadNotificationCount = useMemo(
+    () => notifications.filter((n) => !n.is_read).length,
+    [notifications],
+  )
+
+  const filteredNotifications = useMemo(() => {
+    const search = notificationSearch.trim().toLowerCase()
+    return notifications
+      .filter((n) => {
+        if (notificationFilter === 'WARN' && n.severity !== 'WARN') return false
+        if (notificationFilter === 'CRITICAL' && n.severity !== 'CRITICAL') return false
+        return true
+      })
+      .filter((n) => {
+        if (!search) return true
+        return n.message.toLowerCase().includes(search)
+      })
+      .filter((n) => (notificationUnreadOnly ? !n.is_read : true))
+  }, [notifications, notificationFilter, notificationSearch, notificationUnreadOnly])
 
   useEffect(() => {
     setPayoutAmountByKind((prev) => {
@@ -1614,21 +1644,39 @@ export default function SaccoDashboard() {
 
   async function loadNotifications() {
     if (!currentSacco) return
-    const msgs: string[] = []
+    const prevRead = new Map<string, boolean>()
+    notifications.forEach((n) => {
+      prevRead.set(`${n.severity}:${n.message}`, Boolean(n.is_read))
+    })
+    const items: NotificationItem[] = []
     const memberLabelLower = memberLabel.toLowerCase()
     try {
       const res = await fetchJson<{ items?: LoanRequest[] }>(
         `/u/sacco/${currentSacco}/loan-requests?status=PENDING`,
       )
       const pending = (res.items || []).length
-      if (pending > 0) msgs.push(`${pending} pending loan request${pending > 1 ? 's' : ''}`)
+      if (pending > 0) {
+        items.push({
+          id: `loan-requests-${pending}`,
+          message: `${pending} pending loan request${pending > 1 ? 's' : ''}`,
+          severity: 'WARN',
+          is_read: prevRead.get(`WARN:${pending} pending loan request${pending > 1 ? 's' : ''}`) || false,
+        })
+      }
     } catch {}
     try {
       const loans = await fetchJson<{ items?: any[]; data?: any[] }>('/u/transactions?kind=loans')
       const rows = (loans.items || loans.data || []) as any[]
       const todayISO = new Date().toISOString().slice(0, 10)
       const count = rows.filter((r) => String(r.created_at || '').slice(0, 10) === todayISO).length
-      if (count > 0) msgs.push(`${count} loan repayment${count > 1 ? 's' : ''} recorded today`)
+      if (count > 0) {
+        items.push({
+          id: `loan-repay-${count}`,
+          message: `${count} loan repayment${count > 1 ? 's' : ''} recorded today`,
+          severity: 'INFO',
+          is_read: prevRead.get(`INFO:${count} loan repayment${count > 1 ? 's' : ''} recorded today`) || false,
+        })
+      }
     } catch {}
     try {
       if (matatuMap.size) {
@@ -1650,11 +1698,24 @@ export default function SaccoDashboard() {
         )
         const unpaid = Array.from(matatuMap.keys()).map(String).filter((id) => id && !paid.has(id))
         if (unpaid.length) {
-          msgs.push(`${feeLabel} missing yesterday for ${unpaid.length} ${memberLabelLower}`)
+          const message = `${feeLabel} missing yesterday for ${unpaid.length} ${memberLabelLower}`
+          items.push({
+            id: `missing-fee-${unpaid.length}`,
+            message,
+            severity: 'CRITICAL',
+            is_read: prevRead.get(`CRITICAL:${message}`) || false,
+          })
         }
       }
     } catch {}
-    setNotifications(msgs)
+    setNotifications(items)
+  }
+
+  function toggleNotificationRead(id: string | undefined) {
+    if (!id) return
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, is_read: !n.is_read } : n)),
+    )
   }
 
   async function loadPayoutDestinations() {
@@ -2116,18 +2177,106 @@ export default function SaccoDashboard() {
 
       {notifications.length ? (
         <section className="card" style={{ background: '#f8fafc' }}>
-          <div className="topline">
-            <h3 style={{ margin: 0 }}>Notifications</h3>
-            <button type="button" className="btn ghost" onClick={loadNotifications}>
-              Refresh
-            </button>
+          <div className="topline" style={{ gap: 8, flexWrap: 'wrap' }}>
+            <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <h3 style={{ margin: 0 }}>Notifications</h3>
+              <span className="badge-ghost">Unread: {unreadNotificationCount}</span>
+            </div>
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" className="btn ghost" onClick={loadNotifications}>
+                Refresh
+              </button>
+            </div>
+          </div>
+          <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+            <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className={`btn ghost${notificationFilter === 'ALL' ? ' active' : ''}`}
+                onClick={() => setNotificationFilter('ALL')}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                className={`btn ghost${notificationFilter === 'WARN' ? ' active' : ''}`}
+                onClick={() => setNotificationFilter('WARN')}
+              >
+                Warnings
+              </button>
+              <button
+                type="button"
+                className={`btn ghost${notificationFilter === 'CRITICAL' ? ' active' : ''}`}
+                onClick={() => setNotificationFilter('CRITICAL')}
+              >
+                Critical
+              </button>
+            </div>
+            <label className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              Search
+              <input
+                className="input"
+                placeholder="Title or message"
+                value={notificationSearch}
+                onChange={(e) => setNotificationSearch(e.target.value)}
+                style={{ minWidth: 200 }}
+              />
+            </label>
+            <label className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={notificationUnreadOnly}
+                onChange={(e) => setNotificationUnreadOnly(e.target.checked)}
+              />
+              Unread only
+            </label>
           </div>
           <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>
-            {notifications.map((n, idx) => (
-              <li key={idx} style={{ margin: '4px 0' }}>
-                {n}
+            {filteredNotifications.length === 0 ? (
+              <li className="muted small" style={{ listStyle: 'none', marginTop: 4 }}>
+                No notifications match filters.
               </li>
-            ))}
+            ) : (
+              filteredNotifications.map((n) => {
+                const pillColor =
+                  n.severity === 'CRITICAL' ? '#fee2e2' : n.severity === 'WARN' ? '#fef9c3' : '#e0f2fe'
+                const pillBorder =
+                  n.severity === 'CRITICAL' ? '#ef4444' : n.severity === 'WARN' ? '#f59e0b' : '#0284c7'
+                return (
+                  <li
+                    key={n.id}
+                    className="row"
+                    style={{
+                      margin: '6px 0',
+                      alignItems: 'center',
+                      gap: 8,
+                      opacity: n.is_read ? 0.7 : 1,
+                      listStyle: 'none',
+                    }}
+                  >
+                    <span
+                      className="badge-ghost mono"
+                      style={{
+                        background: pillColor,
+                        border: `1px solid ${pillBorder}`,
+                        color: '#0f172a',
+                      }}
+                    >
+                      {n.severity}
+                    </span>
+                    <span>{n.message}</span>
+                    <button
+                      type="button"
+                      className="btn ghost"
+                      onClick={() => toggleNotificationRead(n.id)}
+                      style={{ marginLeft: 'auto' }}
+                    >
+                      {n.is_read ? 'Mark unread' : 'Mark read'}
+                    </button>
+                  </li>
+                )
+              })
+            )}
           </ul>
         </section>
       ) : null}
