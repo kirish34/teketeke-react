@@ -17,6 +17,9 @@ router.use(requireUser);
 const DEST_TYPES = new Set(['PAYBILL_TILL', 'MSISDN']);
 const WALLET_KINDS = ['SACCO_FEE', 'SACCO_LOAN', 'SACCO_SAVINGS'];
 
+const MIN_PAYOUT = Number(process.env.MIN_PAYOUT_AMOUNT_KES || 10);
+const MAX_PAYOUT = Number(process.env.MAX_PAYOUT_AMOUNT_KES || 150000);
+
 function normalizeRole(role) {
   return String(role || '').trim().toUpperCase();
 }
@@ -312,9 +315,6 @@ router.post('/payout-batches', requireSaccoAdmin, async (req, res) => {
     return res.status(400).json({ ok: false, error: 'date_to cannot be before date_from' });
   }
 
-  const minPayout = Number(process.env.MIN_PAYOUT_AMOUNT_KES || 10);
-  const maxPayout = Number(process.env.MAX_PAYOUT_AMOUNT_KES || 150000);
-
   const itemsInput = Array.isArray(req.body?.items) ? req.body.items : [];
   let normalizedItems = [];
   if (itemsInput.length) {
@@ -414,17 +414,17 @@ router.post('/payout-batches', requireSaccoAdmin, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ ok: false, error: 'amount must be > 0', code: 'INVALID_AMOUNT' });
       }
-      if (amount < minPayout) {
+      if (amount < MIN_PAYOUT) {
         await client.query('ROLLBACK');
         return res
           .status(400)
-          .json({ ok: false, error: `Amount below minimum (${minPayout})`, code: 'MIN_PAYOUT_AMOUNT' });
+          .json({ ok: false, error: `Amount below minimum (${MIN_PAYOUT})`, code: 'MIN_PAYOUT_AMOUNT' });
       }
-      if (amount > maxPayout) {
+      if (amount > MAX_PAYOUT) {
         await client.query('ROLLBACK');
         return res
           .status(400)
-          .json({ ok: false, error: `Amount exceeds maximum (${maxPayout})`, code: 'MAX_PAYOUT_AMOUNT' });
+          .json({ ok: false, error: `Amount exceeds maximum (${MAX_PAYOUT})`, code: 'MAX_PAYOUT_AMOUNT' });
       }
       if (amount > walletBalance) {
         await client.query('ROLLBACK');
@@ -643,6 +643,208 @@ router.get('/payout-batches/:id', requireSaccoAdmin, async (req, res) => {
       events: eventsRes.rows || [],
     });
   } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.delete('/payout-batches/:id', requireSaccoAdmin, async (req, res) => {
+  const batchId = req.params.id;
+  if (!batchId) return res.status(400).json({ ok: false, error: 'batch id required' });
+  try {
+    const deleted = await pool.query(
+      `
+        DELETE FROM payout_batches
+        WHERE id = $1 AND sacco_id = $2 AND status = 'DRAFT'
+        RETURNING id
+      `,
+      [batchId, req.saccoId],
+    );
+    if (!deleted.rows.length) {
+      return res.status(404).json({ ok: false, error: 'Draft batch not found' });
+    }
+    return res.json({ ok: true, deleted: batchId });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/payout-batches/:id/update', requireSaccoAdmin, async (req, res) => {
+  const batchId = req.params.id;
+  if (!batchId) return res.status(400).json({ ok: false, error: 'batch id required' });
+
+  const itemsInput = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (!itemsInput.length) return res.status(400).json({ ok: false, error: 'items required' });
+
+  try {
+    const batchRes = await pool.query(
+      `
+        SELECT * FROM payout_batches WHERE id = $1 AND sacco_id = $2 LIMIT 1
+      `,
+      [batchId, req.saccoId],
+    );
+    const batch = batchRes.rows[0];
+    if (!batch) return res.status(404).json({ ok: false, error: 'Batch not found' });
+    if (batch.status !== 'DRAFT') {
+      return res.status(400).json({ ok: false, error: 'Only DRAFT batches can be edited' });
+    }
+
+    const destIds = Array.from(
+      new Set(
+        itemsInput
+          .map((row) => row.destination_id || null)
+          .filter((value) => typeof value === 'string' && value.trim()),
+      ),
+    );
+    const destRes = await pool.query(
+      `
+        SELECT id, destination_type, destination_ref, destination_name, is_verified
+        FROM payout_destinations
+        WHERE entity_type = 'SACCO' AND entity_id = $1
+          AND ($2::uuid[] IS NULL OR id = ANY($2::uuid[]))
+      `,
+      [req.saccoId, destIds.length ? destIds : null],
+    );
+    const destById = new Map(destRes.rows.map((row) => [row.id, row]));
+
+    const walletRes = await pool.query(
+      `
+        SELECT id, wallet_kind, balance
+        FROM wallets
+        WHERE sacco_id = $1
+          AND wallet_kind IN ('SACCO_DAILY_FEE', 'SACCO_LOAN', 'SACCO_SAVINGS')
+      `,
+      [req.saccoId],
+    );
+    const walletByKind = new Map(
+      walletRes.rows.map((row) => [normalizePayoutWalletKind(row.wallet_kind), row]),
+    );
+
+    const items = [];
+    let totalAmount = 0;
+    const suggested = {};
+    const destIdByKind = {};
+
+    for (const item of itemsInput) {
+      const kind = normalizePayoutWalletKind(item.wallet_kind);
+      if (!WALLET_KINDS.includes(kind)) {
+        return res.status(400).json({ ok: false, error: 'Invalid wallet_kind' });
+      }
+      const wallet = walletByKind.get(kind);
+      if (!wallet) {
+        return res.status(400).json({ ok: false, error: `Missing wallet for ${kind}` });
+      }
+      const walletBalance = Number(wallet.balance || 0);
+      let amount = Math.round(Number(item.amount || 0) * 100) / 100;
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return res.status(400).json({ ok: false, error: 'amount must be > 0', code: 'INVALID_AMOUNT' });
+      }
+      if (amount < MIN_PAYOUT) {
+        return res.status(400).json({ ok: false, error: `Amount below minimum (${MIN_PAYOUT})` });
+      }
+      if (amount > MAX_PAYOUT) {
+        return res.status(400).json({ ok: false, error: `Amount exceeds maximum (${MAX_PAYOUT})` });
+      }
+      if (amount > walletBalance) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Insufficient wallet balance',
+          code: 'INSUFFICIENT_BALANCE',
+          details: { wallet_kind: kind, balance: walletBalance, amount },
+        });
+      }
+
+      const destId = item.destination_id || null;
+      const destination = destId ? destById.get(destId) : null;
+      const destinationType = destination?.destination_type || 'MSISDN';
+      const destinationRef =
+        destination?.destination_ref || `MISSING-${kind}-${batchId}`.slice(0, 32);
+
+      let status = 'PENDING';
+      let blockReason = null;
+      if (!destination) {
+        status = 'BLOCKED';
+        blockReason = 'DESTINATION_MISSING';
+      } else if (destination.destination_type === 'PAYBILL_TILL') {
+        status = 'BLOCKED';
+        blockReason = 'B2B_NOT_SUPPORTED';
+      } else if (!destination.is_verified && destination.destination_type === 'MSISDN') {
+        status = 'BLOCKED';
+        blockReason = 'DESTINATION_NOT_VERIFIED';
+      }
+
+      if (status === 'PENDING') totalAmount += amount;
+      suggested[kind] = amount;
+      if (destination?.id) destIdByKind[kind] = destination.id;
+
+      items.push({
+        wallet_kind: kind,
+        wallet_id: wallet.id,
+        amount,
+        destination_type: destinationType,
+        destination_ref: destinationRef,
+        status,
+        block_reason: blockReason,
+        idempotency_key: `BATCH:${batchId}:${kind}:${amount}:${destinationRef}`,
+      });
+    }
+
+    if (!items.length) return res.status(400).json({ ok: false, error: 'No items to save' });
+
+    await pool.query('BEGIN');
+    await pool.query(`DELETE FROM payout_events WHERE batch_id = $1 AND item_id IS NOT NULL`, [batchId]);
+    await pool.query(`DELETE FROM payout_items WHERE batch_id = $1`, [batchId]);
+
+    for (const item of items) {
+      await pool.query(
+        `
+          INSERT INTO payout_items
+            (id, batch_id, wallet_id, wallet_kind, amount, destination_type, destination_ref, status, idempotency_key, block_reason)
+          VALUES
+            ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        `,
+        [
+          crypto.randomUUID(),
+          batchId,
+          item.wallet_id,
+          item.wallet_kind,
+          item.amount,
+          item.destination_type,
+          item.destination_ref,
+          item.status,
+          item.idempotency_key,
+          item.block_reason,
+        ],
+      );
+    }
+
+    const newMeta = {
+      ...(batch.meta || {}),
+      destination_id_by_kind: destIdByKind,
+      suggested_amounts: suggested,
+    };
+
+    await pool.query(
+      `
+        UPDATE payout_batches
+        SET total_amount = $2,
+            meta = $3
+        WHERE id = $1
+      `,
+      [batchId, totalAmount, newMeta],
+    );
+
+    await insertPayoutEvent({
+      batchId,
+      actorId: req.user?.id || null,
+      eventType: 'BATCH_EDITED',
+      message: 'Batch items edited',
+      meta: { items: items.length, total_amount: totalAmount },
+    });
+
+    await pool.query('COMMIT');
+    return res.json({ ok: true, batch_id: batchId, total_amount: totalAmount });
+  } catch (err) {
+    await pool.query('ROLLBACK');
     return res.status(500).json({ ok: false, error: err.message });
   }
 });

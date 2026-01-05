@@ -76,6 +76,12 @@ Flow:
 Notes:
 - Only MSISDN destinations are automated in v1.
 - PayBill/Till destinations are stored but payout items are marked `BLOCKED` with `B2B_NOT_SUPPORTED`.
+- Amounts per wallet kind must be > 0, within `MIN_PAYOUT_AMOUNT_KES`/`MAX_PAYOUT_AMOUNT_KES` (defaults 10/150000 KES), and cannot exceed wallet balance.
+Auto-draft batches (optional):
+- Enable with `FEATURE_AUTO_DRAFT_PAYOUTS=true`.
+- Run `node scripts/runAutoDraftPayouts.js` (cron example: `30 20 * * * node scripts/runAutoDraftPayouts.js`) to create DRAFT batches with `meta.auto_draft=true` / `meta.auto_draft_run_id=<date>`.
+- Suggested amounts default to full wallet balances; wallets with zero balance are skipped.
+- Items missing verified MSISDN destinations are `BLOCKED` (`DESTINATION_NOT_VERIFIED` / `DESTINATION_MISSING` / `B2B_NOT_SUPPORTED`); reruns skip if an auto-draft already exists for the sacco+date.
 Payout readiness checks:
 - `GET /api/sacco/payout-readiness?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
 - `GET /api/payout-batches/:id/readiness`
@@ -85,8 +91,10 @@ Endpoints:
   - `GET /api/sacco/payout-destinations`
   - `POST /api/sacco/payout-destinations`
   - `POST /api/sacco/payout-batches` (partial amounts per wallet_kind via `items[]`)
+  - `POST /api/sacco/payout-batches/:id/update` (edit items while status = DRAFT)
   - `POST /api/sacco/payout-batches/:id/submit`
   - `GET /api/sacco/payout-batches`
+  - `DELETE /api/sacco/payout-batches/:id` (discard DRAFT only)
 - System admin:
   - `POST /api/admin/payout-destinations/:id/verify`
   - `GET /api/admin/payout-batches?status=SUBMITTED`
@@ -139,6 +147,7 @@ npm run check:payouts   # checks worker heartbeat/stuck processing via payout_wo
 - `npm run check:payouts` - payout pipeline health
 - `npm run verify:whoami` - Supabase auth check
 - `npm run verify:prod` - prod connectivity check
+- `node scripts/runAutoDraftPayouts.js` - auto-draft DRAFT payout batches (requires `FEATURE_AUTO_DRAFT_PAYOUTS=true`)
 
 ## Tests / smoke
 Smoke tests cover C2B/STK, reconciliation, and ops workflows. Run:

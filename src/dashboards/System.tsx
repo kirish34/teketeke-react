@@ -163,6 +163,7 @@ type PayoutBatchRow = {
   currency?: string
   created_at?: string
   updated_at?: string
+  meta?: Record<string, any>
 }
 
 type PayoutItemRow = {
@@ -8034,7 +8035,14 @@ const SystemDashboard = () => {
                         style={row.id && row.id === payoutApprovalSelected ? { background: '#f1f5f9' } : undefined}
                       >
                         <td>
-                          {row.date_from} to {row.date_to}
+                          <div>
+                            {row.date_from} to {row.date_to}
+                            {row.meta?.auto_draft ? (
+                              <span className="badge-ghost" style={{ marginLeft: 6 }}>
+                                AUTO-DRAFT
+                              </span>
+                            ) : null}
+                          </div>
                         </td>
                         <td>{row.sacco_name || row.sacco_id || '-'}</td>
                         <td>{row.status}</td>

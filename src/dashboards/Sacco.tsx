@@ -138,6 +138,7 @@ type PayoutBatch = {
   currency?: string
   created_at?: string
   updated_at?: string
+  meta?: Record<string, any>
 }
 
 type PayoutItem = {
@@ -394,6 +395,9 @@ export default function SaccoDashboard() {
   const [payoutItems, setPayoutItems] = useState<PayoutItem[]>([])
   const [payoutEvents, setPayoutEvents] = useState<PayoutEvent[]>([])
   const [payoutBatchReadiness, setPayoutBatchReadiness] = useState<BatchReadiness | null>(null)
+  const [payoutDraftItems, setPayoutDraftItems] = useState<
+    Array<{ id?: string; wallet_kind?: string; amount?: string; destination_id?: string }>
+  >([])
   const [ledgerData, setLedgerData] = useState<Record<string, LedgerWallet>>({})
   const [ledgerLoading, setLedgerLoading] = useState(false)
   const [ledgerError, setLedgerError] = useState<string | null>(null)
@@ -1744,6 +1748,25 @@ export default function SaccoDashboard() {
       setPayoutEvents(res.events || [])
       setPayoutBatchMsg('')
       await loadPayoutBatchReadiness(batchId)
+      if (res.batch?.status === 'DRAFT') {
+        const draftItems = (res.items || []).map((item) => {
+          const destId =
+            payoutDestinations.find(
+              (d) =>
+                d.destination_type === item.destination_type &&
+                d.destination_ref === item.destination_ref,
+            )?.id || ''
+          return {
+            id: item.id,
+            wallet_kind: item.wallet_kind,
+            amount: item.amount !== undefined ? String(item.amount) : '',
+            destination_id: destId,
+          }
+        })
+        setPayoutDraftItems(draftItems)
+      } else {
+        setPayoutDraftItems([])
+      }
     } catch (err) {
       setPayoutBatchMsg(err instanceof Error ? err.message : 'Failed to load batch')
     }
@@ -1854,6 +1877,62 @@ export default function SaccoDashboard() {
       setPayoutBatchMsg(label)
     } catch (err) {
       setPayoutBatchMsg(err instanceof Error ? err.message : 'Copy failed')
+    }
+  }
+
+  function updateDraftItem(id: string | undefined, field: 'amount' | 'destination_id') {
+    return (value: string) => {
+      setPayoutDraftItems((prev) =>
+        prev.map((row) => (row.id === id ? { ...row, [field]: value } : row)),
+      )
+    }
+  }
+
+  function removeDraftItem(id: string | undefined) {
+    setPayoutDraftItems((prev) => prev.filter((row) => row.id !== id))
+  }
+
+  async function saveDraftBatch() {
+    if (!payoutBatchDetail?.id) return
+    if (!payoutDraftItems.length) {
+      setPayoutBatchMsg('Add at least one item')
+      return
+    }
+    setPayoutBatchMsg('Saving draft...')
+    try {
+      await fetchJson(`/api/sacco/payout-batches/${encodeURIComponent(payoutBatchDetail.id)}/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: payoutDraftItems.map((row) => ({
+            wallet_kind: row.wallet_kind,
+            amount: Number(row.amount || 0),
+            destination_id: row.destination_id || null,
+          })),
+        }),
+      })
+      setPayoutBatchMsg('Draft saved')
+      await loadPayoutBatches()
+      await loadPayoutBatchDetail(payoutBatchDetail.id)
+    } catch (err) {
+      setPayoutBatchMsg(err instanceof Error ? err.message : 'Save failed')
+    }
+  }
+
+  async function discardDraftBatch() {
+    if (!payoutBatchDetail?.id) return
+    setPayoutBatchMsg('Discarding draft...')
+    try {
+      await fetchJson(`/api/sacco/payout-batches/${encodeURIComponent(payoutBatchDetail.id)}`, {
+        method: 'DELETE',
+      })
+      setPayoutBatchMsg('Draft discarded')
+      setPayoutBatchDetail(null)
+      setPayoutItems([])
+      setPayoutEvents([])
+      await loadPayoutBatches()
+    } catch (err) {
+      setPayoutBatchMsg(err instanceof Error ? err.message : 'Discard failed')
     }
   }
 
@@ -3797,6 +3876,7 @@ export default function SaccoDashboard() {
                       >
                         <td>
                           {b.date_from} to {b.date_to}
+                          {b.meta?.auto_draft ? <span className="badge-ghost" style={{ marginLeft: 6 }}>AUTO-DRAFT</span> : null}
                         </td>
                         <td>{b.status}</td>
                         <td>{fmtKES(b.total_amount)}</td>
@@ -3899,6 +3979,17 @@ export default function SaccoDashboard() {
                     ) : null}
                   </div>
                 ) : null}
+                {payoutBatchDetail?.meta?.auto_draft ? (
+                  <div className="card" style={{ marginTop: 12, boxShadow: 'none', background: '#f8fafc' }}>
+                    <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <strong>AUTO-DRAFT</strong> - Auto-drafted on{' '}
+                        {payoutBatchDetail.meta?.auto_draft_run_id || payoutBatchDetail.date_to}
+                      </div>
+                      <div className="muted small">Review amounts and submit when ready.</div>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="grid g2" style={{ gap: 12, marginTop: 12 }}>
                   <div className="table-wrap">
                     <table>
@@ -3911,56 +4002,114 @@ export default function SaccoDashboard() {
                           <th>Block reason</th>
                           <th>Receipt</th>
                           <th>Failure</th>
+                          {payoutBatchDetail?.status === 'DRAFT' ? <th>Actions</th> : null}
                         </tr>
                       </thead>
                       <tbody>
                         {payoutItems.length === 0 ? (
                           <tr>
-                            <td colSpan={7} className="muted">
+                            <td colSpan={payoutBatchDetail?.status === 'DRAFT' ? 8 : 7} className="muted">
                               No payout items.
                             </td>
                           </tr>
                         ) : (
-                          payoutItems.map((item) => (
-                            <tr key={item.id}>
-                              <td>{formatPayoutKind(item.wallet_kind, feeLabel)}</td>
-                              <td>{fmtKES(item.amount)}</td>
-                              <td>
-                                <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-                                  <span>{item.destination_type}</span>
-                                  <span className="mono">{item.destination_ref || '-'}</span>
-                                  {item.destination_ref ? (
+                          payoutItems.map((item) => {
+                            const draft = payoutDraftItems.find((d) => d.id === item.id)
+                            const editable = payoutBatchDetail?.status === 'DRAFT'
+                            return (
+                              <tr key={item.id}>
+                                <td>
+                                  {formatPayoutKind(item.wallet_kind, feeLabel)}
+                                  {item.wallet_balance !== undefined ? (
+                                    <div className="muted small">Avail: {fmtKES(item.wallet_balance)}</div>
+                                  ) : null}
+                                </td>
+                                <td>
+                                  {editable ? (
+                                    <input
+                                      type="number"
+                                      value={draft?.amount || ''}
+                                      onChange={(e) => updateDraftItem(item.id, 'amount')(e.target.value)}
+                                      style={{ width: 120 }}
+                                      step="0.01"
+                                      min={0}
+                                    />
+                                  ) : (
+                                    fmtKES(item.amount)
+                                  )}
+                                </td>
+                                <td>
+                                  {editable ? (
+                                    <select
+                                      value={draft?.destination_id || ''}
+                                      onChange={(e) => updateDraftItem(item.id, 'destination_id')(e.target.value)}
+                                      style={{ minWidth: 200 }}
+                                    >
+                                      <option value="">- select -</option>
+                                      {payoutDestinations.map((dest) => (
+                                        <option key={dest.id} value={dest.id}>
+                                          {dest.destination_type} - {dest.destination_ref}
+                                          {dest.destination_name ? ` (${dest.destination_name})` : ''}
+                                          {dest.is_verified ? '' : ' (unverified)'}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  ) : (
+                                    <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                                      <span>{item.destination_type}</span>
+                                      <span className="mono">{item.destination_ref || '-'}</span>
+                                      {item.destination_ref ? (
+                                        <button
+                                          type="button"
+                                          className="btn ghost"
+                                          onClick={() => copyPayoutValue(item.destination_ref || '', 'Copied destination')}
+                                        >
+                                          Copy
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                  )}
+                                </td>
+                                <td>{item.status}</td>
+                                <td>{item.block_reason || '-'}</td>
+                                <td className="mono">
+                                  <span>{item.provider_receipt || '-'}</span>
+                                  {item.provider_receipt ? (
                                     <button
                                       type="button"
                                       className="btn ghost"
-                                      onClick={() => copyPayoutValue(item.destination_ref || '', 'Copied destination')}
+                                      style={{ marginLeft: 6 }}
+                                      onClick={() => copyPayoutValue(item.provider_receipt || '', 'Copied receipt')}
                                     >
                                       Copy
                                     </button>
                                   ) : null}
-                                </div>
-                              </td>
-                              <td>{item.status}</td>
-                              <td>{item.block_reason || '-'}</td>
-                              <td className="mono">
-                                <span>{item.provider_receipt || '-'}</span>
-                                {item.provider_receipt ? (
-                                  <button
-                                    type="button"
-                                    className="btn ghost"
-                                    style={{ marginLeft: 6 }}
-                                    onClick={() => copyPayoutValue(item.provider_receipt || '', 'Copied receipt')}
-                                  >
-                                    Copy
-                                  </button>
+                                </td>
+                                <td>{item.failure_reason || '-'}</td>
+                                {editable ? (
+                                  <td>
+                                    <button type="button" className="btn ghost" onClick={() => removeDraftItem(item.id)}>
+                                      Remove
+                                    </button>
+                                  </td>
                                 ) : null}
-                              </td>
-                              <td>{item.failure_reason || '-'}</td>
-                            </tr>
-                          ))
+                              </tr>
+                            )
+                          })
                         )}
                       </tbody>
                     </table>
+                    {payoutBatchDetail?.status === 'DRAFT' ? (
+                      <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                        <button className="btn" type="button" onClick={saveDraftBatch}>
+                          Save draft edits
+                        </button>
+                        <button className="btn ghost" type="button" onClick={discardDraftBatch}>
+                          Discard draft
+                        </button>
+                        <span className="muted small">{payoutBatchMsg}</span>
+                      </div>
+                    ) : null}
                   </div>
                   <div className="table-wrap">
                     <table>
