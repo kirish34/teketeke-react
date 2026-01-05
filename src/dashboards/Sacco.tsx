@@ -119,12 +119,102 @@ type LivePosition = {
   recorded_at?: string
 }
 
+type PayoutDestination = {
+  id?: string
+  destination_type?: string
+  destination_ref?: string
+  destination_name?: string | null
+  is_verified?: boolean
+  created_at?: string
+}
+
+type PayoutBatch = {
+  id?: string
+  sacco_id?: string
+  date_from?: string
+  date_to?: string
+  status?: string
+  total_amount?: number
+  currency?: string
+  created_at?: string
+  updated_at?: string
+}
+
+type PayoutItem = {
+  id?: string
+  wallet_kind?: string
+  amount?: number
+  destination_type?: string
+  destination_ref?: string
+  status?: string
+  block_reason?: string | null
+  provider_receipt?: string | null
+  failure_reason?: string | null
+  idempotency_key?: string
+  created_at?: string
+}
+
+type PayoutEvent = {
+  id?: string
+  event_type?: string
+  message?: string | null
+  meta?: Record<string, unknown>
+  created_at?: string
+}
+
+type ReadinessCheck = {
+  pass?: boolean
+  reason?: string
+  details?: Record<string, unknown>
+}
+
+type ReadinessIssue = {
+  code?: string
+  level?: 'WARN' | 'BLOCK' | string
+  message?: string
+  hint?: string | null
+  details?: Record<string, unknown>
+}
+
+type SaccoPayoutReadiness = {
+  sacco_id?: string
+  date_from?: string
+  date_to?: string
+  checks?: {
+    has_verified_msisdn_destination?: ReadinessCheck
+    no_quarantines_in_window?: ReadinessCheck
+    has_positive_balances?: ReadinessCheck
+    b2c_env_present?: ReadinessCheck
+  }
+  wallet_balances?: Array<{ wallet_kind?: string; wallet_id?: string; balance?: number }>
+  quarantines?: { count?: number; sample?: Array<{ id?: string; created_at?: string; account_reference?: string; reason?: string }> }
+  destinations?: { total?: number; verified_msisdn_count?: number }
+}
+
+type BatchReadiness = {
+  batch?: { id?: string; status?: string; sacco_id?: string; date_from?: string; date_to?: string; total_amount?: number }
+  checks?: {
+    can_submit?: ReadinessCheck
+    can_approve?: ReadinessCheck
+    can_process?: ReadinessCheck
+  }
+  items_summary?: {
+    pending_count?: number
+    blocked_count?: number
+    sent_count?: number
+    confirmed_count?: number
+    failed_count?: number
+    blocked_reasons?: Array<{ reason?: string; count?: number }>
+  }
+  issues?: ReadinessIssue[]
+}
 type SaccoTabId =
   | 'overview'
   | 'members'
   | 'daily_fee'
   | 'savings'
   | 'loans'
+  | 'payouts'
   | 'staff'
   | 'routes'
   | 'vehicle_care'
@@ -138,6 +228,14 @@ function formatKind(kind?: string, feeLabel = 'Daily Fee') {
   if (k === 'SACCO_FEE') return feeLabel
   if (k === 'SAVINGS') return 'Savings'
   if (k === 'LOAN_REPAY') return 'Loan Repay'
+  return k || '-'
+}
+
+function formatPayoutKind(kind?: string, feeLabel = 'Daily Fee') {
+  const k = (kind || '').toUpperCase()
+  if (k === 'SACCO_FEE' || k === 'FEE' || k === 'SACCO_DAILY_FEE') return feeLabel
+  if (k === 'SACCO_LOAN' || k === 'LOAN') return 'Loan'
+  if (k === 'SACCO_SAVINGS' || k === 'SAVINGS') return 'Savings'
   return k || '-'
 }
 
@@ -237,6 +335,33 @@ export default function SaccoDashboard() {
   const [routesMsg, setRoutesMsg] = useState('')
   const [stkForm, setStkForm] = useState({ code: '', amount: '', phone: '' })
   const [stkResp, setStkResp] = useState('')
+  const [payoutDestinations, setPayoutDestinations] = useState<PayoutDestination[]>([])
+  const [payoutDestError, setPayoutDestError] = useState<string | null>(null)
+  const [payoutDestMsg, setPayoutDestMsg] = useState('')
+  const [payoutDestForm, setPayoutDestForm] = useState({
+    destination_type: 'MSISDN',
+    destination_ref: '',
+    destination_name: '',
+  })
+  const [payoutReadiness, setPayoutReadiness] = useState<SaccoPayoutReadiness | null>(null)
+  const [payoutReadinessMsg, setPayoutReadinessMsg] = useState('')
+  const [payoutReadinessError, setPayoutReadinessError] = useState<string | null>(null)
+  const [payoutFrom, setPayoutFrom] = useState(todayIso())
+  const [payoutTo, setPayoutTo] = useState(todayIso())
+  const [payoutBatches, setPayoutBatches] = useState<PayoutBatch[]>([])
+  const [payoutBatchError, setPayoutBatchError] = useState<string | null>(null)
+  const [payoutBatchMsg, setPayoutBatchMsg] = useState('')
+  const [payoutBatchForm, setPayoutBatchForm] = useState({
+    date_from: todayIso(),
+    date_to: todayIso(),
+    include_wallet_kinds: { SACCO_FEE: true, SACCO_LOAN: true, SACCO_SAVINGS: true },
+    destination_by_kind: { SACCO_FEE: '', SACCO_LOAN: '', SACCO_SAVINGS: '' },
+  })
+  const [selectedPayoutBatchId, setSelectedPayoutBatchId] = useState('')
+  const [payoutBatchDetail, setPayoutBatchDetail] = useState<PayoutBatch | null>(null)
+  const [payoutItems, setPayoutItems] = useState<PayoutItem[]>([])
+  const [payoutEvents, setPayoutEvents] = useState<PayoutEvent[]>([])
+  const [payoutBatchReadiness, setPayoutBatchReadiness] = useState<BatchReadiness | null>(null)
   const [loans, setLoans] = useState<Loan[]>([])
   const [loanMsg, setLoanMsg] = useState('')
   const [loanForm, setLoanForm] = useState({
@@ -295,19 +420,22 @@ export default function SaccoDashboard() {
   const isBoda = operatorType === 'BODA_GROUP'
   const routeLabel = routesLabel.endsWith('s') ? routesLabel.slice(0, -1) : routesLabel
 
-  const tabs = useMemo<Array<{ id: SaccoTabId; label: string }>>(
-    () => [
+  const tabs = useMemo<Array<{ id: SaccoTabId; label: string }>>(() => {
+    const items: Array<{ id: SaccoTabId; label: string }> = [
       { id: 'overview', label: 'Overview' },
       { id: 'members', label: memberLabel },
       { id: 'daily_fee', label: feeLabel },
       { id: 'savings', label: 'Savings' },
       { id: 'loans', label: 'Loans' },
-      { id: 'staff', label: 'Staff' },
-      { id: 'routes', label: routesLabel },
-      { id: 'vehicle_care', label: 'Vehicle Care' },
-    ],
-    [feeLabel, memberLabel, routesLabel],
-  )
+    ]
+    if (isOperatorAdmin) {
+      items.push({ id: 'payouts', label: 'Payouts' })
+    }
+    items.push({ id: 'staff', label: 'Staff' })
+    items.push({ id: 'routes', label: routesLabel })
+    items.push({ id: 'vehicle_care', label: 'Vehicle Care' })
+    return items
+  }, [feeLabel, isOperatorAdmin, memberLabel, routesLabel])
   const showFilters = true
 
   const memberIdValue = (m: Matatu) => m.number_plate || m.id || ''
@@ -322,6 +450,70 @@ export default function SaccoDashboard() {
   }, [matatus])
 
   const paybillCodes = useMemo(() => mapPaybillCodes(paybillAliases), [paybillAliases])
+
+  const payoutDestinationById = useMemo(() => {
+    const map = new Map<string, PayoutDestination>()
+    payoutDestinations.forEach((dest) => {
+      if (dest.id) map.set(dest.id, dest)
+    })
+    return map
+  }, [payoutDestinations])
+
+  const payoutBalancesByKind = useMemo(() => {
+    const map = new Map<string, number>()
+    ;(payoutReadiness?.wallet_balances || []).forEach((row) => {
+      if (row.wallet_kind) map.set(row.wallet_kind, Number(row.balance || 0))
+    })
+    return map
+  }, [payoutReadiness])
+
+  const payoutReadinessChecks = payoutReadiness?.checks || null
+  const payoutReadinessBlocking = payoutReadinessChecks
+    ? Object.values(payoutReadinessChecks).some((check) => check && check.pass === false)
+    : true
+  const payoutReadinessFirstReason = payoutReadinessChecks
+    ? Object.values(payoutReadinessChecks).find((check) => check && check.pass === false)?.reason || ''
+    : ''
+
+  const payoutReadinessFixes = useMemo(() => {
+    const fixes: string[] = []
+    if (!payoutReadinessChecks) return fixes
+    if (payoutReadinessChecks.has_verified_msisdn_destination?.pass === false) {
+      fixes.push('Add an MSISDN destination and ask a system admin to verify it.')
+    }
+    if (payoutReadinessChecks.no_quarantines_in_window?.pass === false) {
+      fixes.push('Resolve quarantined payments in the selected date window.')
+    }
+    if (payoutReadinessChecks.has_positive_balances?.pass === false) {
+      fixes.push('Wait for collections or top up wallets before submitting payouts.')
+    }
+    if (payoutReadinessChecks.b2c_env_present?.pass === false) {
+      fixes.push('Ask a system admin to configure the MPESA_B2C_* environment variables.')
+    }
+    return fixes
+  }, [payoutReadinessChecks])
+
+  const payoutBlockedPreview = useMemo(() => {
+    const previews: Array<{ kind: string; reason: string }> = []
+    const selectedKinds = Object.entries(payoutBatchForm.include_wallet_kinds).filter(([, v]) => v)
+    selectedKinds.forEach(([kind]) => {
+      const destinationId =
+        payoutBatchForm.destination_by_kind[
+          kind as 'SACCO_FEE' | 'SACCO_LOAN' | 'SACCO_SAVINGS'
+        ]
+      const destination = destinationId ? payoutDestinationById.get(destinationId) : null
+      if (destination?.destination_type === 'PAYBILL_TILL') {
+        previews.push({ kind, reason: 'B2B_NOT_SUPPORTED' })
+      }
+      const balance = payoutBalancesByKind.get(kind) || 0
+      if (balance <= 0) {
+        previews.push({ kind, reason: 'ZERO_BALANCE' })
+      }
+    })
+    return previews
+  }, [payoutBatchForm, payoutDestinationById, payoutBalancesByKind])
+
+  const batchSubmitCheck = payoutBatchReadiness?.checks?.can_submit
 
   const grantsByUserId = useMemo(() => {
     const map = new Map<string, AccessGrant>()
@@ -557,6 +749,17 @@ export default function SaccoDashboard() {
     }
     loadPaybillCodes()
   }, [currentSacco])
+
+  useEffect(() => {
+    if (!currentSacco || !isOperatorAdmin) return
+    void loadPayoutDestinations()
+    void loadPayoutBatches()
+  }, [currentSacco, isOperatorAdmin])
+
+  useEffect(() => {
+    if (!currentSacco || !isOperatorAdmin || activeTab !== 'payouts') return
+    void loadPayoutReadiness()
+  }, [currentSacco, isOperatorAdmin, activeTab, payoutBatchForm.date_from, payoutBatchForm.date_to])
 
   useEffect(() => {
     if (!currentSacco) return
@@ -1376,6 +1579,168 @@ export default function SaccoDashboard() {
     setNotifications(msgs)
   }
 
+  async function loadPayoutDestinations() {
+    setPayoutDestError(null)
+    try {
+      const res = await fetchJson<{ destinations?: PayoutDestination[] }>('/api/sacco/payout-destinations')
+      const items = res.destinations || []
+      setPayoutDestinations(items)
+      setPayoutDestError(null)
+      if (items.length) {
+        setPayoutBatchForm((prev) => {
+          const next = { ...prev.destination_by_kind }
+          ;(['SACCO_FEE', 'SACCO_LOAN', 'SACCO_SAVINGS'] as const).forEach((kind) => {
+            if (!next[kind]) next[kind] = items[0].id || ''
+          })
+          return { ...prev, destination_by_kind: next }
+        })
+      }
+    } catch (err) {
+      setPayoutDestinations([])
+      setPayoutDestError(err instanceof Error ? err.message : 'Failed to load payout destinations')
+    }
+  }
+
+  async function loadPayoutReadiness(dateFrom?: string, dateTo?: string) {
+    const from = dateFrom || payoutBatchForm.date_from
+    const to = dateTo || payoutBatchForm.date_to
+    setPayoutReadinessMsg('Checking readiness...')
+    setPayoutReadinessError(null)
+    try {
+      const res = await fetchJson<SaccoPayoutReadiness>(
+        `/api/sacco/payout-readiness?date_from=${encodeURIComponent(from)}&date_to=${encodeURIComponent(to)}`,
+      )
+      setPayoutReadiness(res || null)
+      setPayoutReadinessMsg('Ready')
+    } catch (err) {
+      setPayoutReadiness(null)
+      setPayoutReadinessError(err instanceof Error ? err.message : 'Failed to load readiness')
+      setPayoutReadinessMsg('')
+    }
+  }
+
+  async function savePayoutDestination() {
+    if (!payoutDestForm.destination_ref.trim()) {
+      setPayoutDestMsg('Destination reference required')
+      return
+    }
+    setPayoutDestMsg('Saving...')
+    try {
+      await fetchJson<{ destination?: PayoutDestination }>('/api/sacco/payout-destinations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          destination_type: payoutDestForm.destination_type,
+          destination_ref: payoutDestForm.destination_ref,
+          destination_name: payoutDestForm.destination_name,
+        }),
+      })
+      setPayoutDestMsg('Saved')
+      setPayoutDestForm({ destination_type: 'MSISDN', destination_ref: '', destination_name: '' })
+      await loadPayoutDestinations()
+    } catch (err) {
+      setPayoutDestMsg(err instanceof Error ? err.message : 'Save failed')
+    }
+  }
+
+  async function loadPayoutBatches() {
+    setPayoutBatchError(null)
+    try {
+      const res = await fetchJson<{ batches?: PayoutBatch[] }>(
+        `/api/sacco/payout-batches?from=${encodeURIComponent(payoutFrom)}&to=${encodeURIComponent(payoutTo)}`,
+      )
+      setPayoutBatches(res.batches || [])
+      setPayoutBatchError(null)
+    } catch (err) {
+      setPayoutBatches([])
+      setPayoutBatchError(err instanceof Error ? err.message : 'Failed to load payout batches')
+    }
+  }
+
+  async function loadPayoutBatchDetail(batchId: string) {
+    if (!batchId) return
+    setSelectedPayoutBatchId(batchId)
+    setPayoutBatchMsg('Loading batch...')
+    try {
+      const res = await fetchJson<{ batch?: PayoutBatch; items?: PayoutItem[]; events?: PayoutEvent[] }>(
+        `/api/sacco/payout-batches/${encodeURIComponent(batchId)}`,
+      )
+      setPayoutBatchDetail(res.batch || null)
+      setPayoutItems(res.items || [])
+      setPayoutEvents(res.events || [])
+      setPayoutBatchMsg('')
+      await loadPayoutBatchReadiness(batchId)
+    } catch (err) {
+      setPayoutBatchMsg(err instanceof Error ? err.message : 'Failed to load batch')
+    }
+  }
+
+  async function loadPayoutBatchReadiness(batchId: string) {
+    if (!batchId) return
+    try {
+      const res = await fetchJson<BatchReadiness>(`/api/payout-batches/${encodeURIComponent(batchId)}/readiness`)
+      setPayoutBatchReadiness(res || null)
+    } catch (err) {
+      setPayoutBatchReadiness(null)
+      setPayoutBatchMsg(err instanceof Error ? err.message : 'Failed to load batch readiness')
+    }
+  }
+
+  async function createPayoutBatch() {
+    const includeKinds = Object.entries(payoutBatchForm.include_wallet_kinds)
+      .filter(([, enabled]) => enabled)
+      .map(([kind]) => kind)
+    if (!includeKinds.length) {
+      setPayoutBatchMsg('Select at least one wallet kind')
+      return
+    }
+    const destByKind: Record<string, string> = {}
+    for (const kind of includeKinds) {
+      const dest =
+        payoutBatchForm.destination_by_kind[
+          kind as 'SACCO_FEE' | 'SACCO_LOAN' | 'SACCO_SAVINGS'
+        ]
+      if (!dest) {
+        setPayoutBatchMsg('Select destinations for all chosen kinds')
+        return
+      }
+      destByKind[kind] = dest
+    }
+    setPayoutBatchMsg('Creating batch...')
+    try {
+      const res = await fetchJson<{ batch_id?: string }>('/api/sacco/payout-batches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          date_from: payoutBatchForm.date_from,
+          date_to: payoutBatchForm.date_to,
+          wallet_kinds: includeKinds,
+          destination_id_by_kind: destByKind,
+        }),
+      })
+      setPayoutBatchMsg('Batch created')
+      await loadPayoutBatches()
+      if (res.batch_id) {
+        await loadPayoutBatchDetail(res.batch_id)
+      }
+    } catch (err) {
+      setPayoutBatchMsg(err instanceof Error ? err.message : 'Batch creation failed')
+    }
+  }
+
+  async function submitPayoutBatch(batchId: string) {
+    if (!batchId) return
+    setPayoutBatchMsg('Submitting batch...')
+    try {
+      await fetchJson(`/api/sacco/payout-batches/${encodeURIComponent(batchId)}/submit`, { method: 'POST' })
+      setPayoutBatchMsg('Batch submitted')
+      await loadPayoutBatches()
+      await loadPayoutBatchDetail(batchId)
+    } catch (err) {
+      setPayoutBatchMsg(err instanceof Error ? err.message : 'Submit failed')
+    }
+  }
+
   async function sendStk() {
     setStkResp('Sending...')
     try {
@@ -1393,6 +1758,16 @@ export default function SaccoDashboard() {
       setStkResp(text)
     } catch (err) {
       setStkResp(err instanceof Error ? err.message : 'STK failed')
+    }
+  }
+
+  async function copyPayoutValue(value: string, label: string) {
+    if (!value) return
+    try {
+      await navigator.clipboard.writeText(value)
+      setPayoutBatchMsg(label)
+    } catch (err) {
+      setPayoutBatchMsg(err instanceof Error ? err.message : 'Copy failed')
     }
   }
 
@@ -2789,6 +3164,600 @@ export default function SaccoDashboard() {
         </>
       ) : null}
 
+      {activeTab === 'payouts' ? (
+        <>
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Payout Readiness</h3>
+              <div className="row" style={{ gap: 8 }}>
+                <button type="button" className="btn ghost" onClick={() => loadPayoutReadiness()}>
+                  Refresh
+                </button>
+                <span className="muted small">{payoutReadinessMsg}</span>
+              </div>
+            </div>
+            {payoutReadinessError ? <div className="err">{payoutReadinessError}</div> : null}
+            <div className="grid g2" style={{ gap: 12, marginTop: 8 }}>
+              <div>
+                <div className="row" style={{ gap: 8 }}>
+                  <span className="badge-ghost">
+                    {payoutReadinessChecks?.has_verified_msisdn_destination?.pass ? 'OK' : 'BLOCK'}
+                  </span>
+                  <strong>Verified MSISDN destination</strong>
+                </div>
+                <div className="muted small">
+                  {payoutReadinessChecks?.has_verified_msisdn_destination?.reason || 'Checking destinations...'}
+                </div>
+                <div className="muted small">
+                  Verified MSISDN destinations: {payoutReadiness?.destinations?.verified_msisdn_count || 0}
+                </div>
+              </div>
+
+              <div>
+                <div className="row" style={{ gap: 8 }}>
+                  <span className="badge-ghost">
+                    {payoutReadinessChecks?.no_quarantines_in_window?.pass ? 'OK' : 'BLOCK'}
+                  </span>
+                  <strong>No quarantines in range</strong>
+                </div>
+                <div className="muted small">
+                  {payoutReadinessChecks?.no_quarantines_in_window?.reason || 'Checking quarantines...'}
+                </div>
+                <div className="muted small">
+                  Quarantines: {payoutReadiness?.quarantines?.count || 0}
+                </div>
+                {payoutReadiness?.quarantines?.sample?.length ? (
+                  <div className="muted small" style={{ marginTop: 4 }}>
+                    Sample: {payoutReadiness.quarantines.sample[0]?.account_reference || '-'} (
+                    {payoutReadiness.quarantines.sample[0]?.reason || 'reason'})
+                  </div>
+                ) : null}
+              </div>
+
+              <div>
+                <div className="row" style={{ gap: 8 }}>
+                  <span className="badge-ghost">
+                    {payoutReadinessChecks?.has_positive_balances?.pass ? 'OK' : 'BLOCK'}
+                  </span>
+                  <strong>Wallet balances &gt; 0</strong>
+                </div>
+                <div className="muted small">
+                  {payoutReadinessChecks?.has_positive_balances?.reason || 'Checking balances...'}
+                </div>
+                {payoutReadiness?.wallet_balances?.length ? (
+                  <div className="muted small" style={{ marginTop: 4 }}>
+                    {payoutReadiness.wallet_balances.map((row) => (
+                      <div key={row.wallet_id || row.wallet_kind}>
+                        {formatPayoutKind(row.wallet_kind, feeLabel)}: {fmtKES(row.balance || 0)}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              <div>
+                <div className="row" style={{ gap: 8 }}>
+                  <span className="badge-ghost">{payoutReadinessChecks?.b2c_env_present?.pass ? 'OK' : 'BLOCK'}</span>
+                  <strong>B2C env configured</strong>
+                </div>
+                <div className="muted small">
+                  {payoutReadinessChecks?.b2c_env_present?.reason || 'Checking B2C config...'}
+                </div>
+                {payoutReadinessChecks?.b2c_env_present?.pass === false ? (
+                  <div className="muted small">
+                    Missing keys:{' '}
+                    {(payoutReadinessChecks?.b2c_env_present?.details?.missing_keys as string[] | undefined)?.join(
+                      ', ',
+                    ) || '-'}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+            {payoutReadinessFixes.length ? (
+              <div className="muted small" style={{ marginTop: 10 }}>
+                <strong>How to fix:</strong>
+                <ul style={{ marginTop: 6 }}>
+                  {payoutReadinessFixes.map((fix) => (
+                    <li key={fix}>{fix}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </section>
+
+          <section className="card">
+            <PaybillHeader title="SACCO Payouts (4814003)" />
+            <div className="muted small" style={{ marginTop: 8 }}>
+              Payout batches require system admin approval. Wallets are debited only after M-Pesa confirms payout.
+            </div>
+            <div className="muted small">
+              Only MSISDN payouts are automated in v1. PayBill/Till destinations require manual transfer.
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Payout destinations</h3>
+              <div className="row" style={{ gap: 8 }}>
+                <button type="button" className="btn ghost" onClick={loadPayoutDestinations}>
+                  Reload
+                </button>
+                <span className="muted small">{payoutDestMsg}</span>
+              </div>
+            </div>
+            {payoutDestError ? <div className="err">{payoutDestError}</div> : null}
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+              <select
+                value={payoutDestForm.destination_type}
+                onChange={(e) => setPayoutDestForm((f) => ({ ...f, destination_type: e.target.value }))}
+                style={{ padding: 10, minWidth: 160 }}
+              >
+                <option value="MSISDN">MSISDN</option>
+                <option value="PAYBILL_TILL">PayBill/Till</option>
+              </select>
+              <input
+                placeholder={payoutDestForm.destination_type === 'MSISDN' ? 'MSISDN e.g. +2547XXXXXXXX' : 'Till or PayBill'}
+                value={payoutDestForm.destination_ref}
+                onChange={(e) => setPayoutDestForm((f) => ({ ...f, destination_ref: e.target.value }))}
+                style={{ minWidth: 200 }}
+              />
+              <input
+                placeholder="Label (optional)"
+                value={payoutDestForm.destination_name}
+                onChange={(e) => setPayoutDestForm((f) => ({ ...f, destination_name: e.target.value }))}
+                style={{ minWidth: 200 }}
+              />
+              <button type="button" onClick={savePayoutDestination}>
+                Save destination
+              </button>
+            </div>
+            {payoutDestForm.destination_type !== 'MSISDN' ? (
+              <div className="muted small" style={{ marginTop: 6 }}>
+                PayBill/Till destinations are stored for manual transfer in v1.
+              </div>
+            ) : null}
+            <div className="table-wrap" style={{ marginTop: 12 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Reference</th>
+                    <th>Label</th>
+                    <th>Verified</th>
+                    <th>Created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {payoutDestinations.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="muted">
+                        No payout destinations yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    payoutDestinations.map((d) => (
+                      <tr key={d.id}>
+                        <td>{d.destination_type || ''}</td>
+                        <td className="mono">{d.destination_ref || ''}</td>
+                        <td>{d.destination_name || '-'}</td>
+                        <td>{d.is_verified ? 'Verified' : 'Pending'}</td>
+                        <td>{d.created_at ? new Date(d.created_at).toLocaleString() : ''}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Create payout batch</h3>
+              <span className="muted small">{payoutBatchMsg}</span>
+            </div>
+            <div className="row" style={{ gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
+              <label>
+                <div className="muted small">Date from</div>
+                <input
+                  type="date"
+                  value={payoutBatchForm.date_from}
+                  onChange={(e) => setPayoutBatchForm((f) => ({ ...f, date_from: e.target.value }))}
+                />
+              </label>
+              <label>
+                <div className="muted small">Date to</div>
+                <input
+                  type="date"
+                  value={payoutBatchForm.date_to}
+                  onChange={(e) => setPayoutBatchForm((f) => ({ ...f, date_to: e.target.value }))}
+                />
+              </label>
+              <label className="row" style={{ gap: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={payoutBatchForm.include_wallet_kinds.SACCO_FEE}
+                  onChange={(e) =>
+                    setPayoutBatchForm((f) => ({
+                      ...f,
+                      include_wallet_kinds: { ...f.include_wallet_kinds, SACCO_FEE: e.target.checked },
+                    }))
+                  }
+                />
+                {feeLabel}
+              </label>
+              <label className="row" style={{ gap: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={payoutBatchForm.include_wallet_kinds.SACCO_LOAN}
+                  onChange={(e) =>
+                    setPayoutBatchForm((f) => ({
+                      ...f,
+                      include_wallet_kinds: { ...f.include_wallet_kinds, SACCO_LOAN: e.target.checked },
+                    }))
+                  }
+                />
+                Loan
+              </label>
+              <label className="row" style={{ gap: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={payoutBatchForm.include_wallet_kinds.SACCO_SAVINGS}
+                  onChange={(e) =>
+                    setPayoutBatchForm((f) => ({
+                      ...f,
+                      include_wallet_kinds: { ...f.include_wallet_kinds, SACCO_SAVINGS: e.target.checked },
+                    }))
+                  }
+                />
+                Savings
+              </label>
+            </div>
+            <div className="row" style={{ gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
+              <label>
+                <div className="muted small">{feeLabel} destination</div>
+                <select
+                  value={payoutBatchForm.destination_by_kind.SACCO_FEE}
+                  onChange={(e) =>
+                    setPayoutBatchForm((f) => ({
+                      ...f,
+                      destination_by_kind: { ...f.destination_by_kind, SACCO_FEE: e.target.value },
+                    }))
+                  }
+                  style={{ padding: 10, minWidth: 220 }}
+                >
+                  <option value="">- select -</option>
+                  {payoutDestinations.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {(d.destination_name || d.destination_ref || '').toString()}
+                      {d.is_verified ? '' : ' (unverified)'}
+                    </option>
+                  ))}
+                </select>
+                {payoutBatchForm.destination_by_kind.SACCO_FEE &&
+                payoutDestinationById.get(payoutBatchForm.destination_by_kind.SACCO_FEE)?.is_verified === false ? (
+                  <div className="muted small">Unverified: approval blocked until verified.</div>
+                ) : null}
+              </label>
+              <label>
+                <div className="muted small">Loan destination</div>
+                <select
+                  value={payoutBatchForm.destination_by_kind.SACCO_LOAN}
+                  onChange={(e) =>
+                    setPayoutBatchForm((f) => ({
+                      ...f,
+                      destination_by_kind: { ...f.destination_by_kind, SACCO_LOAN: e.target.value },
+                    }))
+                  }
+                  style={{ padding: 10, minWidth: 220 }}
+                >
+                  <option value="">- select -</option>
+                  {payoutDestinations.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {(d.destination_name || d.destination_ref || '').toString()}
+                      {d.is_verified ? '' : ' (unverified)'}
+                    </option>
+                  ))}
+                </select>
+                {payoutBatchForm.destination_by_kind.SACCO_LOAN &&
+                payoutDestinationById.get(payoutBatchForm.destination_by_kind.SACCO_LOAN)?.is_verified === false ? (
+                  <div className="muted small">Unverified: approval blocked until verified.</div>
+                ) : null}
+              </label>
+              <label>
+                <div className="muted small">Savings destination</div>
+                <select
+                  value={payoutBatchForm.destination_by_kind.SACCO_SAVINGS}
+                  onChange={(e) =>
+                    setPayoutBatchForm((f) => ({
+                      ...f,
+                      destination_by_kind: { ...f.destination_by_kind, SACCO_SAVINGS: e.target.value },
+                    }))
+                  }
+                  style={{ padding: 10, minWidth: 220 }}
+                >
+                  <option value="">- select -</option>
+                  {payoutDestinations.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {(d.destination_name || d.destination_ref || '').toString()}
+                      {d.is_verified ? '' : ' (unverified)'}
+                    </option>
+                  ))}
+                </select>
+                {payoutBatchForm.destination_by_kind.SACCO_SAVINGS &&
+                payoutDestinationById.get(payoutBatchForm.destination_by_kind.SACCO_SAVINGS)?.is_verified === false ? (
+                  <div className="muted small">Unverified: approval blocked until verified.</div>
+                ) : null}
+              </label>
+              <button type="button" onClick={createPayoutBatch} disabled={payoutReadinessBlocking}>
+                Create batch
+              </button>
+              {payoutReadinessBlocking && payoutReadinessFirstReason ? (
+                <div className="muted small" style={{ maxWidth: 280 }}>
+                  {payoutReadinessFirstReason}
+                </div>
+              ) : null}
+            </div>
+            {payoutBlockedPreview.length ? (
+              <div className="muted small" style={{ marginTop: 8 }}>
+                <strong>Items that will be blocked:</strong>
+                <ul style={{ marginTop: 6 }}>
+                  {payoutBlockedPreview.map((item, idx) => (
+                    <li key={`${item.kind}-${item.reason}-${idx}`}>
+                      {formatPayoutKind(item.kind, feeLabel)} - {item.reason === 'ZERO_BALANCE' ? 'Zero balance' : 'B2B not supported'}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Payout batches</h3>
+              <div className="row" style={{ gap: 8 }}>
+                <label>
+                  <div className="muted small">From</div>
+                  <input type="date" value={payoutFrom} onChange={(e) => setPayoutFrom(e.target.value)} />
+                </label>
+                <label>
+                  <div className="muted small">To</div>
+                  <input type="date" value={payoutTo} onChange={(e) => setPayoutTo(e.target.value)} />
+                </label>
+                <button type="button" className="btn ghost" onClick={loadPayoutBatches}>
+                  Reload
+                </button>
+                {payoutBatchError ? <span className="err">{payoutBatchError}</span> : null}
+              </div>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date range</th>
+                    <th>Status</th>
+                    <th>Total</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {payoutBatches.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="muted">
+                        No payout batches.
+                      </td>
+                    </tr>
+                  ) : (
+                    payoutBatches.map((b) => (
+                      <tr
+                        key={b.id}
+                        style={b.id && b.id === selectedPayoutBatchId ? { background: '#f1f5f9' } : undefined}
+                      >
+                        <td>
+                          {b.date_from} to {b.date_to}
+                        </td>
+                        <td>{b.status}</td>
+                        <td>{fmtKES(b.total_amount)}</td>
+                        <td>{b.created_at ? new Date(b.created_at).toLocaleString() : ''}</td>
+                        <td className="row" style={{ gap: 6 }}>
+                          <button type="button" className="btn ghost" onClick={() => loadPayoutBatchDetail(b.id || '')}>
+                            View
+                          </button>
+                          {b.status === 'DRAFT' ? (
+                            <button
+                              type="button"
+                              onClick={() => submitPayoutBatch(b.id || '')}
+                              disabled={
+                                b.id === selectedPayoutBatchId && batchSubmitCheck?.pass === false
+                              }
+                              title={
+                                b.id === selectedPayoutBatchId && batchSubmitCheck?.pass === false
+                                  ? batchSubmitCheck?.reason || 'Cannot submit'
+                                  : ''
+                              }
+                            >
+                              Submit
+                            </button>
+                          ) : null}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Batch detail</h3>
+              <span className="muted small">{payoutBatchDetail ? payoutBatchDetail.status : 'Select a batch'}</span>
+            </div>
+            {payoutBatchDetail ? (
+              <>
+                <div className="row" style={{ gap: 12, marginTop: 8 }}>
+                  <div className="badge-ghost">
+                    {payoutBatchDetail.date_from} to {payoutBatchDetail.date_to}
+                  </div>
+                  <div className="badge-ghost">Total: {fmtKES(payoutBatchDetail.total_amount)}</div>
+                </div>
+                {payoutBatchReadiness ? (
+                  <div className="card" style={{ marginTop: 12, boxShadow: 'none' }}>
+                    <div className="topline">
+                      <h4 style={{ margin: 0 }}>Readiness</h4>
+                      {payoutBatchDetail.status === 'DRAFT' ? (
+                        <button
+                          type="button"
+                          onClick={() => submitPayoutBatch(payoutBatchDetail.id || '')}
+                          disabled={batchSubmitCheck?.pass === false}
+                        >
+                          Submit batch
+                        </button>
+                      ) : null}
+                    </div>
+                    {batchSubmitCheck?.pass === false ? (
+                      <div className="muted small">Submit blocked: {batchSubmitCheck.reason}</div>
+                    ) : null}
+                    <div className="row" style={{ gap: 12, flexWrap: 'wrap', marginTop: 8 }}>
+                      <div className="badge-ghost">
+                        Pending: {payoutBatchReadiness.items_summary?.pending_count || 0}
+                      </div>
+                      <div className="badge-ghost">
+                        Blocked: {payoutBatchReadiness.items_summary?.blocked_count || 0}
+                      </div>
+                      <div className="badge-ghost">
+                        Sent: {payoutBatchReadiness.items_summary?.sent_count || 0}
+                      </div>
+                      <div className="badge-ghost">
+                        Confirmed: {payoutBatchReadiness.items_summary?.confirmed_count || 0}
+                      </div>
+                      <div className="badge-ghost">
+                        Failed: {payoutBatchReadiness.items_summary?.failed_count || 0}
+                      </div>
+                    </div>
+                    {payoutBatchReadiness.items_summary?.blocked_reasons?.length ? (
+                      <div className="muted small" style={{ marginTop: 8 }}>
+                        Blocked reasons:{' '}
+                        {payoutBatchReadiness.items_summary.blocked_reasons
+                          .map((r) => `${r.reason} (${r.count})`)
+                          .join(', ')}
+                      </div>
+                    ) : null}
+                    {payoutBatchReadiness.issues?.length ? (
+                      <div className="muted small" style={{ marginTop: 8 }}>
+                        Issues:
+                        <ul style={{ marginTop: 6 }}>
+                          {payoutBatchReadiness.issues.map((issue) => (
+                            <li key={`${issue.code}-${issue.message}`}>
+                              {issue.code}: {issue.message}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+                <div className="grid g2" style={{ gap: 12, marginTop: 12 }}>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Wallet kind</th>
+                          <th>Amount</th>
+                          <th>Destination</th>
+                          <th>Status</th>
+                          <th>Block reason</th>
+                          <th>Receipt</th>
+                          <th>Failure</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {payoutItems.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="muted">
+                              No payout items.
+                            </td>
+                          </tr>
+                        ) : (
+                          payoutItems.map((item) => (
+                            <tr key={item.id}>
+                              <td>{formatPayoutKind(item.wallet_kind, feeLabel)}</td>
+                              <td>{fmtKES(item.amount)}</td>
+                              <td>
+                                <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                                  <span>{item.destination_type}</span>
+                                  <span className="mono">{item.destination_ref || '-'}</span>
+                                  {item.destination_ref ? (
+                                    <button
+                                      type="button"
+                                      className="btn ghost"
+                                      onClick={() => copyPayoutValue(item.destination_ref || '', 'Copied destination')}
+                                    >
+                                      Copy
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </td>
+                              <td>{item.status}</td>
+                              <td>{item.block_reason || '-'}</td>
+                              <td className="mono">
+                                <span>{item.provider_receipt || '-'}</span>
+                                {item.provider_receipt ? (
+                                  <button
+                                    type="button"
+                                    className="btn ghost"
+                                    style={{ marginLeft: 6 }}
+                                    onClick={() => copyPayoutValue(item.provider_receipt || '', 'Copied receipt')}
+                                  >
+                                    Copy
+                                  </button>
+                                ) : null}
+                              </td>
+                              <td>{item.failure_reason || '-'}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Time</th>
+                          <th>Event</th>
+                          <th>Message</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {payoutEvents.length === 0 ? (
+                          <tr>
+                            <td colSpan={3} className="muted">
+                              No events.
+                            </td>
+                          </tr>
+                        ) : (
+                          payoutEvents.map((event) => (
+                            <tr key={event.id}>
+                              <td>{event.created_at ? new Date(event.created_at).toLocaleString() : ''}</td>
+                              <td>{event.event_type}</td>
+                              <td>{event.message || '-'}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="muted small" style={{ marginTop: 8 }}>
+                Pick a batch to see items and events.
+              </div>
+            )}
+          </section>
+        </>
+      ) : null}
 
       {activeTab === 'staff' ? (
       <section className="card">

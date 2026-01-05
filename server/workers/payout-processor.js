@@ -24,11 +24,11 @@ const BASE_URL = process.env.DARAJA_BASE_URL || (DARAJA_ENV === 'production'
   : 'https://sandbox.safaricom.co.ke');
 const CONSUMER_KEY = process.env.DARAJA_CONSUMER_KEY || process.env.MPESA_CONSUMER_KEY;
 const CONSUMER_SECRET = process.env.DARAJA_CONSUMER_SECRET || process.env.MPESA_CONSUMER_SECRET;
-const SHORTCODE = process.env.MPESA_B2C_SHORTCODE || process.env.DARAJA_SHORTCODE;
-const INITIATOR = process.env.MPESA_B2C_INITIATOR_NAME || process.env.DARAJA_INITIATOR || process.env.DARAJA_B2C_INITIATOR_NAME;
-const SECURITY_CREDENTIAL = process.env.MPESA_B2C_SECURITY_CREDENTIAL || process.env.DARAJA_B2C_SECURITY_CREDENTIAL;
-const RESULT_URL = process.env.MPESA_B2C_RESULT_URL || process.env.DARAJA_CALLBACK_URL;
-const TIMEOUT_URL = process.env.MPESA_B2C_TIMEOUT_URL || process.env.DARAJA_CALLBACK_URL;
+const SHORTCODE = process.env.MPESA_B2C_SHORTCODE;
+const INITIATOR = process.env.MPESA_B2C_INITIATOR_NAME;
+const SECURITY_CREDENTIAL = process.env.MPESA_B2C_SECURITY_CREDENTIAL;
+const RESULT_URL = process.env.MPESA_B2C_RESULT_URL;
+const TIMEOUT_URL = process.env.MPESA_B2C_TIMEOUT_URL;
 
 function requireEnv(value, name) {
   if (!value) throw new Error(`${name} env is missing`);

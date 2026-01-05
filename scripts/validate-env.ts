@@ -19,6 +19,8 @@ export function getMissingEnv(env: Env) {
     'MPESA_B2C_SECURITY_CREDENTIAL',
     'MPESA_B2C_RESULT_URL',
     'MPESA_B2C_TIMEOUT_URL',
+    'MPESA_B2C_PAYOUT_RESULT_URL',
+    'MPESA_B2C_PAYOUT_TIMEOUT_URL',
   ]
 
   const required: string[] = [...requiredBase]

@@ -67,6 +67,42 @@ npm run seed:roles
   - `POST /api/admin/c2b/:id/resolve`
   - `GET /api/admin/ops-alerts`
 
+## SACCO payouts (manual approval, B2C-only)
+Flow:
+1) SACCO admin sets payout destinations (MSISDN or PayBill/Till) in the SACCO dashboard.
+2) SACCO admin creates a payout batch (DRAFT) and submits it.
+3) System admin verifies MSISDN destinations, approves, and processes the batch.
+4) B2C callbacks confirm/failed items; wallet debits occur on CONFIRMED.
+Notes:
+- Only MSISDN destinations are automated in v1.
+- PayBill/Till destinations are stored but payout items are marked `BLOCKED` with `B2B_NOT_SUPPORTED`.
+Payout readiness checks:
+- `GET /api/sacco/payout-readiness?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
+- `GET /api/payout-batches/:id/readiness`
+
+Endpoints:
+- SACCO:
+  - `GET /api/sacco/payout-destinations`
+  - `POST /api/sacco/payout-destinations`
+  - `POST /api/sacco/payout-batches`
+  - `POST /api/sacco/payout-batches/:id/submit`
+  - `GET /api/sacco/payout-batches`
+- System admin:
+  - `POST /api/admin/payout-destinations/:id/verify`
+  - `GET /api/admin/payout-batches?status=SUBMITTED`
+  - `POST /api/admin/payout-batches/:id/approve`
+  - `POST /api/admin/payout-batches/:id/process`
+- B2C callbacks:
+  - `POST /api/mpesa/b2c/result` (always returns 200 OK)
+  - `POST /api/mpesa/b2c/timeout` (always returns 200 OK)
+
+Payout B2C env (required for payouts/readiness):
+- `MPESA_B2C_PAYOUT_RESULT_URL` (can match `MPESA_B2C_RESULT_URL`)
+- `MPESA_B2C_PAYOUT_TIMEOUT_URL` (can match `MPESA_B2C_TIMEOUT_URL`)
+- `MPESA_B2C_MOCK=1` (tests only; skips real Daraja calls)
+Locked settings:
+- `MPESA_B2C_SHORTCODE` must be `3020891` for all B2C payouts (PartyA).
+
 ## Running locally
 - API/Express: `npm run server` (serves `/api`, `/u`, `/mpesa`, `/public`, `/app` if built)
 - Frontend (Vite dev): `npm run dev` (proxies `/api`, `/u`)

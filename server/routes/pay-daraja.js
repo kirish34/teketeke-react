@@ -391,11 +391,11 @@ router.post('/stk/callback', async (req,res)=>{
       const existing = await pool.query(
         `
           SELECT id
-          FROM wallet_transactions
-          WHERE source = 'MPESA_STK' AND source_ref = $1
+          FROM wallet_ledger
+          WHERE reference_type = 'MPESA_C2B' AND reference_id = $1
           LIMIT 1
         `,
-        [sourceRef]
+        [String(paymentRow?.id || sourceRef)]
       );
       if (existing.rows.length) {
         if (paymentRow) {
@@ -437,6 +437,8 @@ router.post('/stk/callback', async (req,res)=>{
         amount,
         source: 'MPESA_STK',
         sourceRef: sourceRef || null,
+        referenceId: paymentRow?.id || null,
+        referenceType: 'MPESA_C2B',
         description: `STK payment from ${msisdn || 'unknown'}`,
         client,
       });

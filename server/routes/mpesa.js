@@ -2,10 +2,12 @@ const express = require('express');
 const router = express.Router();
 
 const pool = require('../db/pool');
-const { creditFareWithFeesByWalletId } = require('../wallet/wallet.service');
+const { creditFareWithFeesByWalletId, debitWallet } = require('../wallet/wallet.service');
 const { normalizeRef, resolveWalletByRef } = require('../wallet/wallet.aliases');
 const { validatePaybillCode } = require('../wallet/paybillCode.util');
 const { applyRiskRules } = require('../mpesa/c2bRisk');
+const { insertPayoutEvent, updateBatchStatusFromItems } = require('../services/saccoPayouts.service');
+const { createOpsAlert } = require('../services/opsAlerts.service');
 
 /**
  * Normalize incoming M-Pesa callback payload.
@@ -70,6 +72,304 @@ function parseMpesaCallback(body) {
     account_reference,
     transaction_timestamp,
   };
+}
+
+async function handlePayoutB2CResult({
+  originator,
+  conversationId,
+  transactionId,
+  resultCode,
+  resultDesc,
+  isTimeout = false,
+}) {
+  const matchKey = originator || conversationId;
+  if (!matchKey) return false;
+
+  const matchRes = await pool.query(
+    `
+      SELECT id
+      FROM payout_items
+      WHERE idempotency_key = $1
+         OR provider_request_id = $1
+         OR provider_conversation_id = $1
+      LIMIT 1
+    `,
+    [matchKey],
+  );
+  if (!matchRes.rows.length) return false;
+
+  const itemId = matchRes.rows[0].id;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const itemRes = await client.query(
+      `
+        SELECT id, status, wallet_id, amount, batch_id, wallet_kind, failure_reason
+        FROM payout_items
+        WHERE id = $1
+        FOR UPDATE
+      `,
+      [itemId],
+    );
+    const item = itemRes.rows[0];
+    if (!item) {
+      await client.query('ROLLBACK');
+      return true;
+    }
+
+    if (['CONFIRMED', 'CANCELLED', 'BLOCKED'].includes(item.status)) {
+      await client.query('ROLLBACK');
+      return true;
+    }
+
+    const providerRequestId = originator || conversationId || null;
+    const providerReceipt = transactionId || null;
+    const success = Number(resultCode) === 0;
+    if (!success && item.status === 'FAILED') {
+      await client.query('ROLLBACK');
+      return true;
+    }
+
+    if (success) {
+      try {
+        await debitWallet({
+          walletId: item.wallet_id,
+          amount: item.amount,
+          source: 'SACCO_PAYOUT',
+          sourceRef: item.id,
+          entryType: 'PAYOUT_DEBIT',
+          referenceType: 'PAYOUT_ITEM',
+          referenceId: item.id,
+          description: `SACCO payout ${item.wallet_kind || ''}`.trim(),
+          client,
+        });
+      } catch (err) {
+        await client.query(
+          `
+            UPDATE payout_items
+            SET status = 'FAILED',
+                failure_reason = $2,
+                provider_receipt = $3,
+                provider_request_id = COALESCE(provider_request_id, $4),
+                provider_conversation_id = COALESCE(provider_conversation_id, $5)
+            WHERE id = $1
+          `,
+          [item.id, err.message || 'Wallet debit failed', providerReceipt, providerRequestId, conversationId || null],
+        );
+        await insertPayoutEvent({
+          batchId: item.batch_id,
+          itemId: item.id,
+          actorId: null,
+          eventType: 'ITEM_FAILED',
+          message: 'Wallet debit failed',
+          meta: { error: err.message },
+          client,
+        });
+        await createOpsAlert({
+          type: 'PAYOUT_INSUFFICIENT_BALANCE',
+          severity: 'CRITICAL',
+          entity_type: 'WALLET',
+          entity_id: String(item.wallet_id || ''),
+          payment_id: null,
+          message: 'Wallet debit failed on payout confirmation.',
+          meta: { item_id: item.id, batch_id: item.batch_id, error: err.message },
+          client,
+        });
+        await updateBatchStatusFromItems({ batchId: item.batch_id, client });
+        await client.query('COMMIT');
+        return true;
+      }
+
+      await client.query(
+        `
+          UPDATE payout_items
+          SET status = 'CONFIRMED',
+              provider_receipt = $2,
+              provider_request_id = COALESCE(provider_request_id, $3),
+              provider_conversation_id = COALESCE(provider_conversation_id, $4),
+              failure_reason = null
+          WHERE id = $1
+        `,
+        [item.id, providerReceipt, providerRequestId, conversationId || null],
+      );
+      await insertPayoutEvent({
+        batchId: item.batch_id,
+        itemId: item.id,
+        actorId: null,
+        eventType: 'ITEM_CONFIRMED',
+        message: 'Payout confirmed',
+        meta: { provider_receipt: providerReceipt },
+        client,
+      });
+    } else {
+      if (isTimeout && item.status === 'FAILED' && String(item.failure_reason || '').includes('TIMEOUT')) {
+        await createOpsAlert({
+          type: 'PAYOUT_TIMEOUT_REPEAT',
+          severity: 'WARN',
+          entity_type: 'WALLET',
+          entity_id: String(item.wallet_id || ''),
+          payment_id: null,
+          message: 'Repeated payout timeout callbacks received.',
+          meta: { item_id: item.id, batch_id: item.batch_id },
+          client,
+        });
+      }
+      await client.query(
+        `
+          UPDATE payout_items
+          SET status = 'FAILED',
+              failure_reason = $2,
+              provider_receipt = $3,
+              provider_request_id = COALESCE(provider_request_id, $4),
+              provider_conversation_id = COALESCE(provider_conversation_id, $5)
+          WHERE id = $1
+        `,
+        [item.id, `${resultDesc} (code=${resultCode})`, providerReceipt, providerRequestId, conversationId || null],
+      );
+      await insertPayoutEvent({
+        batchId: item.batch_id,
+        itemId: item.id,
+        actorId: null,
+        eventType: 'ITEM_FAILED',
+        message: 'Provider failed',
+        meta: { result_code: resultCode, result_desc: resultDesc },
+        client,
+      });
+      await createOpsAlert({
+        type: 'PAYOUT_ITEM_FAILED',
+        severity: 'WARN',
+        entity_type: 'WALLET',
+        entity_id: String(item.wallet_id || ''),
+        payment_id: null,
+        message: 'Payout failed in provider callback.',
+        meta: { item_id: item.id, batch_id: item.batch_id, result_code: resultCode, result_desc: resultDesc },
+        client,
+      });
+    }
+
+    await updateBatchStatusFromItems({ batchId: item.batch_id, client });
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error processing payout B2C result:', err.message);
+  } finally {
+    client.release();
+  }
+
+  return true;
+}
+
+function extractResultValue(result, key) {
+  const params =
+    result?.ResultParameters?.ResultParameter ||
+    result?.resultParameters?.resultParameter ||
+    result?.ResultParameters?.resultParameter ||
+    [];
+  if (!Array.isArray(params)) return null;
+  const match = params.find((p) => String(p.Key || p.key || '').toLowerCase() === key.toLowerCase());
+  return match ? match.Value ?? match.value ?? null : null;
+}
+
+async function handleB2CResult(req, res) {
+  const body = req.body || {};
+  console.log('Received M-Pesa B2C Result:', JSON.stringify(body));
+
+  const webhookSecret = process.env.DARAJA_WEBHOOK_SECRET || null;
+  if (webhookSecret) {
+    const got = req.headers['x-webhook-secret'] || '';
+    if (got !== webhookSecret) {
+      console.warn('B2C Result rejected: bad webhook secret');
+      return res.status(200).json({ ok: true });
+    }
+  }
+
+  try {
+    const result = body.Result || body.result || body || {};
+    const originator = result.OriginatorConversationID || result.originatorConversationID || null;
+    const conversationId = result.ConversationID || result.conversationID || null;
+    const transactionId =
+      result.TransactionID ||
+      result.transactionID ||
+      extractResultValue(result, 'TransactionReceipt') ||
+      null;
+    const resultCode = Number(result.ResultCode ?? result.resultCode ?? -1);
+    const resultDesc = result.ResultDesc ?? result.resultDesc ?? 'Unknown';
+
+    const handledPayout = await handlePayoutB2CResult({
+      originator,
+      conversationId,
+      transactionId,
+      resultCode,
+      resultDesc,
+    });
+    if (handledPayout) {
+      return res.status(200).json({ ok: true });
+    }
+
+    if (!conversationId) {
+      throw new Error('No ConversationID in B2C result');
+    }
+
+    const status = resultCode === 0 ? 'SUCCESS' : 'FAILED';
+
+    await pool.query(
+      `
+        UPDATE withdrawals
+        SET status = $1,
+            mpesa_transaction_id = $2,
+            mpesa_response = $3,
+            failure_reason = CASE WHEN $1 = 'FAILED' THEN $4 ELSE failure_reason END,
+            updated_at = now()
+        WHERE mpesa_conversation_id = $5
+      `,
+      [
+        status,
+        transactionId || null,
+        body,
+        resultDesc || null,
+        conversationId,
+      ],
+    );
+
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('Error processing B2C Result:', err.message);
+    return res.status(200).json({ ok: true });
+  }
+}
+
+async function handleB2CTimeout(req, res) {
+  const body = req.body || {};
+  console.log('Received M-Pesa B2C Timeout:', JSON.stringify(body));
+
+  const webhookSecret = process.env.DARAJA_WEBHOOK_SECRET || null;
+  if (webhookSecret) {
+    const got = req.headers['x-webhook-secret'] || '';
+    if (got !== webhookSecret) {
+      console.warn('B2C Timeout rejected: bad webhook secret');
+      return res.status(200).json({ ok: true });
+    }
+  }
+
+  try {
+    const result = body.Result || body.result || body || {};
+    const originator = result.OriginatorConversationID || result.originatorConversationID || null;
+    const conversationId = result.ConversationID || result.conversationID || null;
+    const resultDesc = result.ResultDesc ?? result.resultDesc ?? 'Timeout';
+
+    await handlePayoutB2CResult({
+      originator,
+      conversationId,
+      transactionId: null,
+      resultCode: -1,
+      resultDesc: String(resultDesc || 'Timeout'),
+      isTimeout: true,
+    });
+  } catch (err) {
+    console.error('Error processing B2C Timeout:', err.message);
+  }
+
+  return res.status(200).json({ ok: true });
 }
 
 /**
@@ -424,11 +724,11 @@ router.post('/callback', async (req, res) => {
     const existingTx = await pool.query(
       `
         SELECT id
-        FROM wallet_transactions
-        WHERE source = 'MPESA_C2B' AND source_ref = $1
+        FROM wallet_ledger
+        WHERE reference_type = 'MPESA_C2B' AND reference_id = $1
         LIMIT 1
       `,
-      [sourceRef]
+      [String(paymentId)]
     );
     if (existingTx.rows.length) {
       await pool.query(
@@ -465,6 +765,8 @@ router.post('/callback', async (req, res) => {
         amount: amountNumber,
         source: 'MPESA_C2B',
         sourceRef,
+        referenceId: paymentId,
+        referenceType: 'MPESA_C2B',
         description: `M-Pesa fare from ${phone_number || 'unknown'}`,
         client,
       });
@@ -504,56 +806,9 @@ router.post('/callback', async (req, res) => {
  * POST /mpesa/b2c-result
  * Updates withdrawals based on Daraja B2C result callback.
  */
-router.post('/b2c-result', async (req, res) => {
-  const body = req.body || {};
-  console.log('Received M-Pesa B2C Result:', JSON.stringify(body));
-
-  const webhookSecret = process.env.DARAJA_WEBHOOK_SECRET || null;
-  if (webhookSecret) {
-    const got = req.headers['x-webhook-secret'] || '';
-    if (got !== webhookSecret) {
-      console.warn('B2C Result rejected: bad webhook secret');
-      return res.status(200).json({ ok: true });
-    }
-  }
-
-  try {
-    const result = body.Result || {};
-    const conversationId = result.ConversationID || result.OriginatorConversationID || null;
-    const resultCode = result.ResultCode;
-    const resultDesc = result.ResultDesc;
-
-    if (!conversationId) {
-      throw new Error('No ConversationID in B2C result');
-    }
-
-    const status = resultCode === 0 ? 'SUCCESS' : 'FAILED';
-
-    await pool.query(
-      `
-        UPDATE withdrawals
-        SET status = $1,
-            mpesa_transaction_id = $2,
-            mpesa_response = $3,
-            failure_reason = CASE WHEN $1 = 'FAILED' THEN $4 ELSE failure_reason END,
-            updated_at = now()
-        WHERE mpesa_conversation_id = $5
-      `,
-      [
-        status,
-        result.TransactionID || null,
-        body,
-        resultDesc || null,
-        conversationId,
-      ]
-    );
-
-    return res.status(200).json({ ok: true });
-  } catch (err) {
-    console.error('Error processing B2C Result:', err.message);
-
-    return res.status(200).json({ ok: true });
-  }
-});
+router.post('/b2c-result', handleB2CResult);
+router.post('/b2c/callback', handleB2CResult);
+router.post('/b2c/result', handleB2CResult);
+router.post('/b2c/timeout', handleB2CTimeout);
 
 module.exports = router;

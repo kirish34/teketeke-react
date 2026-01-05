@@ -47,6 +47,8 @@ describe('getMissingEnv flag-aware validation', () => {
       MPESA_B2C_SECURITY_CREDENTIAL: 'sec',
       MPESA_B2C_RESULT_URL: 'https://result',
       MPESA_B2C_TIMEOUT_URL: 'https://timeout',
+      MPESA_B2C_PAYOUT_RESULT_URL: 'https://payout-result',
+      MPESA_B2C_PAYOUT_TIMEOUT_URL: 'https://payout-timeout',
     }
 
     expect(getMissingEnv(env).length).toBe(0)

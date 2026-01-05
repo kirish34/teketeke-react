@@ -3,6 +3,26 @@
 const pool = require('../db/pool');
 const { generateVirtualAccountCode } = require('./wallet.utils');
 const { ensureWalletAliasesForMatatu, ensurePaybillAlias } = require('./wallet.aliases');
+const {
+  creditWalletWithLedger,
+  debitWalletWithLedger,
+  newReferenceId,
+} = require('../services/walletLedger.service');
+
+function mapEntryTypeFromSource(source) {
+  const normalized = String(source || '').trim().toUpperCase();
+  if (normalized === 'MPESA_C2B') return 'C2B_CREDIT';
+  if (normalized === 'MPESA_STK') return 'STK_CREDIT';
+  if (normalized === 'SACCO_PAYOUT') return 'PAYOUT_DEBIT';
+  return 'MANUAL_ADJUSTMENT';
+}
+
+function mapReferenceTypeFromSource(source) {
+  const normalized = String(source || '').trim().toUpperCase();
+  if (normalized === 'SACCO_PAYOUT') return 'PAYOUT_ITEM';
+  if (normalized === 'MPESA_C2B' || normalized === 'MPESA_STK') return 'MPESA_C2B';
+  return 'ADMIN';
+}
 
 /**
  * Credit a wallet by virtualAccountCode.
@@ -29,73 +49,85 @@ async function creditWallet({
     throw new Error('amount must be a positive number');
   }
 
-  const client = await pool.connect();
+  const walletRes = await pool.query(
+    `
+      SELECT id
+      FROM wallets
+      WHERE virtual_account_code = $1
+      LIMIT 1
+    `,
+    [virtualAccountCode],
+  );
+
+  if (walletRes.rows.length === 0) {
+    throw new Error(`Wallet not found for virtualAccountCode=${virtualAccountCode}`);
+  }
+
+  const entryType = mapEntryTypeFromSource(source);
+  const referenceType = mapReferenceTypeFromSource(source);
+  const referenceId = sourceRef || newReferenceId();
+
+  const result = await creditWalletWithLedger({
+    walletId: walletRes.rows[0].id,
+    amount,
+    entryType,
+    referenceType,
+    referenceId,
+    description,
+  });
+
+  return {
+    walletId: result.walletId,
+    balanceBefore: result.balanceBefore,
+    balanceAfter: result.balanceAfter,
+  };
+}
+
+/**
+ * Debit wallet by walletId.
+ * Uses a DB transaction to lock the wallet row, update balance, and log history.
+ */
+async function debitWallet({
+  walletId,
+  amount,
+  source = null,
+  sourceRef = null,
+  description = null,
+  entryType = null,
+  referenceType = null,
+  referenceId = null,
+  client = null,
+}) {
+  if (!walletId) {
+    throw new Error('walletId is required');
+  }
+  if (!amount || Number(amount) <= 0) {
+    throw new Error('amount must be a positive number');
+  }
+
+  const effectiveEntryType = entryType || mapEntryTypeFromSource(source);
+  const effectiveReferenceType = referenceType || mapReferenceTypeFromSource(source);
+  const effectiveReferenceId = referenceId || sourceRef || newReferenceId();
 
   try {
-    await client.query('BEGIN');
-
-    // 1) Lock the wallet row so concurrent updates do not conflict
-    const walletRes = await client.query(
-      `
-        SELECT id, balance
-        FROM wallets
-        WHERE virtual_account_code = $1
-        FOR UPDATE
-      `,
-      [virtualAccountCode]
-    );
-
-    if (walletRes.rows.length === 0) {
-      throw new Error(`Wallet not found for virtualAccountCode=${virtualAccountCode}`);
-    }
-
-    const wallet = walletRes.rows[0];
-    const balanceBefore = Number(wallet.balance);
-    const amountNumber = Number(amount);
-    const balanceAfter = balanceBefore + amountNumber;
-
-    // 2) Update wallet balance
-    await client.query(
-      `
-        UPDATE wallets
-        SET balance = $1
-        WHERE id = $2
-      `,
-      [balanceAfter, wallet.id]
-    );
-
-    // 3) Write transaction history
-    await client.query(
-      `
-        INSERT INTO wallet_transactions
-          (wallet_id, tx_type, amount, balance_before, balance_after, source, source_ref, description)
-        VALUES
-          ($1, 'CREDIT', $2, $3, $4, $5, $6, $7)
-      `,
-      [
-        wallet.id,
-        amountNumber,
-        balanceBefore,
-        balanceAfter,
-        source,
-        sourceRef,
-        description,
-      ]
-    );
-
-    await client.query('COMMIT');
+    const result = await debitWalletWithLedger({
+      walletId,
+      amount,
+      entryType: effectiveEntryType,
+      referenceType: effectiveReferenceType,
+      referenceId: effectiveReferenceId,
+      description,
+      client,
+    });
 
     return {
-      walletId: wallet.id,
-      balanceBefore,
-      balanceAfter,
+      walletId: result.walletId,
+      balanceBefore: result.balanceBefore,
+      balanceAfter: result.balanceAfter,
     };
   } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Error in creditWallet:', err.message);
+    console.error('Error in debitWallet:', err.message);
     throw err;
-  } finally {
-    client.release();
   }
 }
 
@@ -119,64 +151,41 @@ async function debitWalletAndCreateWithdrawal({
 
     const walletRes = await client.query(
       `
-        SELECT id, balance
+        SELECT id
         FROM wallets
         WHERE virtual_account_code = $1
-        FOR UPDATE
+        LIMIT 1
       `,
-      [virtualAccountCode]
+      [virtualAccountCode],
     );
 
     if (walletRes.rows.length === 0) {
       throw new Error(`Wallet not found for virtualAccountCode=${virtualAccountCode}`);
     }
 
-    const wallet = walletRes.rows[0];
-    const balanceBefore = Number(wallet.balance);
+    const walletId = walletRes.rows[0].id;
     const amountNumber = Number(amount);
+    const withdrawalId = newReferenceId();
 
-    if (balanceBefore < amountNumber) {
-      throw new Error('Insufficient wallet balance');
-    }
-
-    const balanceAfter = balanceBefore - amountNumber;
-
-    await client.query(
-      `
-        UPDATE wallets
-        SET balance = $1
-        WHERE id = $2
-      `,
-      [balanceAfter, wallet.id]
-    );
-
-    await client.query(
-      `
-        INSERT INTO wallet_transactions
-          (wallet_id, tx_type, amount, balance_before, balance_after, source, source_ref, description)
-        VALUES
-          ($1, 'DEBIT', $2, $3, $4, $5, $6, $7)
-      `,
-      [
-        wallet.id,
-        amountNumber,
-        balanceBefore,
-        balanceAfter,
-        'WITHDRAWAL',
-        null,
-        `Withdrawal to ${phoneNumber}`,
-      ]
-    );
+    const debitResult = await debitWalletWithLedger({
+      walletId,
+      amount: amountNumber,
+      entryType: 'MANUAL_ADJUSTMENT',
+      referenceType: 'ADMIN',
+      referenceId: withdrawalId,
+      description: `Withdrawal to ${phoneNumber}`,
+      client,
+    });
 
     const withdrawalRes = await client.query(
       `
         INSERT INTO withdrawals
-          (wallet_id, amount, phone_number, status)
+          (id, wallet_id, amount, phone_number, status)
         VALUES
-          ($1, $2, $3, 'PENDING')
+          ($1, $2, $3, $4, 'PENDING')
         RETURNING id, status, created_at
       `,
-      [wallet.id, amountNumber, phoneNumber]
+      [withdrawalId, walletId, amountNumber, phoneNumber],
     );
 
     const withdrawal = withdrawalRes.rows[0];
@@ -184,9 +193,9 @@ async function debitWalletAndCreateWithdrawal({
     await client.query('COMMIT');
 
     return {
-      walletId: wallet.id,
-      balanceBefore,
-      balanceAfter,
+      walletId,
+      balanceBefore: debitResult.balanceBefore,
+      balanceAfter: debitResult.balanceAfter,
       withdrawalId: withdrawal.id,
       withdrawalStatus: withdrawal.status,
     };
@@ -246,29 +255,29 @@ async function getWalletTransactions({ virtualAccountCode, limit = 20, offset = 
     `
       SELECT
         id,
-        tx_type,
+        direction AS tx_type,
         amount,
         balance_before,
         balance_after,
-        source,
-        source_ref,
+        entry_type AS source,
+        reference_id AS source_ref,
         description,
         created_at
-      FROM wallet_transactions
+      FROM wallet_ledger
       WHERE wallet_id = $1
       ORDER BY created_at DESC
       LIMIT $2 OFFSET $3
     `,
-    [walletId, limit, offset]
+    [walletId, limit, offset],
   );
 
   const countRes = await pool.query(
     `
       SELECT COUNT(*)::int as total
-      FROM wallet_transactions
+      FROM wallet_ledger
       WHERE wallet_id = $1
     `,
-    [walletId]
+    [walletId],
   );
 
   return {
@@ -287,6 +296,8 @@ async function creditFareWithFeesByWalletId({
   amount,
   source = 'MPESA_C2B',
   sourceRef = null,
+  referenceId = null,
+  referenceType = null,
   description = null,
   client = null,
 }) {
@@ -300,14 +311,16 @@ async function creditFareWithFeesByWalletId({
     if (ownTx) await useClient.query('BEGIN');
 
     const grossAmount = Number(amount);
+    const entryType = mapEntryTypeFromSource(source);
+    const effectiveReferenceType = referenceType || mapReferenceTypeFromSource(source);
+    const effectiveReferenceId = referenceId || sourceRef || newReferenceId();
 
     // Lock matatu wallet
     const matatuRes = await useClient.query(
       `
-        SELECT id, balance, virtual_account_code
+        SELECT id, virtual_account_code
         FROM wallets
         WHERE id = $1
-        FOR UPDATE
       `,
       [walletId]
     );
@@ -367,79 +380,36 @@ async function creditFareWithFeesByWalletId({
     const netToMatatu = grossAmount - totalFees;
 
     // Credit net to matatu wallet
-    const matatuBalanceBefore = Number(matatuWallet.balance);
-    const matatuBalanceAfter = matatuBalanceBefore + netToMatatu;
-
-    await useClient.query(
-      `
-        UPDATE wallets
-        SET balance = $1
-        WHERE id = $2
-      `,
-      [matatuBalanceAfter, matatuWallet.id]
-    );
-
-    await useClient.query(
-      `
-        INSERT INTO wallet_transactions
-          (wallet_id, tx_type, amount, balance_before, balance_after, source, source_ref, description)
-        VALUES
-          ($1, 'CREDIT', $2, $3, $4, $5, $6, $7)
-      `,
-      [
-        matatuWallet.id,
-        netToMatatu,
-        matatuBalanceBefore,
-        matatuBalanceAfter,
-        source,
-        sourceRef,
-        description || `Fare credit (net) from ${source}`,
-      ]
-    );
+    const matatuResult = await creditWalletWithLedger({
+      walletId: matatuWallet.id,
+      amount: netToMatatu,
+      entryType,
+      referenceType: effectiveReferenceType,
+      referenceId: effectiveReferenceId,
+      description: description || `Fare credit (net) from ${source}`,
+      client: useClient,
+    });
 
     // Credit fee beneficiary wallets
     for (const fee of feeDetails) {
-      const benRes = await useClient.query(
-        `
-          SELECT id, balance
-          FROM wallets
-          WHERE id = $1
-          FOR UPDATE
-        `,
-        [fee.beneficiaryWalletId]
-      );
-
-      if (benRes.rows.length === 0) {
-        console.warn(`Beneficiary wallet ${fee.beneficiaryWalletId} not found, skipping fee.`);
-        continue;
+      try {
+        await creditWalletWithLedger({
+          walletId: fee.beneficiaryWalletId,
+          amount: fee.amount,
+          entryType,
+          referenceType: effectiveReferenceType,
+          referenceId: effectiveReferenceId,
+          description: `Fee: ${fee.name} from fare on ${virtualAccountCode || walletId}`,
+          client: useClient,
+        });
+      } catch (err) {
+        const msg = String(err.message || '').toLowerCase();
+        if (msg.includes('wallet not found')) {
+          console.warn(`Beneficiary wallet ${fee.beneficiaryWalletId} not found, skipping fee.`);
+          continue;
+        }
+        throw err;
       }
-
-      const benWallet = benRes.rows[0];
-      const benBalanceBefore = Number(benWallet.balance);
-      const benBalanceAfter = benBalanceBefore + fee.amount;
-
-      await useClient.query(
-        `UPDATE wallets SET balance = $1 WHERE id = $2`,
-        [benBalanceAfter, benWallet.id]
-      );
-
-      await useClient.query(
-        `
-          INSERT INTO wallet_transactions
-            (wallet_id, tx_type, amount, balance_before, balance_after, source, source_ref, description)
-          VALUES
-            ($1, 'CREDIT', $2, $3, $4, $5, $6, $7)
-        `,
-        [
-          benWallet.id,
-          fee.amount,
-          benBalanceBefore,
-          benBalanceAfter,
-          'FEE_MATATU_FARE',
-          sourceRef,
-          `Fee: ${fee.name} from fare on ${virtualAccountCode || walletId}`,
-        ]
-      );
     }
 
     if (ownTx) await useClient.query('COMMIT');
@@ -451,8 +421,8 @@ async function creditFareWithFeesByWalletId({
       totalFees,
       feeDetails,
       matatuWalletId: matatuWallet.id,
-      matatuBalanceBefore,
-      matatuBalanceAfter,
+      matatuBalanceBefore: matatuResult.balanceBefore,
+      matatuBalanceAfter: matatuResult.balanceAfter,
     };
   } catch (err) {
     if (ownTx) await useClient.query('ROLLBACK');
@@ -468,6 +438,8 @@ async function creditFareWithFees({
   amount,
   source = 'MPESA_C2B',
   sourceRef = null,
+  referenceId = null,
+  referenceType = null,
   description = null,
 }) {
   if (!virtualAccountCode) throw new Error('virtualAccountCode is required');
@@ -491,12 +463,15 @@ async function creditFareWithFees({
     amount,
     source,
     sourceRef,
+    referenceId,
+    referenceType,
     description,
   });
 }
 
 module.exports = {
   creditWallet,
+  debitWallet,
   debitWalletAndCreateWithdrawal,
   getWalletByVirtualAccountCode,
   getWalletTransactions,
@@ -708,64 +683,55 @@ async function createBankWithdrawal({
 
     const wRes = await client.query(
       `
-        SELECT id, balance
+        SELECT id
         FROM wallets
         WHERE virtual_account_code = $1
-        FOR UPDATE
+        LIMIT 1
       `,
-      [virtualAccountCode]
+      [virtualAccountCode],
     );
     if (!wRes.rows.length) throw new Error(`Wallet not found for ${virtualAccountCode}`);
 
-    const wallet = wRes.rows[0];
-    const balanceBefore = Number(wallet.balance);
+    const walletId = wRes.rows[0].id;
     const grossAmount = Number(amount);
-    if (balanceBefore < grossAmount) throw new Error('Insufficient wallet balance');
-
     const feeAmount = feePercent > 0 ? grossAmount * feePercent : 0;
     const netPayout = grossAmount - feeAmount;
     if (netPayout <= 0) throw new Error('Net payout must be > 0');
 
-    const balanceAfter = balanceBefore - grossAmount;
-
-    await client.query(
-      `UPDATE wallets SET balance = $1 WHERE id = $2`,
-      [balanceAfter, wallet.id]
-    );
-
-    await client.query(
-      `
-        INSERT INTO wallet_transactions
-          (wallet_id, tx_type, amount, balance_before, balance_after, source, source_ref, description)
-        VALUES
-          ($1, 'DEBIT', $2, $3, $4, $5, $6, $7)
-      `,
-      [
-        wallet.id,
-        grossAmount,
-        balanceBefore,
-        balanceAfter,
-        'WITHDRAWAL_BANK',
-        null,
-        `Bank withdrawal request to ${bankName} (${bankAccountNumber})`,
-      ]
-    );
+    const withdrawalId = newReferenceId();
+    const debitResult = await debitWalletWithLedger({
+      walletId,
+      amount: grossAmount,
+      entryType: 'MANUAL_ADJUSTMENT',
+      referenceType: 'ADMIN',
+      referenceId: withdrawalId,
+      description: `Bank withdrawal request to ${bankName} (${bankAccountNumber})`,
+      client,
+    });
 
     const wdRes = await client.query(
       `
         INSERT INTO withdrawals
-          (wallet_id, amount, phone_number, status, method,
+          (id, wallet_id, amount, phone_number, status, method,
            bank_name, bank_branch, bank_account_number, bank_account_name,
            failure_reason, mpesa_transaction_id, mpesa_conversation_id,
            mpesa_response, internal_note)
         VALUES
-          ($1, $2, null, 'PENDING', 'BANK',
+          ($1, $2, $3, null, 'PENDING', 'BANK',
            $3, $4, $5, $6,
            null, null, null,
            null, null)
         RETURNING id, created_at
       `,
-      [wallet.id, netPayout, bankName, bankBranch || null, bankAccountNumber, bankAccountName]
+      [
+        withdrawalId,
+        walletId,
+        netPayout,
+        bankName,
+        bankBranch || null,
+        bankAccountNumber,
+        bankAccountName,
+      ],
     );
 
     const withdrawal = wdRes.rows[0];
@@ -774,12 +740,12 @@ async function createBankWithdrawal({
 
     return {
       withdrawalId: withdrawal.id,
-      walletId: wallet.id,
+      walletId,
       grossAmount,
       feeAmount,
       netPayout,
-      balanceBefore,
-      balanceAfter,
+      balanceBefore: debitResult.balanceBefore,
+      balanceAfter: debitResult.balanceAfter,
     };
   } catch (err) {
     await client.query('ROLLBACK');
@@ -792,6 +758,7 @@ async function createBankWithdrawal({
 
 module.exports = {
   creditWallet,
+  debitWallet,
   debitWalletAndCreateWithdrawal,
   getWalletByVirtualAccountCode,
   getWalletTransactions,

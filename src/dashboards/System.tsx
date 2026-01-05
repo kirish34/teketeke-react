@@ -152,6 +152,72 @@ type OpsAlertRow = {
   meta?: Record<string, unknown>
 }
 
+type PayoutBatchRow = {
+  id?: string
+  sacco_id?: string
+  sacco_name?: string
+  date_from?: string
+  date_to?: string
+  status?: string
+  total_amount?: number
+  currency?: string
+  created_at?: string
+  updated_at?: string
+}
+
+type PayoutItemRow = {
+  id?: string
+  wallet_kind?: string
+  amount?: number
+  destination_type?: string
+  destination_ref?: string
+  status?: string
+  block_reason?: string | null
+  provider_receipt?: string | null
+  failure_reason?: string | null
+  created_at?: string
+}
+
+type PayoutEventRow = {
+  id?: string
+  event_type?: string
+  message?: string | null
+  created_at?: string
+  meta?: Record<string, unknown>
+}
+
+type ReadinessCheck = {
+  pass?: boolean
+  reason?: string
+  details?: Record<string, unknown>
+}
+
+type ReadinessIssue = {
+  code?: string
+  level?: 'WARN' | 'BLOCK' | string
+  message?: string
+  hint?: string | null
+  details?: Record<string, unknown>
+}
+
+type BatchReadiness = {
+  batch?: { id?: string; status?: string; sacco_id?: string; date_from?: string; date_to?: string; total_amount?: number }
+  checks?: {
+    can_submit?: ReadinessCheck
+    can_approve?: ReadinessCheck
+    can_process?: ReadinessCheck
+  }
+  items_summary?: {
+    pending_count?: number
+    blocked_count?: number
+    sent_count?: number
+    confirmed_count?: number
+    failed_count?: number
+    blocked_reasons?: Array<{ reason?: string; count?: number }>
+  }
+  issues?: ReadinessIssue[]
+  unverified_destinations?: Array<{ destination_ref?: string; destination_type?: string }>
+}
 type C2bActionState = {
   busy?: boolean
   error?: string
@@ -279,6 +345,7 @@ type SystemTabId =
   | 'quarantine'
   | 'alerts'
   | 'payouts'
+  | 'payout_approvals'
   | 'worker_monitor'
   | 'saccos'
   | 'matatu'
@@ -542,6 +609,28 @@ async function deleteJson(url: string) {
 
 const formatKes = (val?: number | null) => `KES ${(Number(val || 0)).toLocaleString('en-KE')}`
 const WITHDRAW_STATUS_OPTIONS = ['PENDING', 'PROCESSING', 'SENT', 'SUCCESS', 'FAILED']
+
+function formatPayoutKind(kind?: string) {
+  const k = (kind || '').toUpperCase()
+  if (k === 'SACCO_FEE' || k === 'FEE' || k === 'SACCO_DAILY_FEE') return 'Daily Fee'
+  if (k === 'SACCO_LOAN' || k === 'LOAN') return 'Loan'
+  if (k === 'SACCO_SAVINGS' || k === 'SAVINGS') return 'Savings'
+  return k || '-'
+}
+
+function findIssue(readiness: BatchReadiness | null | undefined, code: string) {
+  return readiness?.issues?.find((issue) => issue.code === code) || null
+}
+
+function buildReadinessChip(readiness: BatchReadiness | null | undefined) {
+  if (!readiness) return { label: 'CHECKING', tone: 'muted' }
+  if (findIssue(readiness, 'QUARANTINES_PRESENT')) return { label: 'BLOCKED: QUARANTINES', tone: 'bad' }
+  if (findIssue(readiness, 'DESTINATION_NOT_VERIFIED')) return { label: 'BLOCKED: DESTINATION', tone: 'bad' }
+  if (readiness.checks?.can_process?.pass) return { label: 'READY: PROCESS', tone: 'good' }
+  if (readiness.checks?.can_approve?.pass) return { label: 'READY: APPROVE', tone: 'good' }
+  if (readiness.checks?.can_submit?.pass) return { label: 'READY: SUBMIT', tone: 'good' }
+  return { label: 'NEEDS REVIEW', tone: 'muted' }
+}
 
 function parseAmountInput(value: string) {
   const num = Number(value)
@@ -1040,6 +1129,17 @@ const SystemDashboard = () => {
   const [alertsRows, setAlertsRows] = useState<OpsAlertRow[]>([])
   const [alertsError, setAlertsError] = useState<string | null>(null)
 
+  const [payoutApprovalStatus, setPayoutApprovalStatus] = useState('SUBMITTED')
+  const [payoutApprovalRows, setPayoutApprovalRows] = useState<PayoutBatchRow[]>([])
+  const [payoutApprovalError, setPayoutApprovalError] = useState<string | null>(null)
+  const [payoutApprovalMsg, setPayoutApprovalMsg] = useState('')
+  const [payoutApprovalSelected, setPayoutApprovalSelected] = useState('')
+  const [payoutApprovalDetail, setPayoutApprovalDetail] = useState<PayoutBatchRow | null>(null)
+  const [payoutApprovalItems, setPayoutApprovalItems] = useState<PayoutItemRow[]>([])
+  const [payoutApprovalEvents, setPayoutApprovalEvents] = useState<PayoutEventRow[]>([])
+  const [payoutReadinessMap, setPayoutReadinessMap] = useState<Record<string, BatchReadiness | null>>({})
+  const [payoutApprovalReadiness, setPayoutApprovalReadiness] = useState<BatchReadiness | null>(null)
+
   const [walletCode, setWalletCode] = useState('')
   const [walletSummary, setWalletSummary] = useState<WalletSummary | null>(null)
   const [walletTx, setWalletTx] = useState<WalletTx[]>([])
@@ -1226,6 +1326,7 @@ const SystemDashboard = () => {
     { id: 'quarantine', label: 'Quarantine' },
     { id: 'alerts', label: 'Alerts' },
     { id: 'payouts', label: 'B2C Payouts' },
+    { id: 'payout_approvals', label: 'Payout Approvals' },
     { id: 'worker_monitor', label: 'Worker Monitor' },
     { id: 'saccos', label: 'Operators' },
     { id: 'matatu', label: 'Shuttles' },
@@ -3274,6 +3375,102 @@ const SystemDashboard = () => {
     }
   }
 
+  async function loadPayoutApprovals(status?: string) {
+    const nextStatus = status !== undefined ? status : payoutApprovalStatus
+    if (status !== undefined) setPayoutApprovalStatus(nextStatus)
+    try {
+      const params = new URLSearchParams()
+      if (nextStatus) params.set('status', nextStatus)
+      const res = await fetchJson<{ batches?: PayoutBatchRow[] }>(
+        `/api/admin/payout-batches?${params.toString()}`,
+      )
+      setPayoutApprovalRows(res.batches || [])
+      setPayoutApprovalError(null)
+      const batches = res.batches || []
+      batches.forEach((row) => {
+        if (row.id && !payoutReadinessMap[row.id]) {
+          void loadBatchReadiness(row.id)
+        }
+      })
+    } catch (err) {
+      setPayoutApprovalRows([])
+      setPayoutApprovalError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function loadBatchReadiness(batchId: string) {
+    if (!batchId) return
+    try {
+      const res = await fetchJson<BatchReadiness>(`/api/payout-batches/${encodeURIComponent(batchId)}/readiness`)
+      setPayoutReadinessMap((prev) => ({ ...prev, [batchId]: res }))
+      if (batchId === payoutApprovalSelected) {
+        setPayoutApprovalReadiness(res)
+      }
+    } catch (err) {
+      setPayoutReadinessMap((prev) => ({
+        ...prev,
+        [batchId]: { issues: [{ code: 'READINESS_LOAD_FAILED', level: 'WARN', message: String(err) }] },
+      }))
+      if (batchId === payoutApprovalSelected) {
+        setPayoutApprovalReadiness(null)
+      }
+    }
+  }
+
+  async function loadPayoutApprovalDetail(batchId: string) {
+    if (!batchId) return
+    setPayoutApprovalSelected(batchId)
+    setPayoutApprovalMsg('Loading batch...')
+    try {
+      const res = await fetchJson<{ batch?: PayoutBatchRow; items?: PayoutItemRow[]; events?: PayoutEventRow[] }>(
+        `/api/admin/payout-batches/${encodeURIComponent(batchId)}`,
+      )
+      setPayoutApprovalDetail(res.batch || null)
+      setPayoutApprovalItems(res.items || [])
+      setPayoutApprovalEvents(res.events || [])
+      await loadBatchReadiness(batchId)
+      setPayoutApprovalMsg('')
+    } catch (err) {
+      setPayoutApprovalMsg(err instanceof Error ? err.message : 'Failed to load batch')
+    }
+  }
+
+  async function approvePayoutBatch(batchId: string) {
+    if (!batchId) return
+    setPayoutApprovalMsg('Approving batch...')
+    try {
+      await sendJson(`/api/admin/payout-batches/${encodeURIComponent(batchId)}/approve`, 'POST', {})
+      setPayoutApprovalMsg('Approved')
+      await loadPayoutApprovals()
+      await loadPayoutApprovalDetail(batchId)
+    } catch (err) {
+      setPayoutApprovalMsg(err instanceof Error ? err.message : 'Approval failed')
+    }
+  }
+
+  async function processPayoutBatch(batchId: string) {
+    if (!batchId) return
+    setPayoutApprovalMsg('Processing batch...')
+    try {
+      await sendJson(`/api/admin/payout-batches/${encodeURIComponent(batchId)}/process`, 'POST', {})
+      setPayoutApprovalMsg('Processing started')
+      await loadPayoutApprovals()
+      await loadPayoutApprovalDetail(batchId)
+    } catch (err) {
+      setPayoutApprovalMsg(err instanceof Error ? err.message : 'Process failed')
+    }
+  }
+
+  async function copyPayoutValue(value: string, label: string) {
+    if (!value) return
+    try {
+      await navigator.clipboard.writeText(value)
+      setPayoutApprovalMsg(label)
+    } catch (err) {
+      setPayoutApprovalMsg(err instanceof Error ? err.message : 'Copy failed')
+    }
+  }
+
   useEffect(() => {
     if (!routeMapOpen || !routeEditId) return
     let cancelled = false
@@ -3333,6 +3530,9 @@ const SystemDashboard = () => {
     }
     if (activeTab === 'alerts') {
       void loadAlerts({ page: 1 })
+    }
+    if (activeTab === 'payout_approvals') {
+      void loadPayoutApprovals()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
@@ -7773,6 +7973,332 @@ const SystemDashboard = () => {
       ) : null}
 
       {activeTab === 'payouts' ? <PayoutHistory /> : null}
+
+      {activeTab === 'payout_approvals' ? (
+        <>
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Payout Approvals</h3>
+              <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                <label className="muted small">
+                  Status
+                  <select
+                    value={payoutApprovalStatus}
+                    onChange={(e) => loadPayoutApprovals(e.target.value)}
+                    style={{ padding: 10, marginLeft: 8 }}
+                  >
+                    <option value="SUBMITTED">SUBMITTED</option>
+                    <option value="APPROVED">APPROVED</option>
+                    <option value="PROCESSING">PROCESSING</option>
+                    <option value="COMPLETED">COMPLETED</option>
+                    <option value="FAILED">FAILED</option>
+                    <option value="CANCELLED">CANCELLED</option>
+                  </select>
+                </label>
+                <button className="btn ghost" type="button" onClick={() => loadPayoutApprovals()}>
+                  Reload
+                </button>
+                <span className="muted small">{payoutApprovalMsg}</span>
+                {payoutApprovalError ? <span className="err">{payoutApprovalError}</span> : null}
+              </div>
+            </div>
+            <div className="muted small" style={{ marginTop: 6 }}>
+              Only MSISDN payouts are automated in v1. PayBill/Till destinations require manual transfer.
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date range</th>
+                    <th>SACCO</th>
+                    <th>Status</th>
+                    <th>Readiness</th>
+                    <th>Total</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {payoutApprovalRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="muted">
+                        No payout batches.
+                      </td>
+                    </tr>
+                  ) : (
+                    payoutApprovalRows.map((row) => (
+                      <tr
+                        key={row.id}
+                        style={row.id && row.id === payoutApprovalSelected ? { background: '#f1f5f9' } : undefined}
+                      >
+                        <td>
+                          {row.date_from} to {row.date_to}
+                        </td>
+                        <td>{row.sacco_name || row.sacco_id || '-'}</td>
+                        <td>{row.status}</td>
+                        <td>
+                          {(() => {
+                            const chip = buildReadinessChip(row.id ? payoutReadinessMap[row.id] : null)
+                            return (
+                              <span
+                                className="badge-ghost"
+                                style={
+                                  chip.tone === 'bad'
+                                    ? { borderColor: '#ef4444', color: '#b91c1c' }
+                                    : chip.tone === 'good'
+                                      ? { borderColor: '#22c55e', color: '#15803d' }
+                                      : undefined
+                                }
+                              >
+                                {chip.label}
+                              </span>
+                            )
+                          })()}
+                        </td>
+                        <td>{formatKes(row.total_amount)}</td>
+                        <td>{row.created_at ? new Date(row.created_at).toLocaleString() : '-'}</td>
+                        <td className="row" style={{ gap: 6 }}>
+                          <button
+                            className="btn ghost"
+                            type="button"
+                            onClick={() => loadPayoutApprovalDetail(row.id || '')}
+                          >
+                            View
+                          </button>
+                          {row.status === 'SUBMITTED' ? (
+                            <button
+                              type="button"
+                              onClick={() => approvePayoutBatch(row.id || '')}
+                              disabled={!!row.id && payoutReadinessMap[row.id]?.checks?.can_approve?.pass === false}
+                              title={
+                                row.id && payoutReadinessMap[row.id]?.checks?.can_approve?.pass === false
+                                  ? payoutReadinessMap[row.id]?.checks?.can_approve?.reason || 'Cannot approve'
+                                  : ''
+                              }
+                            >
+                              Approve
+                            </button>
+                          ) : null}
+                          {row.status === 'APPROVED' || row.status === 'PROCESSING' ? (
+                            <button
+                              type="button"
+                              onClick={() => processPayoutBatch(row.id || '')}
+                              disabled={!!row.id && payoutReadinessMap[row.id]?.checks?.can_process?.pass === false}
+                              title={
+                                row.id && payoutReadinessMap[row.id]?.checks?.can_process?.pass === false
+                                  ? payoutReadinessMap[row.id]?.checks?.can_process?.reason || 'Cannot process'
+                                  : ''
+                              }
+                            >
+                              Process
+                            </button>
+                          ) : null}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Batch detail</h3>
+              <span className="muted small">
+                {payoutApprovalDetail ? payoutApprovalDetail.status : 'Select a batch'}
+              </span>
+            </div>
+            {payoutApprovalDetail ? (
+              <>
+                <div className="row" style={{ gap: 12, marginTop: 8 }}>
+                  <div className="badge-ghost">
+                    {payoutApprovalDetail.date_from} to {payoutApprovalDetail.date_to}
+                  </div>
+                  <div className="badge-ghost">Total: {formatKes(payoutApprovalDetail.total_amount)}</div>
+                </div>
+                {payoutApprovalReadiness ? (
+                  <div className="card" style={{ marginTop: 12, boxShadow: 'none' }}>
+                    <div className="topline">
+                      <h4 style={{ margin: 0 }}>Readiness</h4>
+                      <div className="row" style={{ gap: 8 }}>
+                        {findIssue(payoutApprovalReadiness, 'DESTINATION_NOT_VERIFIED') ? (
+                          <button type="button" className="btn ghost" onClick={() => setActiveTab('saccos')}>
+                            Go to Destinations Verification
+                          </button>
+                        ) : null}
+                        {findIssue(payoutApprovalReadiness, 'QUARANTINES_PRESENT') ? (
+                          <button type="button" className="btn ghost" onClick={() => setActiveTab('quarantine')}>
+                            Go to Quarantine
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="grid g2" style={{ gap: 12 }}>
+                      <div>
+                        <div className="row" style={{ gap: 8 }}>
+                          <span className="badge-ghost">
+                            {payoutApprovalReadiness.checks?.can_approve?.pass ? 'OK' : 'BLOCK'}
+                          </span>
+                          <strong>Approve</strong>
+                        </div>
+                        <div className="muted small">
+                          {payoutApprovalReadiness.checks?.can_approve?.reason || 'Checking approve readiness...'}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="row" style={{ gap: 8 }}>
+                          <span className="badge-ghost">
+                            {payoutApprovalReadiness.checks?.can_process?.pass ? 'OK' : 'BLOCK'}
+                          </span>
+                          <strong>Process</strong>
+                        </div>
+                        <div className="muted small">
+                          {payoutApprovalReadiness.checks?.can_process?.reason || 'Checking process readiness...'}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="row" style={{ gap: 12, flexWrap: 'wrap', marginTop: 8 }}>
+                      <div className="badge-ghost">
+                        Pending: {payoutApprovalReadiness.items_summary?.pending_count || 0}
+                      </div>
+                      <div className="badge-ghost">
+                        Blocked: {payoutApprovalReadiness.items_summary?.blocked_count || 0}
+                      </div>
+                      <div className="badge-ghost">
+                        Sent: {payoutApprovalReadiness.items_summary?.sent_count || 0}
+                      </div>
+                      <div className="badge-ghost">
+                        Confirmed: {payoutApprovalReadiness.items_summary?.confirmed_count || 0}
+                      </div>
+                      <div className="badge-ghost">
+                        Failed: {payoutApprovalReadiness.items_summary?.failed_count || 0}
+                      </div>
+                    </div>
+                    {payoutApprovalReadiness.items_summary?.blocked_reasons?.length ? (
+                      <div className="muted small" style={{ marginTop: 8 }}>
+                        Blocked reasons:{' '}
+                        {payoutApprovalReadiness.items_summary.blocked_reasons
+                          .map((r) => `${r.reason} (${r.count})`)
+                          .join(', ')}
+                      </div>
+                    ) : null}
+                    {payoutApprovalReadiness.issues?.length ? (
+                      <div className="muted small" style={{ marginTop: 8 }}>
+                        Issues:
+                        <ul style={{ marginTop: 6 }}>
+                          {payoutApprovalReadiness.issues.map((issue) => (
+                            <li key={`${issue.code}-${issue.message}`}>
+                              {issue.code}: {issue.message}
+                              {issue.hint ? ` (${issue.hint})` : ''}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+                <div className="grid g2" style={{ gap: 12, marginTop: 12 }}>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Wallet kind</th>
+                          <th>Amount</th>
+                          <th>Destination</th>
+                          <th>Status</th>
+                          <th>Block reason</th>
+                          <th>Receipt</th>
+                          <th>Failure</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {payoutApprovalItems.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="muted">
+                              No items.
+                            </td>
+                          </tr>
+                        ) : (
+                          payoutApprovalItems.map((item) => (
+                            <tr key={item.id}>
+                              <td>{formatPayoutKind(item.wallet_kind)}</td>
+                              <td>{formatKes(item.amount)}</td>
+                              <td>
+                                <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                                  <span>{item.destination_type}</span>
+                                  <span className="mono">{item.destination_ref || '-'}</span>
+                                  {item.destination_ref ? (
+                                    <button
+                                      type="button"
+                                      className="btn ghost"
+                                      onClick={() => copyPayoutValue(item.destination_ref || '', 'Copied destination')}
+                                    >
+                                      Copy
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </td>
+                              <td>{item.status}</td>
+                              <td>{item.block_reason || '-'}</td>
+                              <td className="mono">
+                                <span>{item.provider_receipt || '-'}</span>
+                                {item.provider_receipt ? (
+                                  <button
+                                    type="button"
+                                    className="btn ghost"
+                                    style={{ marginLeft: 6 }}
+                                    onClick={() => copyPayoutValue(item.provider_receipt || '', 'Copied receipt')}
+                                  >
+                                    Copy
+                                  </button>
+                                ) : null}
+                              </td>
+                              <td>{item.failure_reason || '-'}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Time</th>
+                          <th>Event</th>
+                          <th>Message</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {payoutApprovalEvents.length === 0 ? (
+                          <tr>
+                            <td colSpan={3} className="muted">
+                              No events.
+                            </td>
+                          </tr>
+                        ) : (
+                          payoutApprovalEvents.map((event) => (
+                            <tr key={event.id}>
+                              <td>{event.created_at ? new Date(event.created_at).toLocaleString() : ''}</td>
+                              <td>{event.event_type}</td>
+                              <td>{event.message || '-'}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="muted small" style={{ marginTop: 8 }}>
+                Pick a batch to view details and events.
+              </div>
+            )}
+          </section>
+        </>
+      ) : null}
 
       {activeTab === 'worker_monitor' ? <WorkerMonitor /> : null}
 

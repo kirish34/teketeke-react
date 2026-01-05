@@ -9,7 +9,10 @@ const {
   createWalletRecord,
   registerWalletForEntity,
 } = require('../wallet/wallet.service');
+const { sendB2CPayout } = require('../mpesa/mpesaB2C.service');
+const { insertPayoutEvent, updateBatchStatusFromItems } = require('../services/saccoPayouts.service');
 const { runDailyReconciliation, formatDateISO } = require('../services/reconciliation.service');
+const { createOpsAlert } = require('../services/opsAlerts.service');
 const {
   normalizeRef,
   resolveWalletByRef,
@@ -567,11 +570,11 @@ router.post('/c2b-payments/:id/reprocess', async (req, res) => {
     const existing = await pool.query(
       `
         SELECT id
-        FROM wallet_transactions
-        WHERE source = 'MPESA_C2B' AND source_ref = $1
+        FROM wallet_ledger
+        WHERE reference_type = 'MPESA_C2B' AND reference_id = $1
         LIMIT 1
       `,
-      [sourceRef]
+      [String(row.id)]
     );
     if (existing.rows.length) {
       await pool.query(`UPDATE mpesa_c2b_payments SET status = 'CREDITED' WHERE id = $1 AND status = 'RECEIVED'`, [
@@ -588,6 +591,8 @@ router.post('/c2b-payments/:id/reprocess', async (req, res) => {
         amount,
         source: 'MPESA_C2B',
         sourceRef,
+        referenceId: row.id,
+        referenceType: 'MPESA_C2B',
         description: `M-Pesa fare from ${row.msisdn || 'unknown'}`,
         client,
       });
@@ -923,11 +928,11 @@ router.post('/c2b/:id/resolve', async (req, res) => {
     const existingTx = await client.query(
       `
         SELECT id
-        FROM wallet_transactions
-        WHERE source = 'MPESA_C2B' AND source_ref = $1
+        FROM wallet_ledger
+        WHERE reference_type = 'MPESA_C2B' AND reference_id = $1
         LIMIT 1
       `,
-      [sourceRef]
+      [String(payment.id)]
     );
 
     if (existingTx.rows.length) {
@@ -952,6 +957,8 @@ router.post('/c2b/:id/resolve', async (req, res) => {
       amount,
       source: 'MPESA_C2B',
       sourceRef,
+      referenceId: payment.id,
+      referenceType: 'MPESA_C2B',
       description: `Manual C2B resolve from ${payment.msisdn || 'unknown'}`,
       client,
     });
@@ -1039,6 +1046,374 @@ router.get('/ops-alerts', async (req, res) => {
     res.json({ ok: true, items: rows || [], total, limit, offset });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// SACCO payout destinations (verification)
+router.post('/payout-destinations/:id/verify', async (req, res) => {
+  const id = req.params.id;
+  if (!id) return res.status(400).json({ ok: false, error: 'destination id required' });
+  try {
+    const { rows } = await pool.query(
+      `
+        UPDATE payout_destinations
+        SET is_verified = true
+        WHERE id = $1
+        RETURNING *
+      `,
+      [id],
+    );
+    if (!rows.length) return res.status(404).json({ ok: false, error: 'destination not found' });
+    return res.json({ ok: true, destination: rows[0] });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// SACCO payout batches (admin)
+router.get('/payout-batches', async (req, res) => {
+  try {
+    const statusRaw = String(req.query.status || '').trim().toUpperCase();
+    const statuses = statusRaw
+      ? statusRaw.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean)
+      : [];
+    const params = [];
+    const where = [];
+    if (statuses.length) {
+      params.push(statuses);
+      where.push(`b.status = ANY($${params.length})`);
+    }
+    const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const { rows } = await pool.query(
+      `
+        SELECT
+          b.*,
+          s.name AS sacco_name
+        FROM payout_batches b
+        LEFT JOIN saccos s ON s.id = b.sacco_id
+        ${whereClause}
+        ORDER BY b.created_at DESC
+        LIMIT 200
+      `,
+      params,
+    );
+    return res.json({ ok: true, batches: rows || [] });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.get('/payout-batches/:id', async (req, res) => {
+  const batchId = req.params.id;
+  if (!batchId) return res.status(400).json({ ok: false, error: 'batch id required' });
+  try {
+    const batchRes = await pool.query(
+      `
+        SELECT
+          b.*,
+          s.name AS sacco_name
+        FROM payout_batches b
+        LEFT JOIN saccos s ON s.id = b.sacco_id
+        WHERE b.id = $1
+        LIMIT 1
+      `,
+      [batchId],
+    );
+    if (!batchRes.rows.length) return res.status(404).json({ ok: false, error: 'batch not found' });
+    const itemsRes = await pool.query(
+      `
+        SELECT
+          pi.*,
+          wl.id AS ledger_entry_id
+        FROM payout_items pi
+        LEFT JOIN wallet_ledger wl
+          ON wl.reference_type = 'PAYOUT_ITEM'
+         AND wl.reference_id = pi.id::text
+        WHERE pi.batch_id = $1
+        ORDER BY pi.created_at ASC
+      `,
+      [batchId],
+    );
+    const eventsRes = await pool.query(
+      `
+        SELECT *
+        FROM payout_events
+        WHERE batch_id = $1
+        ORDER BY created_at ASC
+      `,
+      [batchId],
+    );
+    return res.json({
+      ok: true,
+      batch: batchRes.rows[0],
+      items: itemsRes.rows || [],
+      events: eventsRes.rows || [],
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/payout-batches/:id/approve', async (req, res) => {
+  const batchId = req.params.id;
+  if (!batchId) return res.status(400).json({ ok: false, error: 'batch id required' });
+  try {
+    const batchRes = await pool.query(
+      `
+        SELECT *
+        FROM payout_batches
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [batchId],
+    );
+    if (!batchRes.rows.length) return res.status(404).json({ ok: false, error: 'batch not found' });
+    const batch = batchRes.rows[0];
+    if (batch.status !== 'SUBMITTED') {
+      return res.status(400).json({ ok: false, error: 'batch not in SUBMITTED status' });
+    }
+
+    const unverifiedRes = await pool.query(
+      `
+        SELECT COUNT(*)::int AS total
+        FROM payout_items pi
+        JOIN payout_batches b ON b.id = pi.batch_id
+        LEFT JOIN payout_destinations pd
+          ON pd.entity_type = 'SACCO'
+         AND pd.entity_id = b.sacco_id
+         AND pd.destination_type = pi.destination_type
+         AND pd.destination_ref = pi.destination_ref
+         AND pd.is_verified = true
+        WHERE pi.batch_id = $1
+          AND pi.status = 'PENDING'
+          AND pi.destination_type = 'MSISDN'
+          AND pd.id IS NULL
+      `,
+      [batchId],
+    );
+    if (unverifiedRes.rows[0]?.total > 0) {
+      return res.status(400).json({ ok: false, error: 'Unverified payout destinations' });
+    }
+
+    const quarantinedRes = await pool.query(
+      `
+        SELECT COUNT(*)::int AS total
+        FROM mpesa_c2b_payments p
+        JOIN wallet_aliases wa
+          ON wa.alias = p.account_reference
+         AND wa.is_active = true
+        JOIN wallets w
+          ON w.id = wa.wallet_id
+        WHERE w.sacco_id = $1
+          AND p.status = 'QUARANTINED'
+          AND p.created_at::date BETWEEN $2 AND $3
+      `,
+      [batch.sacco_id, batch.date_from, batch.date_to],
+    );
+    if (quarantinedRes.rows[0]?.total > 0) {
+      await createOpsAlert({
+        type: 'PAYOUT_APPROVAL_BLOCKED',
+        severity: 'WARN',
+        entity_type: 'SACCO',
+        entity_id: String(batch.sacco_id || ''),
+        payment_id: null,
+        message: 'Payout approval blocked due to quarantined payments in range.',
+        meta: {
+          batch_id: batchId,
+          date_from: batch.date_from,
+          date_to: batch.date_to,
+          quarantined_count: quarantinedRes.rows[0]?.total || 0,
+        },
+      });
+      return res.status(400).json({ ok: false, error: 'Unresolved quarantined payments in range' });
+    }
+
+    const updated = await pool.query(
+      `
+        UPDATE payout_batches
+        SET status = 'APPROVED',
+            approved_by = $2,
+            approved_at = now()
+        WHERE id = $1 AND status = 'SUBMITTED'
+        RETURNING *
+      `,
+      [batchId, req.user?.id || null],
+    );
+    if (!updated.rows.length) {
+      return res.status(409).json({ ok: false, error: 'batch status changed; retry' });
+    }
+
+    await insertPayoutEvent({
+      batchId,
+      actorId: req.user?.id || null,
+      eventType: 'BATCH_APPROVED',
+      message: 'Batch approved',
+      meta: {},
+    });
+
+    return res.json({ ok: true, batch: updated.rows[0] });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/payout-batches/:id/process', async (req, res) => {
+  const batchId = req.params.id;
+  if (!batchId) return res.status(400).json({ ok: false, error: 'batch id required' });
+  try {
+    const batchRes = await pool.query(
+      `
+        SELECT *
+        FROM payout_batches
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [batchId],
+    );
+    if (!batchRes.rows.length) return res.status(404).json({ ok: false, error: 'batch not found' });
+    const batch = batchRes.rows[0];
+    if (!['APPROVED', 'PROCESSING'].includes(batch.status)) {
+      return res.status(400).json({ ok: false, error: 'batch not approved for processing' });
+    }
+
+    if (batch.status !== 'PROCESSING') {
+      await pool.query(
+        `UPDATE payout_batches SET status = 'PROCESSING' WHERE id = $1`,
+        [batchId],
+      );
+      await insertPayoutEvent({
+        batchId,
+        actorId: req.user?.id || null,
+        eventType: 'BATCH_PROCESSING',
+        message: 'Batch processing started',
+        meta: {},
+      });
+    }
+
+    const itemsRes = await pool.query(
+      `
+        SELECT *
+        FROM payout_items
+        WHERE batch_id = $1
+        ORDER BY created_at ASC
+      `,
+      [batchId],
+    );
+    const items = itemsRes.rows || [];
+    const results = [];
+
+    for (const item of items) {
+      if (item.status !== 'PENDING') continue;
+
+      if (item.destination_type !== 'MSISDN') {
+        const updated = await pool.query(
+          `
+            UPDATE payout_items
+            SET status = 'BLOCKED',
+                block_reason = 'B2B_NOT_SUPPORTED'
+            WHERE id = $1 AND status = 'PENDING'
+            RETURNING *
+          `,
+          [item.id],
+        );
+        if (updated.rows.length) {
+          await insertPayoutEvent({
+            batchId,
+            itemId: item.id,
+            actorId: req.user?.id || null,
+            eventType: 'ITEM_BLOCKED',
+            message: 'Manual transfer required (B2B not supported)',
+            meta: { reason: 'B2B_NOT_SUPPORTED' },
+          });
+          results.push({ id: item.id, status: 'BLOCKED' });
+        }
+        continue;
+      }
+
+      const claim = await pool.query(
+        `
+          UPDATE payout_items
+          SET status = 'SENT',
+              provider_request_id = $2,
+              provider_conversation_id = NULL,
+              updated_at = now()
+          WHERE id = $1 AND status = 'PENDING'
+          RETURNING *
+        `,
+        [item.id, item.idempotency_key],
+      );
+      if (!claim.rows.length) continue;
+
+      try {
+        const b2cRes = await sendB2CPayout({
+          payoutItemId: item.id,
+          amount: item.amount,
+          phoneNumber: item.destination_ref,
+          idempotencyKey: item.idempotency_key,
+        });
+        if (b2cRes.providerRequestId || b2cRes.conversationId || b2cRes.originatorConversationId) {
+          await pool.query(
+            `
+              UPDATE payout_items
+              SET provider_request_id = COALESCE($2, provider_request_id),
+                  provider_conversation_id = COALESCE($3, provider_conversation_id)
+              WHERE id = $1
+            `,
+            [item.id, b2cRes.providerRequestId || null, b2cRes.conversationId || null],
+          );
+        }
+        await insertPayoutEvent({
+          batchId,
+          itemId: item.id,
+          actorId: req.user?.id || null,
+          eventType: 'ITEM_SENT',
+          message: 'B2C payout sent',
+          meta: {
+            provider_request_id: b2cRes.providerRequestId || null,
+            provider_conversation_id: b2cRes.conversationId || null,
+            response: b2cRes.response,
+          },
+        });
+        results.push({ id: item.id, status: 'SENT' });
+      } catch (err) {
+        await pool.query(
+          `
+            UPDATE payout_items
+            SET status = 'FAILED',
+                failure_reason = $2
+            WHERE id = $1
+          `,
+          [item.id, err.message || 'B2C send failed'],
+        );
+        await insertPayoutEvent({
+          batchId,
+          itemId: item.id,
+          actorId: req.user?.id || null,
+          eventType: 'ITEM_FAILED',
+          message: 'B2C send failed',
+          meta: { error: err.message },
+        });
+        await createOpsAlert({
+          type: 'PAYOUT_ITEM_FAILED',
+          severity: 'WARN',
+          entity_type: 'SACCO',
+          entity_id: String(batch.sacco_id || ''),
+          payment_id: null,
+          message: 'B2C payout send failed.',
+          meta: { batch_id: batchId, item_id: item.id, error: err.message },
+        });
+        results.push({ id: item.id, status: 'FAILED' });
+      }
+    }
+
+    const updatedBatch = await updateBatchStatusFromItems({
+      batchId,
+      actorId: req.user?.id || null,
+    });
+
+    return res.json({ ok: true, results, batch_status: updatedBatch?.status || 'PROCESSING' });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
   }
 });
 
