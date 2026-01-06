@@ -3,7 +3,7 @@ module.exports = {
     {
       name: 'teketeke-api',
       script: 'server/server.js',
-      cwd: process.cwd(),
+      cwd: '/home/teketeke/apps/teketeke-api',
       env: {
         NODE_ENV: 'production',
         PORT: process.env.PORT || 5001,

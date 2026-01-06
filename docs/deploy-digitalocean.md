@@ -1,10 +1,10 @@
 # DigitalOcean Deployment (Ubuntu + Nginx + PM2)
 
-This guide targets a fresh Ubuntu 22.04/24.04 Droplet (≥2GB RAM) exposing the Node/Express API at `https://api.teketeke.dev`.
+This guide targets a fresh Ubuntu 22.04/24.04 Droplet (≥2GB RAM) exposing the Node/Express API at `https://api.teketeke.org`.
 
 ## 1) Prereqs & DNS
 - Create Droplet (Ubuntu 22.04/24.04, 2GB RAM recommended).
-- Point DNS: `api.teketeke.dev` → Droplet public IP (A record).
+- Point DNS: `api.teketeke.org` → Droplet public IP (A record).
 
 ## 2) Harden base OS
 ```bash
@@ -50,27 +50,27 @@ pm2 save
 pm2 startup systemd -u $USER --hp $HOME
 ```
 
-## 7) Nginx reverse proxy (server_name api.teketeke.dev)
+## 7) Nginx reverse proxy (server_name api.teketeke.org)
 ```bash
 sudo mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
-sudo cp ops/nginx/api.teketeke.dev.conf /etc/nginx/sites-available/api.teketeke.dev.conf
-sudo ln -s /etc/nginx/sites-available/api.teketeke.dev.conf /etc/nginx/sites-enabled/api.teketeke.dev.conf
+sudo cp ops/nginx/api.teketeke.org.conf /etc/nginx/sites-available/api.teketeke.org.conf
+sudo ln -s /etc/nginx/sites-available/api.teketeke.org.conf /etc/nginx/sites-enabled/api.teketeke.org.conf
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
 ### Certbot TLS
 ```bash
-sudo certbot --nginx -d api.teketeke.dev --redirect --non-interactive --agree-tos -m admin@teketeke.dev
+sudo certbot --nginx -d api.teketeke.org --redirect --non-interactive --agree-tos -m admin@teketeke.org
 sudo systemctl reload nginx
 ```
 
 ## 8) Expected health checks
 ```bash
-curl -I https://api.teketeke.dev/
-curl -I https://api.teketeke.dev/api/mpesa/callback
-curl -I https://api.teketeke.dev/api/pay/stk/callback
-curl -I https://api.teketeke.dev/api/mpesa/b2c/result
-curl -I https://api.teketeke.dev/api/mpesa/b2c/timeout
+curl -I https://api.teketeke.org/
+curl -I https://api.teketeke.org/api/mpesa/callback
+curl -I https://api.teketeke.org/api/pay/stk/callback
+curl -I https://api.teketeke.org/api/mpesa/b2c/result
+curl -I https://api.teketeke.org/api/mpesa/b2c/timeout
 pm2 status
 pm2 logs --lines 100
 sudo nginx -t
@@ -78,10 +78,10 @@ sudo nginx -t
 (`curl -I` may return 404/405 which is acceptable; goal is 200/4xx not 5xx.)
 
 ## 9) Safaricom callback URLs (register exactly)
-- C2B PayBill confirmation: `https://api.teketeke.dev/api/mpesa/callback`
-- STK Push callback: `https://api.teketeke.dev/api/pay/stk/callback`
-- B2C Result: `https://api.teketeke.dev/api/mpesa/b2c/result`
-- B2C Timeout: `https://api.teketeke.dev/api/mpesa/b2c/timeout`
+- C2B PayBill confirmation: `https://api.teketeke.org/api/mpesa/callback`
+- STK Push callback: `https://api.teketeke.org/api/pay/stk/callback`
+- B2C Result: `https://api.teketeke.org/api/mpesa/b2c/result`
+- B2C Timeout: `https://api.teketeke.org/api/mpesa/b2c/timeout`
 
 ## 10) Roll forward / roll back
 ```bash
@@ -95,4 +95,4 @@ sudo nginx -t && sudo systemctl reload nginx
 ```
 
 ## 11) Frontend note
-- Set `VITE_API_BASE=https://api.teketeke.dev` for any frontend build consuming this API.
+- Set `VITE_API_BASE=https://api.teketeke.org` for any frontend build consuming this API.

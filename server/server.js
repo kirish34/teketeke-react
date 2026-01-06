@@ -17,7 +17,7 @@ app.use(express.urlencoded({ extended: false }));
 const defaultCors = [
   'https://teketeke.dev',
   'https://www.teketeke.dev',
-  'https://api.teketeke.dev',
+  'https://api.teketeke.org',
   'https://teketeke-react.vercel.app',
   'https://teketeke-react-1oh3rpn5r-team-teke.vercel.app',
 ];
