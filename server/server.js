@@ -7,9 +7,18 @@ const helmet = require('helmet');
 const cors = require('cors');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
+const registryRouter = require('./routes/registry');
+const telemetryRouter = require('./routes/telemetry');
+const darajaB2CRouter = require('./routes/daraja-b2c');
+const payoutReadinessRouter = require('./routes/payout-readiness');
+const walletLedgerRouter = require('./routes/wallet-ledger');
 
 const app = express();
-app.set('trust proxy', 1);
+const trustProxy =
+  process.env.TRUST_PROXY === '0' || process.env.TRUST_PROXY === 'false'
+    ? false
+    : process.env.TRUST_PROXY || (process.env.NODE_ENV === 'production' ? 1 : false);
+app.set('trust proxy', trustProxy);
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false }));
 
@@ -21,6 +30,11 @@ const defaultCors = [
   'https://teketeke-react.vercel.app',
   'https://teketeke-react-1oh3rpn5r-team-teke.vercel.app',
 ];
+const envRailwayDomains = (process.env.RAILWAY_PUBLIC_DOMAIN || process.env.RAILWAY_URL || process.env.RAILWAY_DOMAIN || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean)
+  .map((s) => s.replace(/^https?:\/\//, ''));
 const allow = Array.from(new Set([
   ...defaultCors,
   ...(process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
@@ -33,12 +47,23 @@ const allowVercelPreview = (origin = '') => {
     return false;
   }
 };
+const allowRailwayDomain = (origin = '') => {
+  try {
+    const { hostname } = new URL(origin);
+    if (envRailwayDomains.some((d) => hostname === d || hostname === d.split(':')[0])) {
+      return true;
+    }
+    return hostname.endsWith('.railway.app');
+  } catch {
+    return false;
+  }
+};
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin || allow.length === 0 || allow.includes(origin) || allowVercelPreview(origin)) {
+    if (!origin || allow.length === 0 || allow.includes(origin) || allowVercelPreview(origin) || allowRailwayDomain(origin)) {
       return cb(null, true);
     }
-    return cb(new null, false);
+    return cb(new Error('Not allowed by CORS'), false);
   },
   credentials: true
 }));
@@ -82,20 +107,26 @@ app.use('/u', require('./routes/user'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/staff', require('./routes/staff'));
 app.use('/api/pay', require('./routes/pay-daraja'));
+app.use('/mpesa', require('./routes/mpesa'));
+app.use('/api/mpesa', require('./routes/mpesa'));
 app.use('/api/taxi', require('./routes/taxi'));
 app.use('/api/boda', require('./routes/boda'));
 app.use('/api/signup', require('./routes/signup'));
 app.use('/api/db', require('./routes/db'));
-app.use('/api', require('./routes/registry'));
-app.use('/api', require('./routes/telemetry'));
-app.use('/api', require('./routes/daraja-b2c'));
-app.use('/api', require('./routes/payout-readiness'));
+// Skip auth-heavy routers for mpesa callbacks to avoid 401s
+const skipMpesa = (router) => (req, res, next) => {
+  if (req.path.startsWith('/mpesa')) return next();
+  return router(req, res, next);
+};
+
+app.use('/api', skipMpesa(registryRouter));
+app.use('/api', skipMpesa(telemetryRouter));
+app.use('/api', skipMpesa(darajaB2CRouter));
+app.use('/api', skipMpesa(payoutReadinessRouter));
 app.use('/api/sacco', require('./routes/sacco-payouts'));
-app.use('/api', require('./routes/wallet-ledger'));
+app.use('/api', skipMpesa(walletLedgerRouter));
 app.use('/test', require('./routes/wallet'));
 app.use('/', require('./routes/wallet-withdraw'));
-app.use('/mpesa', require('./routes/mpesa'));
-app.use('/api/mpesa', require('./routes/mpesa'));
 app.use('/api/admin', require('./routes/admin-withdrawals'));
 app.use('/api/admin', require('./routes/admin-matatu-payout'));
 app.use('/api/admin', require('./routes/admin-vehicle-payout'));
@@ -103,7 +134,13 @@ app.use('/api/admin', require('./routes/admin-sms'));
 app.use('/', require('./routes/sacco'));
 
 // health (works on Vercel via rewrite /healthz -> /api/index.js)
-app.get(['/healthz','/api/healthz'], (_req,res)=>res.json({ ok:true, mode:'real' }));
+app.get(['/healthz', '/api/healthz'], (req, res) => {
+  const accept = (req.headers.accept || '').toLowerCase();
+  if (accept.includes('application/json')) {
+    return res.status(200).json({ ok: true, mode: 'real' });
+  }
+  return res.status(200).type('text/plain').send('ok');
+});
 
 // local only (guard for Vercel)
 const PORT = process.env.PORT || 5001;

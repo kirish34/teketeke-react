@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "start": "node server/server.js",
     "server": "node server/server.js",
     "migrate": "node scripts/migrate.js",
     "backfill:wallets": "node scripts/backfillWallets.js",

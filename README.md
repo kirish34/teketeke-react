@@ -36,6 +36,13 @@ npm run validate:env
 npm install
 ```
 
+## Deploying to Railway (API)
+1) Connect the GitHub repo to a new Railway service (Root directory = repo root). Build command can stay empty or `npm run build` if you want the Vite bundle served from `/app`; start command must be `npm start` (uses `server/server.js`).
+2) Railway sets `PORT` automatically; keep it unset in your env. Set `NODE_ENV=production`.
+3) Add secrets in the Railway Variables tab (see env table below). Never commit real secrets.
+4) After the first deploy passes `/healthz`, attach your custom domain in Railway and point DNS (see Custom Domain).
+5) Legacy VPS bits live at `ops/pm2` and `ops/nginx` plus `docs/deploy-digitalocean.md`; keep them for reference but they are not used on Railway.
+
 ## Database
 Apply SQL migrations to Supabase/Postgres:
 ```
