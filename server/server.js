@@ -143,9 +143,9 @@ app.get(['/healthz', '/api/healthz'], (req, res) => {
 });
 
 // local only (guard for Vercel)
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 8080;
 if (!process.env.VERCEL) {
-  app.listen(PORT, () => console.log('TekeTeke REAL API listening on ' + PORT));
+  app.listen(PORT, '0.0.0.0', () => console.log(`TekeTeke REAL API listening on ${PORT}`));
 }
 
 // 404 fallback to avoid hanging in serverless when route not matched
