@@ -111,6 +111,85 @@ function respondC2bAck(res) {
   }
 }
 
+async function upsertC2bPaymentQuarantine({ paybill_number, account_reference, amountValue, msisdn, mpesa_receipt, body }) {
+  if (!mpesa_receipt) return { id: null, status: null };
+
+  const existing = await pool.query(
+    `SELECT id, status FROM mpesa_c2b_payments WHERE receipt = $1 LIMIT 1`,
+    [mpesa_receipt]
+  );
+
+  if (existing.rows.length) {
+    const currentStatus = existing.rows[0].status;
+    const nextStatus = ['CREDITED', 'REJECTED', 'QUARANTINED'].includes(currentStatus) ? currentStatus : 'QUARANTINED';
+    const res = await pool.query(
+      `
+        UPDATE mpesa_c2b_payments
+        SET paybill_number = $1,
+            account_reference = $2,
+            amount = $3,
+            msisdn = $4,
+            raw = $5,
+            status = $6
+        WHERE receipt = $7
+        RETURNING id, status
+      `,
+      [paybill_number || null, account_reference || null, amountValue, msisdn, body, nextStatus, mpesa_receipt]
+    );
+    return res.rows[0] || { id: null, status: null };
+  }
+
+  const insertRes = await pool.query(
+    `
+      INSERT INTO mpesa_c2b_payments
+        (paybill_number, account_reference, amount, msisdn, receipt, status, raw)
+      VALUES
+        ($1, $2, $3, $4, $5, 'QUARANTINED', $6)
+      RETURNING id, status
+    `,
+    [paybill_number || null, account_reference || null, amountValue, msisdn, mpesa_receipt, body]
+  );
+  return insertRes.rows[0] || { id: null, status: null };
+}
+
+async function upsertC2bPaymentReceived({ paybill_number, account_reference, amountValue, msisdn, mpesa_receipt, body }) {
+  if (!mpesa_receipt) return { id: null, status: null };
+
+  const existing = await pool.query(
+    `SELECT id, status FROM mpesa_c2b_payments WHERE receipt = $1 LIMIT 1`,
+    [mpesa_receipt]
+  );
+
+  if (existing.rows.length) {
+    const res = await pool.query(
+      `
+        UPDATE mpesa_c2b_payments
+        SET paybill_number = $1,
+            account_reference = $2,
+            amount = $3,
+            msisdn = $4,
+            raw = $5
+        WHERE receipt = $6
+        RETURNING id, status
+      `,
+      [paybill_number || null, account_reference || null, amountValue, msisdn, body, mpesa_receipt]
+    );
+    return res.rows[0] || { id: null, status: null };
+  }
+
+  const insertRes = await pool.query(
+    `
+      INSERT INTO mpesa_c2b_payments
+        (paybill_number, account_reference, amount, msisdn, receipt, status, raw)
+      VALUES
+        ($1, $2, $3, $4, $5, 'RECEIVED', $6)
+      RETURNING id, status
+    `,
+    [paybill_number || null, account_reference || null, amountValue, msisdn, mpesa_receipt, body]
+  );
+  return insertRes.rows[0] || { id: null, status: null };
+}
+
 function enqueueC2BProcessing(req, res, source = 'direct') {
   const payload = req.body || {};
   const headers = { ...(req.headers || {}) };
@@ -502,36 +581,16 @@ async function handleC2BCallback(req, res) {
       let paymentStatus = null;
 
       if (mpesa_receipt) {
-        const upsertRes = await pool.query(
-          `
-            INSERT INTO mpesa_c2b_payments
-              (paybill_number, account_reference, amount, msisdn, receipt, status, raw)
-            VALUES
-              ($1, $2, $3, $4, $5, 'QUARANTINED', $6)
-            ON CONFLICT (receipt) DO UPDATE
-              SET paybill_number = EXCLUDED.paybill_number,
-                  account_reference = EXCLUDED.account_reference,
-                  amount = EXCLUDED.amount,
-                  msisdn = EXCLUDED.msisdn,
-                  raw = EXCLUDED.raw,
-                  status = CASE
-                    WHEN mpesa_c2b_payments.status IN ('CREDITED', 'REJECTED', 'QUARANTINED')
-                      THEN mpesa_c2b_payments.status
-                    ELSE 'QUARANTINED'
-                  END
-            RETURNING id, status
-          `,
-          [
-            paybill_number || null,
-            normalizedRef || null,
-            amountValue,
-            phone_number || null,
-            mpesa_receipt || null,
-            body,
-          ]
-        );
-        paymentId = upsertRes.rows[0]?.id || null;
-        paymentStatus = upsertRes.rows[0]?.status || null;
+        const upsertRes = await upsertC2bPaymentQuarantine({
+          paybill_number,
+          account_reference: normalizedRef,
+          amountValue,
+          msisdn,
+          mpesa_receipt,
+          body,
+        });
+        paymentId = upsertRes?.id || null;
+        paymentStatus = upsertRes?.status || null;
       } else {
         const insertRes = await pool.query(
           `
@@ -590,31 +649,16 @@ async function handleC2BCallback(req, res) {
     let paymentStatus = null;
 
     if (mpesa_receipt) {
-      const upsertRes = await pool.query(
-        `
-          INSERT INTO mpesa_c2b_payments
-            (paybill_number, account_reference, amount, msisdn, receipt, status, raw)
-          VALUES
-            ($1, $2, $3, $4, $5, 'RECEIVED', $6)
-          ON CONFLICT (receipt) DO UPDATE
-            SET paybill_number = EXCLUDED.paybill_number,
-                account_reference = EXCLUDED.account_reference,
-                amount = EXCLUDED.amount,
-                msisdn = EXCLUDED.msisdn,
-                raw = EXCLUDED.raw
-          RETURNING id, status
-        `,
-          [
-            paybill_number || null,
-            normalizedRef || null,
-            amountValue,
-            msisdn,
-            mpesa_receipt || null,
-            body,
-          ]
-        );
-        paymentId = upsertRes.rows[0].id;
-      paymentStatus = upsertRes.rows[0].status;
+      const upsertRes = await upsertC2bPaymentReceived({
+        paybill_number,
+        account_reference: normalizedRef,
+        amountValue,
+        msisdn,
+        mpesa_receipt,
+        body,
+      });
+      paymentId = upsertRes?.id || null;
+      paymentStatus = upsertRes?.status || null;
     } else {
       const insertRes = await pool.query(
         `
