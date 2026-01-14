@@ -581,6 +581,18 @@ async function handleC2BCallback(req, res) {
       let paymentStatus = null;
 
       if (mpesa_receipt) {
+        const existing = await pool.query(
+          `SELECT id, status FROM mpesa_c2b_payments WHERE receipt = $1 LIMIT 1`,
+          [mpesa_receipt]
+        );
+        paymentId = existing.rows[0]?.id || null;
+        paymentStatus = existing.rows[0]?.status || null;
+        if (paymentStatus === 'CREDITED') {
+          return finish('ALREADY_CREDITED', { payment_id: paymentId, status: paymentStatus });
+        }
+      }
+
+      if (mpesa_receipt) {
         const upsertRes = await upsertC2bPaymentQuarantine({
           paybill_number,
           account_reference: normalizedRef,
@@ -589,8 +601,8 @@ async function handleC2BCallback(req, res) {
           mpesa_receipt,
           body,
         });
-        paymentId = upsertRes?.id || null;
-        paymentStatus = upsertRes?.status || null;
+        paymentId = upsertRes?.id || paymentId;
+        paymentStatus = upsertRes?.status || paymentStatus;
       } else {
         const insertRes = await pool.query(
           `
@@ -604,13 +616,13 @@ async function handleC2BCallback(req, res) {
             paybill_number || null,
             normalizedRef || null,
             amountValue,
-            phone_number || null,
+            msisdn,
             mpesa_receipt || null,
             body,
           ]
         );
-        paymentId = insertRes.rows[0]?.id || null;
-        paymentStatus = insertRes.rows[0]?.status || null;
+        paymentId = insertRes.rows[0]?.id || paymentId;
+        paymentStatus = insertRes.rows[0]?.status || paymentStatus;
       }
 
       if (paymentStatus === 'QUARANTINED' || paymentStatus === 'RECEIVED') {
@@ -621,7 +633,7 @@ async function handleC2BCallback(req, res) {
             VALUES
               ($1, $2, $3, $4, $5, 'WEBHOOK_SECRET_MISMATCH')
           `,
-          [paybill_number || null, normalizedRef || null, amountValue, phone_number || null, body]
+          [paybill_number || null, normalizedRef || null, amountValue, msisdn, body]
         );
       }
 
@@ -649,6 +661,16 @@ async function handleC2BCallback(req, res) {
     let paymentStatus = null;
 
     if (mpesa_receipt) {
+      const existing = await pool.query(
+        `SELECT id, status FROM mpesa_c2b_payments WHERE receipt = $1 LIMIT 1`,
+        [mpesa_receipt]
+      );
+      paymentId = existing.rows[0]?.id || null;
+      paymentStatus = existing.rows[0]?.status || null;
+      if (paymentStatus === 'CREDITED') {
+        return finish('ALREADY_CREDITED', { payment_id: paymentId, status: paymentStatus });
+      }
+
       const upsertRes = await upsertC2bPaymentReceived({
         paybill_number,
         account_reference: normalizedRef,
@@ -657,8 +679,8 @@ async function handleC2BCallback(req, res) {
         mpesa_receipt,
         body,
       });
-      paymentId = upsertRes?.id || null;
-      paymentStatus = upsertRes?.status || null;
+      paymentId = upsertRes?.id || paymentId;
+      paymentStatus = upsertRes?.status || paymentStatus;
     } else {
       const insertRes = await pool.query(
         `
