@@ -12,6 +12,7 @@ const telemetryRouter = require('./routes/telemetry');
 const darajaB2CRouter = require('./routes/daraja-b2c');
 const payoutReadinessRouter = require('./routes/payout-readiness');
 const walletLedgerRouter = require('./routes/wallet-ledger');
+const mpesaRouter = require('./routes/mpesa');
 
 const app = express();
 const trustProxy =
@@ -107,8 +108,8 @@ app.use('/u', require('./routes/user'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/staff', require('./routes/staff'));
 app.use('/api/pay', require('./routes/pay-daraja'));
-app.use('/mpesa', require('./routes/mpesa'));
-app.use('/api/mpesa', require('./routes/mpesa'));
+app.use('/mpesa', mpesaRouter);
+app.use('/api/mpesa', mpesaRouter);
 app.use('/api/taxi', require('./routes/taxi'));
 app.use('/api/boda', require('./routes/boda'));
 app.use('/api/signup', require('./routes/signup'));
@@ -132,6 +133,14 @@ app.use('/api/admin', require('./routes/admin-matatu-payout'));
 app.use('/api/admin', require('./routes/admin-vehicle-payout'));
 app.use('/api/admin', require('./routes/admin-sms'));
 app.use('/', require('./routes/sacco'));
+
+// Daraja C2B aliases (Safaricom blocks "mpesa" substring in RegisterURL)
+if (mpesaRouter.handleC2BValidation) {
+  app.post('/validation', mpesaRouter.handleC2BValidation);
+}
+if (mpesaRouter.handleC2BConfirmation) {
+  app.post('/confirmation', mpesaRouter.handleC2BConfirmation);
+}
 
 // health (works on Vercel via rewrite /healthz -> /api/index.js)
 app.get(['/healthz', '/api/healthz'], (req, res) => {

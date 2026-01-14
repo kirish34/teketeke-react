@@ -886,10 +886,6 @@ const handleC2BConfirmation = (req, res) => enqueueC2BProcessing(req, res, 'c2b_
 router.post('/c2b/validation', handleC2BValidation);
 router.post('/c2b/confirmation', handleC2BConfirmation);
 
-// Aliases without "mpesa" for Safaricom validation rules
-router.post('/validation', handleC2BValidation);
-router.post('/confirmation', handleC2BConfirmation);
-
 router.post('/callback', (req, res) => enqueueC2BProcessing(req, res, 'direct_callback'));
 
 /**
@@ -902,3 +898,5 @@ router.post('/b2c/result', handleB2CResult);
 router.post('/b2c/timeout', handleB2CTimeout);
 
 module.exports = router;
+module.exports.handleC2BValidation = handleC2BValidation;
+module.exports.handleC2BConfirmation = handleC2BConfirmation;
