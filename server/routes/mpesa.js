@@ -9,6 +9,9 @@ const { applyRiskRules } = require('../mpesa/c2bRisk');
 const { insertPayoutEvent, updateBatchStatusFromItems } = require('../services/saccoPayouts.service');
 const { createOpsAlert } = require('../services/opsAlerts.service');
 
+const C2B_ACK = { ResultCode: 0, ResultDesc: 'Accepted' };
+const EXPECTED_PAYBILL = process.env.MPESA_C2B_SHORTCODE || process.env.DARAJA_SHORTCODE || null;
+
 /**
  * Normalize incoming M-Pesa callback payload.
  * Adjust the fields here if your provider sends a different shape.
@@ -72,6 +75,67 @@ function parseMpesaCallback(body) {
     account_reference,
     transaction_timestamp,
   };
+}
+
+function createNoopRes() {
+  const res = {};
+  res.status = () => res;
+  res.json = () => res;
+  return res;
+}
+
+function buildCorrelationId(body = {}) {
+  return (
+    body.TransID ||
+    body.transId ||
+    (body.transaction && body.transaction.id) ||
+    body.BillRefNumber ||
+    body.AccountReference ||
+    body.accountReference ||
+    body.account_ref ||
+    `c2b-${Date.now()}`
+  );
+}
+
+function logWithCtx(level, message, ctx = {}, extra = {}) {
+  const payload = { ...ctx, ...extra };
+  const printer = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
+  printer('[MPESA_C2B]', message, payload);
+}
+
+function respondC2bAck(res) {
+  try {
+    return res.status(200).json(C2B_ACK);
+  } catch (err) {
+    return null;
+  }
+}
+
+function enqueueC2BProcessing(req, res, source = 'direct') {
+  const payload = req.body || {};
+  const headers = { ...(req.headers || {}) };
+  const correlationId = buildCorrelationId(payload);
+
+  const callbackReq = {
+    body: payload,
+    headers,
+    correlationId,
+    source,
+  };
+
+  const webhookSecret = process.env.DARAJA_WEBHOOK_SECRET || null;
+  if (webhookSecret) {
+    callbackReq.headers['x-webhook-secret'] = webhookSecret;
+  }
+
+  const noopRes = createNoopRes();
+  respondC2bAck(res);
+
+  setImmediate(() => {
+    handleC2BCallback(callbackReq, noopRes).catch((err) => {
+      logWithCtx('error', 'Async C2B handler failed', { correlation_id: correlationId, source }, { error: err.message });
+    });
+  });
 }
 
 async function handlePayoutB2CResult({
@@ -272,106 +336,105 @@ function extractResultValue(result, key) {
   return match ? match.Value ?? match.value ?? null : null;
 }
 
-async function handleB2CResult(req, res) {
+function handleB2CResult(req, res) {
   const body = req.body || {};
   console.log('Received M-Pesa B2C Result:', JSON.stringify(body));
 
+  res.status(200).json({ ResultCode: 0, ResultDesc: 'Received' });
+
   const webhookSecret = process.env.DARAJA_WEBHOOK_SECRET || null;
-  if (webhookSecret) {
-    const got = req.headers['x-webhook-secret'] || '';
-    if (got !== webhookSecret) {
-      console.warn('B2C Result rejected: bad webhook secret');
-      return res.status(200).json({ ok: true });
-    }
+  const got = (req.headers && req.headers['x-webhook-secret']) || '';
+  const secretMismatch = webhookSecret ? got !== webhookSecret : false;
+  if (secretMismatch) {
+    console.warn('B2C Result webhook secret mismatch; processing without blocking');
   }
 
-  try {
-    const result = body.Result || body.result || body || {};
-    const originator = result.OriginatorConversationID || result.originatorConversationID || null;
-    const conversationId = result.ConversationID || result.conversationID || null;
-    const transactionId =
-      result.TransactionID ||
-      result.transactionID ||
-      extractResultValue(result, 'TransactionReceipt') ||
-      null;
-    const resultCode = Number(result.ResultCode ?? result.resultCode ?? -1);
-    const resultDesc = result.ResultDesc ?? result.resultDesc ?? 'Unknown';
+  setImmediate(async () => {
+    try {
+      const result = body.Result || body.result || body || {};
+      const originator = result.OriginatorConversationID || result.originatorConversationID || null;
+      const conversationId = result.ConversationID || result.conversationID || null;
+      const transactionId =
+        result.TransactionID ||
+        result.transactionID ||
+        extractResultValue(result, 'TransactionReceipt') ||
+        null;
+      const resultCode = Number(result.ResultCode ?? result.resultCode ?? -1);
+      const resultDesc = result.ResultDesc ?? result.resultDesc ?? 'Unknown';
 
-    const handledPayout = await handlePayoutB2CResult({
-      originator,
-      conversationId,
-      transactionId,
-      resultCode,
-      resultDesc,
-    });
-    if (handledPayout) {
-      return res.status(200).json({ ok: true });
-    }
-
-    if (!conversationId) {
-      throw new Error('No ConversationID in B2C result');
-    }
-
-    const status = resultCode === 0 ? 'SUCCESS' : 'FAILED';
-
-    await pool.query(
-      `
-        UPDATE withdrawals
-        SET status = $1,
-            mpesa_transaction_id = $2,
-            mpesa_response = $3,
-            failure_reason = CASE WHEN $1 = 'FAILED' THEN $4 ELSE failure_reason END,
-            updated_at = now()
-        WHERE mpesa_conversation_id = $5
-      `,
-      [
-        status,
-        transactionId || null,
-        body,
-        resultDesc || null,
+      const handledPayout = await handlePayoutB2CResult({
+        originator,
         conversationId,
-      ],
-    );
+        transactionId,
+        resultCode,
+        resultDesc,
+      });
+      if (handledPayout) {
+        return;
+      }
 
-    return res.status(200).json({ ok: true });
-  } catch (err) {
-    console.error('Error processing B2C Result:', err.message);
-    return res.status(200).json({ ok: true });
-  }
+      if (!conversationId) {
+        throw new Error('No ConversationID in B2C result');
+      }
+
+      const status = resultCode === 0 ? 'SUCCESS' : 'FAILED';
+
+      await pool.query(
+        `
+          UPDATE withdrawals
+          SET status = $1,
+              mpesa_transaction_id = $2,
+              mpesa_response = $3,
+              failure_reason = CASE WHEN $1 = 'FAILED' THEN $4 ELSE failure_reason END,
+              updated_at = now()
+          WHERE mpesa_conversation_id = $5
+        `,
+        [
+          status,
+          transactionId || null,
+          body,
+          resultDesc || null,
+          conversationId,
+        ],
+      );
+    } catch (err) {
+      console.error('Error processing B2C Result:', err.message);
+    }
+  });
 }
 
-async function handleB2CTimeout(req, res) {
+function handleB2CTimeout(req, res) {
   const body = req.body || {};
   console.log('Received M-Pesa B2C Timeout:', JSON.stringify(body));
 
+  res.status(200).json({ ResultCode: 0, ResultDesc: 'Received' });
+
   const webhookSecret = process.env.DARAJA_WEBHOOK_SECRET || null;
-  if (webhookSecret) {
-    const got = req.headers['x-webhook-secret'] || '';
-    if (got !== webhookSecret) {
-      console.warn('B2C Timeout rejected: bad webhook secret');
-      return res.status(200).json({ ok: true });
+  const got = (req.headers && req.headers['x-webhook-secret']) || '';
+  const secretMismatch = webhookSecret ? got !== webhookSecret : false;
+  if (secretMismatch) {
+    console.warn('B2C Timeout webhook secret mismatch; processing without blocking');
+  }
+
+  setImmediate(async () => {
+    try {
+      const result = body.Result || body.result || body || {};
+      const originator = result.OriginatorConversationID || result.originatorConversationID || null;
+      const conversationId = result.ConversationID || result.conversationID || null;
+      const resultDesc = result.ResultDesc ?? result.resultDesc ?? 'Timeout';
+
+      await handlePayoutB2CResult({
+        originator,
+        conversationId,
+        transactionId: null,
+        resultCode: -1,
+        resultDesc: String(resultDesc || 'Timeout'),
+        isTimeout: true,
+      });
+    } catch (err) {
+      console.error('Error processing B2C Timeout:', err.message);
     }
-  }
-
-  try {
-    const result = body.Result || body.result || body || {};
-    const originator = result.OriginatorConversationID || result.originatorConversationID || null;
-    const conversationId = result.ConversationID || result.conversationID || null;
-    const resultDesc = result.ResultDesc ?? result.resultDesc ?? 'Timeout';
-
-    await handlePayoutB2CResult({
-      originator,
-      conversationId,
-      transactionId: null,
-      resultCode: -1,
-      resultDesc: String(resultDesc || 'Timeout'),
-      isTimeout: true,
-    });
-  } catch (err) {
-    console.error('Error processing B2C Timeout:', err.message);
-  }
-
-  return res.status(200).json({ ok: true });
+  });
 }
 
 /**
@@ -380,14 +443,29 @@ async function handleB2CTimeout(req, res) {
  * - Credit wallet using account_reference as virtual_account_code
  * - Mark raw row as processed
  */
-router.post('/callback', async (req, res) => {
+async function handleC2BCallback(req, res) {
   const body = req.body || {};
+  const correlationId = req.correlationId || buildCorrelationId(body);
+  let logCtx = { correlation_id: correlationId, source: req.source || 'direct' };
+  const log = (level, message, extra = {}) => logWithCtx(level, message, logCtx, extra);
+  const finish = (decision, extra = {}) => {
+    log('info', `Decision=${decision}`, extra);
+    return respondC2bAck(res);
+  };
 
-  console.log('Received M-Pesa callback:', JSON.stringify(body));
+  log('info', 'Received M-Pesa callback');
 
   const webhookSecret = process.env.DARAJA_WEBHOOK_SECRET || null;
   const got = req.headers['x-webhook-secret'] || '';
-  const secretMismatch = webhookSecret ? got !== webhookSecret : false;
+  const requireSecret = process.env.MPESA_C2B_REQUIRE_SECRET === '1';
+  const secretProvided = Boolean(got);
+  const secretMismatch = webhookSecret
+    ? (requireSecret ? got !== webhookSecret : secretProvided && got !== webhookSecret)
+    : false;
+
+  if (webhookSecret && !secretProvided && !requireSecret) {
+    log('warn', 'Webhook secret header missing; continuing (not enforced)');
+  }
 
   let parsed;
   let parseError = null;
@@ -405,12 +483,19 @@ router.post('/callback', async (req, res) => {
   const paybill_number = parsed?.paybill_number || null;
   const account_reference = parsed?.account_reference || null;
   const normalizedRef = normalizeRef(account_reference);
-  const expectedPaybill = '4814003';
   const amountNumber = Number(amount);
   const amountValue = Number.isFinite(amountNumber) ? amountNumber : 0;
 
+  logCtx = {
+    ...logCtx,
+    receipt: mpesa_receipt || null,
+    account_reference: normalizedRef || null,
+    paybill_number,
+    amount: amountValue,
+  };
+
   if (secretMismatch) {
-    console.warn('M-Pesa callback rejected: bad webhook secret');
+    log('warn', 'M-Pesa callback rejected: bad webhook secret');
     try {
       let paymentId = null;
       let paymentStatus = null;
@@ -484,19 +569,19 @@ router.post('/callback', async (req, res) => {
         try {
           await applyRiskRules({ paymentId, reasonCodes: ['WEBHOOK_SECRET_MISMATCH'] });
         } catch (err) {
-          console.warn('Risk engine failed for webhook secret mismatch:', err.message);
+          log('warn', 'Risk engine failed for webhook secret mismatch', { error: err.message });
         }
       }
     } catch (err) {
-      console.warn('Failed to quarantine webhook secret mismatch:', err.message);
+      log('warn', 'Failed to quarantine webhook secret mismatch', { error: err.message });
     }
 
-    return res.status(200).json({ ok: true });
+    return finish('QUARANTINED', { reason: 'WEBHOOK_SECRET_MISMATCH' });
   }
 
   if (parseError) {
-    console.error('Failed to parse callback:', parseError.message);
-    return res.status(200).json({ ok: true });
+    log('error', 'Failed to parse callback', { error: parseError.message });
+    return finish('PARSE_FAILED', { reason: parseError.message });
   }
 
   try {
@@ -552,21 +637,17 @@ router.post('/callback', async (req, res) => {
     }
 
     if (paymentStatus && paymentStatus !== 'RECEIVED') {
-      console.log('Duplicate callback ignored for receipt', mpesa_receipt || paymentId);
+      log('info', 'Duplicate callback ignored', { payment_id: paymentId, status: paymentStatus });
       try {
         await applyRiskRules({ paymentId, reasonCodes: ['DUPLICATE_RECEIPT'] });
       } catch (err) {
-        console.warn('Risk engine failed for duplicate receipt:', err.message);
+        log('warn', 'Risk engine failed for duplicate receipt', { error: err.message });
       }
-      return res.status(200).json({ ok: true });
+      return finish('DUPLICATE', { payment_id: paymentId, status: paymentStatus });
     }
 
-    if (String(paybill_number || '') !== expectedPaybill) {
-      console.warn('ALERT: C2B paybill mismatch', {
-        receipt: mpesa_receipt || null,
-        paybill_number,
-        account_reference: normalizedRef || null,
-      });
+    if (EXPECTED_PAYBILL && String(paybill_number || '') !== String(EXPECTED_PAYBILL)) {
+      log('warn', 'ALERT: C2B paybill mismatch');
       const updateRes = await pool.query(
         `
           UPDATE mpesa_c2b_payments
@@ -589,17 +670,13 @@ router.post('/callback', async (req, res) => {
       try {
         await applyRiskRules({ paymentId, reasonCodes: ['PAYBILL_MISMATCH'] });
       } catch (err) {
-        console.warn('Risk engine failed for paybill mismatch:', err.message);
+        log('warn', 'Risk engine failed for paybill mismatch', { error: err.message });
       }
-      return res.status(200).json({ ok: true });
+      return finish('QUARANTINED', { payment_id: paymentId, reason: 'PAYBILL_MISMATCH' });
     }
 
     if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
-      console.warn('ALERT: C2B invalid amount', {
-        receipt: mpesa_receipt || null,
-        amount,
-        account_reference: normalizedRef || null,
-      });
+      log('warn', 'ALERT: C2B invalid amount', { amount });
       const updateRes = await pool.query(
         `
           UPDATE mpesa_c2b_payments
@@ -622,16 +699,13 @@ router.post('/callback', async (req, res) => {
       try {
         await applyRiskRules({ paymentId, reasonCodes: [] });
       } catch (err) {
-        console.warn('Risk engine failed for invalid amount:', err.message);
+        log('warn', 'Risk engine failed for invalid amount', { error: err.message });
       }
-      return res.status(200).json({ ok: true });
+      return finish('QUARANTINED', { payment_id: paymentId, reason: 'INVALID_AMOUNT' });
     }
 
     if (!validatePaybillCode(normalizedRef)) {
-      console.warn('ALERT: C2B invalid checksum account reference', {
-        receipt: mpesa_receipt || null,
-        account_reference: normalizedRef || null,
-      });
+      log('warn', 'ALERT: C2B invalid checksum account reference');
       const updateRes = await pool.query(
         `
           UPDATE mpesa_c2b_payments
@@ -654,17 +728,14 @@ router.post('/callback', async (req, res) => {
       try {
         await applyRiskRules({ paymentId, reasonCodes: ['INVALID_CHECKSUM_REF'] });
       } catch (err) {
-        console.warn('Risk engine failed for invalid checksum reference:', err.message);
+        log('warn', 'Risk engine failed for invalid checksum reference', { error: err.message });
       }
-      return res.status(200).json({ ok: true });
+      return finish('QUARANTINED', { payment_id: paymentId, reason: 'INVALID_CHECKSUM_REF' });
     }
 
     const walletId = await resolveWalletByRef(normalizedRef);
     if (!walletId) {
-      console.warn('ALERT: C2B unknown account reference', {
-        receipt: mpesa_receipt || null,
-        account_reference: normalizedRef || null,
-      });
+      log('warn', 'ALERT: C2B unknown account reference');
       const updateRes = await pool.query(
         `
           UPDATE mpesa_c2b_payments
@@ -687,16 +758,16 @@ router.post('/callback', async (req, res) => {
       try {
         await applyRiskRules({ paymentId, reasonCodes: ['UNKNOWN_ACCOUNT_REF'] });
       } catch (err) {
-        console.warn('Risk engine failed for unknown account reference:', err.message);
+        log('warn', 'Risk engine failed for unknown account reference', { error: err.message });
       }
-      return res.status(200).json({ ok: true });
+      return finish('QUARANTINED', { payment_id: paymentId, reason: 'UNKNOWN_ACCOUNT_REF' });
     }
 
     let riskResult = null;
     try {
       riskResult = await applyRiskRules({ paymentId, reasonCodes: [] });
     } catch (err) {
-      console.warn('Risk engine failed for C2B payment:', err.message);
+      log('warn', 'Risk engine failed for C2B payment', { error: err.message });
     }
 
     if (riskResult && riskResult.risk_level === 'HIGH') {
@@ -719,7 +790,7 @@ router.post('/callback', async (req, res) => {
           [paybill_number || null, normalizedRef || null, amountNumber, phone_number || null, body]
         );
       }
-      return res.status(200).json({ ok: true });
+      return finish('QUARANTINED', { payment_id: paymentId, reason: 'HIGH_RISK' });
     }
 
     const sourceRef = mpesa_receipt || String(paymentId);
@@ -740,9 +811,9 @@ router.post('/callback', async (req, res) => {
       try {
         await applyRiskRules({ paymentId, reasonCodes: ['IDEMPOTENT_REPLAY'] });
       } catch (err) {
-        console.warn('Risk engine failed for idempotent replay:', err.message);
+        log('warn', 'Risk engine failed for idempotent replay', { error: err.message });
       }
-      return res.status(200).json({ ok: true });
+      return finish('ALREADY_CREDITED', { payment_id: paymentId });
     }
 
     const client = await pool.connect();
@@ -760,7 +831,7 @@ router.post('/callback', async (req, res) => {
       const lockedStatus = locked.rows[0]?.status;
       if (lockedStatus !== 'RECEIVED') {
         await client.query('ROLLBACK');
-        return res.status(200).json({ ok: true });
+        return finish('LOCKED_SKIP', { payment_id: paymentId, status: lockedStatus });
       }
       const result = await creditFareWithFeesByWalletId({
         walletId,
@@ -778,31 +849,48 @@ router.post('/callback', async (req, res) => {
       );
       if (!updated.rowCount) {
         await client.query('ROLLBACK');
-        return res.status(200).json({ ok: true });
+        return finish('LOCKED_SKIP', { payment_id: paymentId, status: lockedStatus || 'UNKNOWN' });
       }
       await client.query('COMMIT');
 
-      console.log(
-        `Wallet credited: walletId=${result.matatuWalletId}, before=${result.matatuBalanceBefore}, after=${result.matatuBalanceAfter}`
-      );
+      log('info', 'Wallet credited', {
+        wallet_id: result.matatuWalletId,
+        balance_before: result.matatuBalanceBefore,
+        balance_after: result.matatuBalanceAfter,
+        payment_id: paymentId,
+      });
+      return finish('CREDITED', { payment_id: paymentId, wallet_id: result.matatuWalletId });
     } catch (err) {
       await client.query('ROLLBACK');
-      console.error('Error crediting wallet for C2B:', err.message);
+      log('error', 'Error crediting wallet for C2B', { error: err.message });
       await pool.query(`UPDATE mpesa_c2b_payments SET status = 'REJECTED' WHERE id = $1 AND status = 'RECEIVED'`, [
         paymentId,
       ]);
-      return res.status(200).json({ ok: true });
+      return finish('REJECTED', { payment_id: paymentId, reason: err.message });
     } finally {
       client.release();
     }
-
-    return res.status(200).json({ ok: true });
   } catch (err) {
-    console.error('Error handling M-Pesa callback:', err.message);
-
-    return res.status(200).json({ ok: true });
+    log('error', 'Error handling M-Pesa callback', { error: err.message });
+    return finish('ERROR', { reason: err.message });
   }
-});
+}
+
+const handleC2BValidation = (req, res) => {
+  console.log('Received M-Pesa C2B validation:', JSON.stringify(req.body || {}));
+  return res.status(200).json({ ResultCode: 0, ResultDesc: 'Accepted' });
+};
+
+const handleC2BConfirmation = (req, res) => enqueueC2BProcessing(req, res, 'c2b_confirmation');
+
+router.post('/c2b/validation', handleC2BValidation);
+router.post('/c2b/confirmation', handleC2BConfirmation);
+
+// Aliases without "mpesa" for Safaricom validation rules
+router.post('/validation', handleC2BValidation);
+router.post('/confirmation', handleC2BConfirmation);
+
+router.post('/callback', (req, res) => enqueueC2BProcessing(req, res, 'direct_callback'));
 
 /**
  * POST /mpesa/b2c-result
