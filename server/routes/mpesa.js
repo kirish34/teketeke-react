@@ -482,6 +482,7 @@ async function handleC2BCallback(req, res) {
   const phone_number = parsed?.phone_number || null;
   const paybill_number = parsed?.paybill_number || null;
   const account_reference = parsed?.account_reference || null;
+  const msisdn = phone_number || 'unknown';
   const normalizedRef = normalizeRef(account_reference);
   const amountNumber = Number(amount);
   const amountValue = Number.isFinite(amountNumber) ? amountNumber : 0;
@@ -603,16 +604,16 @@ async function handleC2BCallback(req, res) {
                 raw = EXCLUDED.raw
           RETURNING id, status
         `,
-        [
-          paybill_number || null,
-          normalizedRef || null,
-          amountValue,
-          phone_number || null,
-          mpesa_receipt || null,
-          body,
-        ]
-      );
-      paymentId = upsertRes.rows[0].id;
+          [
+            paybill_number || null,
+            normalizedRef || null,
+            amountValue,
+            msisdn,
+            mpesa_receipt || null,
+            body,
+          ]
+        );
+        paymentId = upsertRes.rows[0].id;
       paymentStatus = upsertRes.rows[0].status;
     } else {
       const insertRes = await pool.query(
@@ -623,16 +624,16 @@ async function handleC2BCallback(req, res) {
             ($1, $2, $3, $4, $5, 'RECEIVED', $6)
           RETURNING id, status
         `,
-        [
-          paybill_number || null,
-          normalizedRef || null,
-          amountValue,
-          phone_number || null,
-          mpesa_receipt || null,
-          body,
-        ]
-      );
-      paymentId = insertRes.rows[0].id;
+          [
+            paybill_number || null,
+            normalizedRef || null,
+            amountValue,
+            msisdn,
+            mpesa_receipt || null,
+            body,
+          ]
+        );
+        paymentId = insertRes.rows[0].id;
       paymentStatus = insertRes.rows[0].status;
     }
 
