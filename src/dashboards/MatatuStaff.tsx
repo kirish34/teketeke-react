@@ -115,7 +115,7 @@ const MatatuStaffDashboard = () => {
     void loadTransactions()
     const timer = setInterval(() => {
       void loadTransactions()
-    }, 10000)
+    }, 5000)
     return () => clearInterval(timer)
   }, [loadTransactions, saccoId])
 
@@ -364,7 +364,7 @@ const MatatuStaffDashboard = () => {
         <section className="card">
           <div className="topline">
             <h3 style={{ margin: 0 }}>Live payments</h3>
-            <span className="muted small">Auto-refresh every 10 seconds</span>
+            <span className="muted small">Auto-refresh every 5 seconds</span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
             {liveTxs.length === 0 ? (
