@@ -324,12 +324,26 @@ router.get('/wallets/owner-ledger', async (req, res) => {
     const matatuRes = await pool.query(`SELECT id, sacco_id FROM matatus WHERE id = $1 LIMIT 1`, [matatuId]);
     const matatu = matatuRes.rows[0] || null;
     if (!matatu) return res.status(404).json({ ok: false, error: 'matatu not found' });
-    const roleName = String(role?.role || '').toUpperCase();
+
+    // Normalize/infer role context
+    let roleName = String(role?.role || '').toUpperCase();
+    let saccoId = role?.sacco_id || null;
+    let roleMatatuId = role?.matatu_id || null;
+    if ((roleName === 'SACCO_STAFF' || roleName === 'SACCO_ADMIN') && !saccoId && matatu.sacco_id) {
+      saccoId = matatu.sacco_id;
+    }
+    if (roleName === 'OWNER' && !roleMatatuId) {
+      roleMatatuId = matatu.id;
+    }
+
     const saccoScoped =
-      !!role?.sacco_id &&
+      !!saccoId &&
       !!matatu.sacco_id &&
-      String(role.sacco_id) === String(matatu.sacco_id) &&
+      String(saccoId) === String(matatu.sacco_id) &&
       ['SACCO_STAFF', 'SACCO_ADMIN', 'SYSTEM_ADMIN'].includes(roleName);
+    const ownerScoped =
+      roleName === 'OWNER' &&
+      (!!roleMatatuId ? String(roleMatatuId) === String(matatuId) : true);
 
     const kindRaw = String(req.query.wallet_kind || '').trim().toUpperCase();
     const walletKind = kindRaw && isMatatuOwnerWalletKind(kindRaw) ? kindRaw : null;
@@ -356,6 +370,7 @@ router.get('/wallets/owner-ledger', async (req, res) => {
       const enrichedWallet = { ...wallet, sacco_id: wallet.sacco_id || matatu.sacco_id || null };
       const allowed =
         saccoScoped ||
+        ownerScoped ||
         hasGrant ||
         (await canAccessWalletLedger(req.user?.id, enrichedWallet));
       if (allowed) allowedWallets.push(wallet);
