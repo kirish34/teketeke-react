@@ -19,7 +19,9 @@ try {
   parsedUrl = new URL(dbUrl);
   console.log('[db] using host', parsedUrl.hostname || 'unknown');
 } catch (err) {
-  throw new Error(`Invalid ${dbSource || 'database URL'} format: ${err.message || err}`);
+  throw new Error(
+    `Invalid ${dbSource || 'database URL'} format (${dbUrl}). Expected something like postgres://user:pass@host:5432/dbname. ${err.message || err}`
+  );
 }
 
 const pool = new Pool({
