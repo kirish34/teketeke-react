@@ -58,6 +58,20 @@ async function getStaffRole(userId) {
   return data || null;
 }
 
+async function hasOwnerAccessGrant(userId, matatuId) {
+  if (!userId || !matatuId) return false;
+  const { data, error } = await supabaseAdmin
+    .from('access_grants')
+    .select('user_id')
+    .eq('user_id', userId)
+    .eq('scope_type', 'OWNER')
+    .eq('scope_id', matatuId)
+    .eq('is_active', true)
+    .maybeSingle();
+  if (error) throw error;
+  return !!data;
+}
+
 async function matchesOwnerWallet({ role, wallet }) {
   if (!role?.matatu_id) return false;
   const walletMatatuId =
@@ -336,11 +350,13 @@ router.get('/wallets/owner-ledger', async (req, res) => {
     );
     const wallets = walletsRes.rows || [];
     const allowedWallets = [];
+    const hasGrant = await hasOwnerAccessGrant(req.user?.id, matatuId);
     for (const wallet of wallets) {
       // If wallet lacks sacco_id, fall back to the matatu's sacco for permission checks
       const enrichedWallet = { ...wallet, sacco_id: wallet.sacco_id || matatu.sacco_id || null };
       const allowed =
         saccoScoped ||
+        hasGrant ||
         (await canAccessWalletLedger(req.user?.id, enrichedWallet));
       if (allowed) allowedWallets.push(wallet);
     }
