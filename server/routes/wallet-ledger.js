@@ -291,7 +291,8 @@ router.get('/sacco/wallet-ledger', async (req, res) => {
 router.get('/wallets/owner-ledger', async (req, res) => {
   try {
     const role = await getUserRole(req.user?.id);
-    const matatuId = role?.matatu_id || null;
+    const requestedMatatuIdRaw = String(req.query.matatu_id || '').trim();
+    const matatuId = requestedMatatuIdRaw || role?.matatu_id || null;
     if (!matatuId) return res.status(403).json({ ok: false, error: 'forbidden' });
 
     const kindRaw = String(req.query.wallet_kind || '').trim().toUpperCase();
@@ -302,7 +303,7 @@ router.get('/wallets/owner-ledger', async (req, res) => {
 
     const walletsRes = await pool.query(
       `
-        SELECT id, wallet_kind, virtual_account_code, balance
+        SELECT id, wallet_kind, sacco_id, matatu_id, entity_type, entity_id, virtual_account_code, balance
         FROM wallets
         WHERE matatu_id = $1
           AND wallet_kind IN ('MATATU_OWNER','MATATU_VEHICLE')
@@ -312,8 +313,16 @@ router.get('/wallets/owner-ledger', async (req, res) => {
       [matatuId, walletKind],
     );
     const wallets = walletsRes.rows || [];
-    const results = [];
+    const allowedWallets = [];
     for (const wallet of wallets) {
+      const allowed = await canAccessWalletLedger(req.user?.id, wallet);
+      if (allowed) allowedWallets.push(wallet);
+    }
+
+    if (!allowedWallets.length) return res.status(403).json({ ok: false, error: 'forbidden' });
+
+    const results = [];
+    for (const wallet of allowedWallets) {
       const ledger = await fetchLedgerForWallet(wallet.id, { from, to, limit, offset });
       results.push({
         wallet_id: wallet.id,

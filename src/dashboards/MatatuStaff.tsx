@@ -21,6 +21,27 @@ type Tx = {
   created_by_name?: string
   created_by_email?: string
 }
+type LedgerRow = {
+  id?: string
+  wallet_id?: string
+  direction?: "CREDIT" | "DEBIT" | string
+  amount?: number
+  balance_before?: number
+  balance_after?: number
+  entry_type?: string
+  reference_type?: string
+  reference_id?: string
+  description?: string | null
+  created_at?: string
+}
+type LedgerWallet = {
+  wallet_id?: string
+  wallet_kind?: string
+  virtual_account_code?: string
+  balance?: number
+  total?: number
+  items?: LedgerRow[]
+}
 
 const fmtKES = (val?: number | null) => `KES ${(Number(val || 0)).toLocaleString("en-KE")}`
 const todayKey = () => new Date().toISOString().slice(0, 10)
@@ -39,6 +60,13 @@ const MatatuStaffDashboard = () => {
   const [txs, setTxs] = useState<Tx[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const ledgerStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const ledgerEnd = new Date().toISOString().slice(0, 10)
+  const [wallets, setWallets] = useState<LedgerWallet[]>([])
+  const [walletError, setWalletError] = useState<string | null>(null)
+  const [walletLoading, setWalletLoading] = useState(false)
+  const [ledgerFrom, setLedgerFrom] = useState(ledgerStart)
+  const [ledgerTo, setLedgerTo] = useState(ledgerEnd)
 
   const [manualAmount, setManualAmount] = useState("")
   const [manualNote, setManualNote] = useState("")
@@ -65,6 +93,29 @@ const MatatuStaffDashboard = () => {
       setError(err instanceof Error ? err.message : "Failed to load transactions")
     }
   }, [fetchJson, matatuId, saccoId])
+
+  const loadWallets = useCallback(async () => {
+    if (!matatuId) {
+      setWallets([])
+      return
+    }
+    setWalletLoading(true)
+    setWalletError(null)
+    try {
+      const params = new URLSearchParams()
+      params.set("limit", "100")
+      if (ledgerFrom) params.set("from", ledgerFrom)
+      if (ledgerTo) params.set("to", ledgerTo)
+      params.set("matatu_id", matatuId)
+      const res = await fetchJson<{ wallets?: LedgerWallet[] }>(`/api/wallets/owner-ledger?${params.toString()}`)
+      setWallets(res.wallets || [])
+    } catch (err) {
+      setWalletError(err instanceof Error ? err.message : "Failed to load wallets")
+      setWallets([])
+    } finally {
+      setWalletLoading(false)
+    }
+  }, [fetchJson, ledgerFrom, ledgerTo, matatuId])
 
   useEffect(() => {
     async function loadSaccos() {
@@ -113,11 +164,22 @@ const MatatuStaffDashboard = () => {
   useEffect(() => {
     if (!saccoId) return
     void loadTransactions()
+    if (activeTab === "overview") {
+      void loadWallets()
+    }
     const timer = setInterval(() => {
       void loadTransactions()
+      if (activeTab === "overview") {
+        void loadWallets()
+      }
     }, 5000)
     return () => clearInterval(timer)
-  }, [loadTransactions, saccoId])
+  }, [activeTab, loadTransactions, loadWallets, saccoId])
+
+  useEffect(() => {
+    if (activeTab !== "overview") return
+    void loadWallets()
+  }, [activeTab, loadWallets])
 
   useEffect(() => {
     void (async () => {
@@ -361,39 +423,122 @@ const MatatuStaffDashboard = () => {
       </nav>
 
       {activeTab === "overview" ? (
-        <section className="card">
-          <div className="topline">
-            <h3 style={{ margin: 0 }}>Live payments</h3>
-            <span className="muted small">Auto-refresh every 5 seconds</span>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
-            {liveTxs.length === 0 ? (
-              <div className="muted small">No payments yet.</div>
-            ) : (
-              liveTxs.map((tx) => {
-                const name =
-                  (tx.notes || "").trim() ||
-                  (tx.created_by_name || "").trim() ||
-                  (tx.created_by_email || "").trim() ||
-                  "Payer"
-                const phone = tx.passenger_msisdn || tx.msisdn || "-"
-                return (
-                  <div key={tx.id || tx.created_at} className="card" style={{ boxShadow: "none", border: "1px solid #e5e7eb" }}>
-                    <div className="row" style={{ alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                      <div>
-                        <div style={{ fontWeight: 600 }}>{name}</div>
-                        <div className="muted small">
-                          {phone} {tx.created_at ? `- ${new Date(tx.created_at).toLocaleTimeString()}` : ""}
+        <>
+          <section className="card">
+            <div className="topline" style={{ flexWrap: "wrap", gap: 8 }}>
+              <div>
+                <h3 style={{ margin: 0 }}>Wallets</h3>
+                <div className="muted small">Owner + vehicle wallets (auto-refresh 5 seconds)</div>
+              </div>
+              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                <label className="muted small">
+                  From
+                  <input type="date" value={ledgerFrom} onChange={(e) => setLedgerFrom(e.target.value)} />
+                </label>
+                <label className="muted small">
+                  To
+                  <input type="date" value={ledgerTo} onChange={(e) => setLedgerTo(e.target.value)} />
+                </label>
+                <button className="btn" type="button" onClick={() => loadWallets()}>
+                  Refresh
+                </button>
+                {walletLoading ? <span className="muted small">Loading...</span> : null}
+                {walletError ? <span className="err">{walletError}</span> : null}
+              </div>
+            </div>
+            <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12, marginTop: 12 }}>
+              {wallets.length === 0 ? (
+                <div className="muted small">No wallet entries yet.</div>
+              ) : (
+                wallets.map((wallet) => {
+                  const rows = (wallet.items || []).slice(0, 10)
+                  return (
+                    <div
+                      key={wallet.wallet_id || wallet.wallet_kind}
+                      className="table-wrap"
+                      style={{ border: "1px solid #e2e8f0", borderRadius: 8 }}
+                    >
+                      <div className="topline" style={{ padding: "8px 12px" }}>
+                        <div>
+                          <div className="muted small">{wallet.wallet_kind || "Wallet"}</div>
+                          <strong>{fmtKES(wallet.balance)}</strong>
+                          <div className="muted small">Account: {wallet.virtual_account_code || "-"}</div>
                         </div>
+                        <span className="muted small">Entries: {wallet.total || rows.length}</span>
                       </div>
-                      <div style={{ fontWeight: 700, color: "#0f172a" }}>{fmtKES(tx.fare_amount_kes)}</div>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Time</th>
+                            <th>Type</th>
+                            <th>Amount</th>
+                            <th>Balance</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.length === 0 ? (
+                            <tr>
+                              <td colSpan={4} className="muted">
+                                No ledger rows.
+                              </td>
+                            </tr>
+                          ) : (
+                            rows.map((row) => (
+                              <tr key={row.id || row.created_at}>
+                                <td className="muted small">
+                                  {row.created_at ? new Date(row.created_at).toLocaleTimeString() : "-"}
+                                </td>
+                                <td>{row.entry_type || row.direction || ""}</td>
+                                <td style={{ color: (row.direction || "").toUpperCase() === "CREDIT" ? "#15803d" : "#b91c1c" }}>
+                                  {fmtKES(row.amount)}
+                                </td>
+                                <td>{fmtKES(row.balance_after)}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
                     </div>
-                  </div>
-                )
-              })
-            )}
-          </div>
-        </section>
+                  )
+                })
+              )}
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="topline">
+              <h3 style={{ margin: 0 }}>Live payments</h3>
+              <span className="muted small">Auto-refresh every 5 seconds</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
+              {liveTxs.length === 0 ? (
+                <div className="muted small">No payments yet.</div>
+              ) : (
+                liveTxs.map((tx) => {
+                  const name =
+                    (tx.notes || "").trim() ||
+                    (tx.created_by_name || "").trim() ||
+                    (tx.created_by_email || "").trim() ||
+                    "Payer"
+                  const phone = tx.passenger_msisdn || tx.msisdn || "-"
+                  return (
+                    <div key={tx.id || tx.created_at} className="card" style={{ boxShadow: "none", border: "1px solid #e5e7eb" }}>
+                      <div className="row" style={{ alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                        <div>
+                          <div style={{ fontWeight: 600 }}>{name}</div>
+                          <div className="muted small">
+                            {phone} {tx.created_at ? `- ${new Date(tx.created_at).toLocaleTimeString()}` : ""}
+                          </div>
+                        </div>
+                        <div style={{ fontWeight: 700, color: "#0f172a" }}>{fmtKES(tx.fare_amount_kes)}</div>
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </section>
+        </>
       ) : null}
 
       {activeTab === "trips" ? (

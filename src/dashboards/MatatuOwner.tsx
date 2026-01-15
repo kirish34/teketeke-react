@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import DashboardShell from '../components/DashboardShell'
 import PaybillCodeCard from '../components/PaybillCodeCard'
 import PaybillHeader from '../components/PaybillHeader'
@@ -254,13 +254,6 @@ const MatatuOwnerDashboard = () => {
   useEffect(() => {
     setLoanHist({ loanId: null, items: [], total: 0, msg: 'Select a loan' })
   }, [currentId])
-
-  useEffect(() => {
-    if (activeTab === 'overview') {
-      void loadOwnerLedger()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, currentId])
 
   useEffect(() => {
     async function loadVehicles() {
@@ -742,7 +735,7 @@ const MatatuOwnerDashboard = () => {
   const baseInspectionDate = toDateInput(currentVehicle?.inspection_expiry_date)
   const complianceDirty = insuranceDate !== baseInsuranceDate || inspectionDate !== baseInspectionDate
 
-  async function loadOwnerLedger() {
+  const loadOwnerLedger = useCallback(async () => {
     setLedgerLoading(true)
     setLedgerError(null)
     try {
@@ -750,6 +743,7 @@ const MatatuOwnerDashboard = () => {
       params.set('limit', '200')
       if (ledgerFrom) params.set('from', ledgerFrom)
       if (ledgerTo) params.set('to', ledgerTo)
+      if (currentId) params.set('matatu_id', currentId)
       const res = await fetchJson<{ wallets?: LedgerWallet[] }>(`/api/wallets/owner-ledger?${params.toString()}`)
       setLedgerWallets(res.wallets || [])
     } catch (err) {
@@ -757,7 +751,20 @@ const MatatuOwnerDashboard = () => {
     } finally {
       setLedgerLoading(false)
     }
-  }
+  }, [currentId, ledgerFrom, ledgerTo])
+
+  useEffect(() => {
+    if (activeTab !== 'overview') return
+    void loadOwnerLedger()
+  }, [activeTab, loadOwnerLedger])
+
+  useEffect(() => {
+    if (activeTab !== 'overview') return
+    const timer = setInterval(() => {
+      void loadOwnerLedger()
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [activeTab, loadOwnerLedger])
 
   function exportOwnerLedgerCsv(wallet: LedgerWallet) {
     if (!wallet.items?.length) return
@@ -857,6 +864,10 @@ const MatatuOwnerDashboard = () => {
               <div>
                 <h3 style={{ margin: 0 }}>Wallet statements</h3>
                 <div className="muted small">Owner + vehicle wallet ledger (read-only)</div>
+                <div className="muted small">
+                  PayBill 4814003 • Owner Account {paybillCodes.owner || '-'} • Vehicle Account{' '}
+                  {paybillCodes.vehicle || '-'}
+                </div>
               </div>
               <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
                 <label className="muted small">
