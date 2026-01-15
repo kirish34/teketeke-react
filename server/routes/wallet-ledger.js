@@ -365,6 +365,16 @@ router.get('/wallets/owner-ledger', async (req, res) => {
     const wallets = walletsRes.rows || [];
     const allowedWallets = [];
     const hasGrant = await hasOwnerAccessGrant(req.user?.id, matatuId);
+    const debugCtx = {
+      user_id: req.user?.id || null,
+      role: roleName || null,
+      sacco_id: saccoId || null,
+      matatu_id: matatuId,
+      saccoScoped,
+      ownerScoped,
+      hasGrant,
+      wallet_count: wallets.length,
+    };
     for (const wallet of wallets) {
       // If wallet lacks sacco_id, fall back to the matatu's sacco for permission checks
       const enrichedWallet = { ...wallet, sacco_id: wallet.sacco_id || matatu.sacco_id || null };
@@ -376,7 +386,10 @@ router.get('/wallets/owner-ledger', async (req, res) => {
       if (allowed) allowedWallets.push(wallet);
     }
 
-    if (!allowedWallets.length) return res.status(403).json({ ok: false, error: 'forbidden' });
+    if (!allowedWallets.length) {
+      console.warn('[wallet-ledger] forbidden', debugCtx);
+      return res.status(403).json({ ok: false, error: 'forbidden' });
+    }
 
     const results = [];
     for (const wallet of allowedWallets) {
