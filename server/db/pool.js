@@ -3,7 +3,7 @@
 require('dotenv').config();
 const { Pool } = require('pg');
 
-const dbUrl = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
+let dbUrl = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
 const dbSource = process.env.DATABASE_URL
   ? 'DATABASE_URL'
   : process.env.SUPABASE_DB_URL
@@ -16,6 +16,11 @@ if (!dbUrl) {
 
 let parsedUrl;
 try {
+  // Some providers use "postgresql://" which Node's URL parser rejects; normalize it.
+  if (dbUrl.startsWith('postgresql://')) {
+    dbUrl = dbUrl.replace('postgresql://', 'postgres://');
+  }
+
   parsedUrl = new URL(dbUrl);
   console.log('[db] using host', parsedUrl.hostname || 'unknown');
 } catch (err) {
