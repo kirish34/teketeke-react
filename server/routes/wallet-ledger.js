@@ -47,6 +47,17 @@ async function getUserRole(userId) {
   return data || null;
 }
 
+async function getStaffRole(userId) {
+  if (!userId) return null;
+  const { data, error } = await supabaseAdmin
+    .from('staff_profiles')
+    .select('role,sacco_id,matatu_id')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
 async function matchesOwnerWallet({ role, wallet }) {
   if (!role?.matatu_id) return false;
   const walletMatatuId =
@@ -290,7 +301,7 @@ router.get('/sacco/wallet-ledger', async (req, res) => {
 
 router.get('/wallets/owner-ledger', async (req, res) => {
   try {
-    const role = await getUserRole(req.user?.id);
+    const role = (await getUserRole(req.user?.id)) || (await getStaffRole(req.user?.id));
     const requestedMatatuIdRaw = String(req.query.matatu_id || '').trim();
     const matatuId = requestedMatatuIdRaw || role?.matatu_id || null;
     if (!matatuId) return res.status(403).json({ ok: false, error: 'forbidden' });
@@ -299,6 +310,12 @@ router.get('/wallets/owner-ledger', async (req, res) => {
     const matatuRes = await pool.query(`SELECT id, sacco_id FROM matatus WHERE id = $1 LIMIT 1`, [matatuId]);
     const matatu = matatuRes.rows[0] || null;
     if (!matatu) return res.status(404).json({ ok: false, error: 'matatu not found' });
+    const roleName = String(role?.role || '').toUpperCase();
+    const saccoScoped =
+      !!role?.sacco_id &&
+      !!matatu.sacco_id &&
+      String(role.sacco_id) === String(matatu.sacco_id) &&
+      ['SACCO_STAFF', 'SACCO_ADMIN', 'SYSTEM_ADMIN'].includes(roleName);
 
     const kindRaw = String(req.query.wallet_kind || '').trim().toUpperCase();
     const walletKind = kindRaw && isMatatuOwnerWalletKind(kindRaw) ? kindRaw : null;
@@ -322,7 +339,9 @@ router.get('/wallets/owner-ledger', async (req, res) => {
     for (const wallet of wallets) {
       // If wallet lacks sacco_id, fall back to the matatu's sacco for permission checks
       const enrichedWallet = { ...wallet, sacco_id: wallet.sacco_id || matatu.sacco_id || null };
-      const allowed = await canAccessWalletLedger(req.user?.id, enrichedWallet);
+      const allowed =
+        saccoScoped ||
+        (await canAccessWalletLedger(req.user?.id, enrichedWallet));
       if (allowed) allowedWallets.push(wallet);
     }
 
