@@ -295,6 +295,11 @@ router.get('/wallets/owner-ledger', async (req, res) => {
     const matatuId = requestedMatatuIdRaw || role?.matatu_id || null;
     if (!matatuId) return res.status(403).json({ ok: false, error: 'forbidden' });
 
+    // Resolve matatu's sacco_id to use for permission checks when wallets lack sacco_id
+    const matatuRes = await pool.query(`SELECT id, sacco_id FROM matatus WHERE id = $1 LIMIT 1`, [matatuId]);
+    const matatu = matatuRes.rows[0] || null;
+    if (!matatu) return res.status(404).json({ ok: false, error: 'matatu not found' });
+
     const kindRaw = String(req.query.wallet_kind || '').trim().toUpperCase();
     const walletKind = kindRaw && isMatatuOwnerWalletKind(kindRaw) ? kindRaw : null;
     const { from, to, error } = normalizeDateBounds(req.query.from, req.query.to);
@@ -315,7 +320,9 @@ router.get('/wallets/owner-ledger', async (req, res) => {
     const wallets = walletsRes.rows || [];
     const allowedWallets = [];
     for (const wallet of wallets) {
-      const allowed = await canAccessWalletLedger(req.user?.id, wallet);
+      // If wallet lacks sacco_id, fall back to the matatu's sacco for permission checks
+      const enrichedWallet = { ...wallet, sacco_id: wallet.sacco_id || matatu.sacco_id || null };
+      const allowed = await canAccessWalletLedger(req.user?.id, enrichedWallet);
       if (allowed) allowedWallets.push(wallet);
     }
 
