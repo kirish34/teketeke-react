@@ -8,6 +8,13 @@ if (!dbUrl) {
   throw new Error('DATABASE_URL is not set in .env');
 }
 
+try {
+  const host = new URL(dbUrl).hostname;
+  console.log('[db] using host', host || 'unknown');
+} catch (err) {
+  console.warn('[db] failed to parse DATABASE_URL host', err.message || String(err));
+}
+
 const pool = new Pool({
   connectionString: dbUrl,
   ssl: {
