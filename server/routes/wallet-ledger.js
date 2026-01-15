@@ -64,9 +64,9 @@ async function hasOwnerAccessGrant(userId, matatuId) {
     .from('access_grants')
     .select('user_id')
     .eq('user_id', userId)
-    .eq('scope_type', 'OWNER')
     .eq('scope_id', matatuId)
     .eq('is_active', true)
+    .in('scope_type', ['OWNER', 'MATATU'])
     .maybeSingle();
   if (error) throw error;
   return !!data;
@@ -341,6 +341,7 @@ router.get('/wallets/owner-ledger', async (req, res) => {
       !!matatu.sacco_id &&
       String(saccoId) === String(matatu.sacco_id) &&
       ['SACCO_STAFF', 'SACCO_ADMIN', 'SYSTEM_ADMIN'].includes(roleName);
+    const superUser = roleName === 'SYSTEM_ADMIN';
     const ownerScoped =
       roleName === 'OWNER' &&
       (!!roleMatatuId ? String(roleMatatuId) === String(matatuId) : true);
@@ -380,6 +381,7 @@ router.get('/wallets/owner-ledger', async (req, res) => {
       // If wallet lacks sacco_id, fall back to the matatu's sacco for permission checks
       const enrichedWallet = { ...wallet, sacco_id: wallet.sacco_id || matatu.sacco_id || null };
       const allowed =
+        superUser ||
         saccoScoped ||
         ownerScoped ||
         hasGrant ||
