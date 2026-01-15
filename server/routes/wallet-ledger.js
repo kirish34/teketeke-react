@@ -375,6 +375,7 @@ router.get('/wallets/owner-ledger', async (req, res) => {
       hasGrant,
       wallet_count: wallets.length,
     };
+    console.log('[wallet-ledger] access ctx', debugCtx);
     for (const wallet of wallets) {
       // If wallet lacks sacco_id, fall back to the matatu's sacco for permission checks
       const enrichedWallet = { ...wallet, sacco_id: wallet.sacco_id || matatu.sacco_id || null };
