@@ -8,6 +8,7 @@ const { validatePaybillCode } = require('../wallet/paybillCode.util');
 const { applyRiskRules } = require('../mpesa/c2bRisk');
 const { insertPayoutEvent, updateBatchStatusFromItems } = require('../services/saccoPayouts.service');
 const { createOpsAlert } = require('../services/opsAlerts.service');
+const { normalizeMsisdn, maskMsisdn } = require('../utils/msisdn');
 
 const C2B_ACK = { ResultCode: 0, ResultDesc: 'Accepted' };
 const EXPECTED_PAYBILL = process.env.MPESA_C2B_SHORTCODE || process.env.DARAJA_SHORTCODE || null;
@@ -111,7 +112,17 @@ function respondC2bAck(res) {
   }
 }
 
-async function upsertC2bPaymentQuarantine({ paybill_number, account_reference, amountValue, msisdn, mpesa_receipt, body }) {
+async function upsertC2bPaymentQuarantine({
+  paybill_number,
+  account_reference,
+  amountValue,
+  msisdn,
+  msisdn_normalized,
+  display_msisdn,
+  msisdn_source,
+  mpesa_receipt,
+  body,
+}) {
   if (!mpesa_receipt) return { id: null, status: null };
 
   const existing = await pool.query(
@@ -129,12 +140,26 @@ async function upsertC2bPaymentQuarantine({ paybill_number, account_reference, a
             account_reference = $2,
             amount = $3,
             msisdn = $4,
-            raw = $5,
-            status = $6
-        WHERE receipt = $7
+            msisdn_normalized = $5,
+            display_msisdn = $6,
+            msisdn_source = $7,
+            raw = $8,
+            status = $9
+        WHERE receipt = $10
         RETURNING id, status
       `,
-      [paybill_number || null, account_reference || null, amountValue, msisdn, body, nextStatus, mpesa_receipt]
+      [
+        paybill_number || null,
+        account_reference || null,
+        amountValue,
+        msisdn,
+        msisdn_normalized || null,
+        display_msisdn || null,
+        msisdn_source || null,
+        body,
+        nextStatus,
+        mpesa_receipt,
+      ]
     );
     return res.rows[0] || { id: null, status: null };
   }
@@ -142,17 +167,37 @@ async function upsertC2bPaymentQuarantine({ paybill_number, account_reference, a
   const insertRes = await pool.query(
     `
       INSERT INTO mpesa_c2b_payments
-        (paybill_number, account_reference, amount, msisdn, receipt, status, raw)
+        (paybill_number, account_reference, amount, msisdn, msisdn_normalized, display_msisdn, msisdn_source, receipt, status, raw)
       VALUES
-        ($1, $2, $3, $4, $5, 'QUARANTINED', $6)
+        ($1, $2, $3, $4, $5, $6, $7, $8, 'QUARANTINED', $9)
       RETURNING id, status
     `,
-    [paybill_number || null, account_reference || null, amountValue, msisdn, mpesa_receipt, body]
+    [
+      paybill_number || null,
+      account_reference || null,
+      amountValue,
+      msisdn,
+      msisdn_normalized || null,
+      display_msisdn || null,
+      msisdn_source || null,
+      mpesa_receipt,
+      body,
+    ]
   );
   return insertRes.rows[0] || { id: null, status: null };
 }
 
-async function upsertC2bPaymentReceived({ paybill_number, account_reference, amountValue, msisdn, mpesa_receipt, body }) {
+async function upsertC2bPaymentReceived({
+  paybill_number,
+  account_reference,
+  amountValue,
+  msisdn,
+  msisdn_normalized,
+  display_msisdn,
+  msisdn_source,
+  mpesa_receipt,
+  body,
+}) {
   if (!mpesa_receipt) return { id: null, status: null };
 
   const existing = await pool.query(
@@ -168,11 +213,24 @@ async function upsertC2bPaymentReceived({ paybill_number, account_reference, amo
             account_reference = $2,
             amount = $3,
             msisdn = $4,
-            raw = $5
-        WHERE receipt = $6
+            msisdn_normalized = $5,
+            display_msisdn = $6,
+            msisdn_source = $7,
+            raw = $8
+        WHERE receipt = $9
         RETURNING id, status
       `,
-      [paybill_number || null, account_reference || null, amountValue, msisdn, body, mpesa_receipt]
+      [
+        paybill_number || null,
+        account_reference || null,
+        amountValue,
+        msisdn,
+        msisdn_normalized || null,
+        display_msisdn || null,
+        msisdn_source || null,
+        body,
+        mpesa_receipt,
+      ]
     );
     return res.rows[0] || { id: null, status: null };
   }
@@ -180,12 +238,22 @@ async function upsertC2bPaymentReceived({ paybill_number, account_reference, amo
   const insertRes = await pool.query(
     `
       INSERT INTO mpesa_c2b_payments
-        (paybill_number, account_reference, amount, msisdn, receipt, status, raw)
+        (paybill_number, account_reference, amount, msisdn, msisdn_normalized, display_msisdn, msisdn_source, receipt, status, raw)
       VALUES
-        ($1, $2, $3, $4, $5, 'RECEIVED', $6)
+        ($1, $2, $3, $4, $5, $6, $7, $8, 'RECEIVED', $9)
       RETURNING id, status
     `,
-    [paybill_number || null, account_reference || null, amountValue, msisdn, mpesa_receipt, body]
+    [
+      paybill_number || null,
+      account_reference || null,
+      amountValue,
+      msisdn,
+      msisdn_normalized || null,
+      display_msisdn || null,
+      msisdn_source || null,
+      mpesa_receipt,
+      body,
+    ]
   );
   return insertRes.rows[0] || { id: null, status: null };
 }
@@ -561,7 +629,11 @@ async function handleC2BCallback(req, res) {
   const phone_number = parsed?.phone_number || null;
   const paybill_number = parsed?.paybill_number || null;
   const account_reference = parsed?.account_reference || null;
-  const msisdn = phone_number || 'unknown';
+  const msisdn_raw = phone_number || null;
+  const msisdn_normalized = normalizeMsisdn(msisdn_raw);
+  const display_msisdn = maskMsisdn(msisdn_normalized);
+  const msisdn = msisdn_normalized || null;
+  const msisdn_source = msisdn_raw ? 'mpesa' : 'missing';
   const normalizedRef = normalizeRef(account_reference);
   const amountNumber = Number(amount);
   const amountValue = Number.isFinite(amountNumber) ? amountNumber : 0;
@@ -598,6 +670,9 @@ async function handleC2BCallback(req, res) {
           account_reference: normalizedRef,
           amountValue,
           msisdn,
+          msisdn_source,
+          msisdn_normalized,
+          display_msisdn,
           mpesa_receipt,
           body,
         });
@@ -607,9 +682,9 @@ async function handleC2BCallback(req, res) {
         const insertRes = await pool.query(
           `
             INSERT INTO mpesa_c2b_payments
-              (paybill_number, account_reference, amount, msisdn, receipt, status, raw)
+              (paybill_number, account_reference, amount, msisdn, msisdn_normalized, display_msisdn, msisdn_source, receipt, status, raw)
             VALUES
-              ($1, $2, $3, $4, $5, 'QUARANTINED', $6)
+              ($1, $2, $3, $4, $5, $6, $7, $8, 'QUARANTINED', $9)
             RETURNING id, status
           `,
           [
@@ -617,6 +692,9 @@ async function handleC2BCallback(req, res) {
             normalizedRef || null,
             amountValue,
             msisdn,
+            msisdn_normalized || null,
+            display_msisdn || null,
+            msisdn_source || null,
             mpesa_receipt || null,
             body,
           ]
@@ -676,6 +754,9 @@ async function handleC2BCallback(req, res) {
         account_reference: normalizedRef,
         amountValue,
         msisdn,
+        msisdn_source,
+        msisdn_normalized,
+        display_msisdn,
         mpesa_receipt,
         body,
       });
@@ -685,9 +766,9 @@ async function handleC2BCallback(req, res) {
       const insertRes = await pool.query(
         `
           INSERT INTO mpesa_c2b_payments
-            (paybill_number, account_reference, amount, msisdn, receipt, status, raw)
+            (paybill_number, account_reference, amount, msisdn, msisdn_normalized, display_msisdn, msisdn_source, receipt, status, raw)
           VALUES
-            ($1, $2, $3, $4, $5, 'RECEIVED', $6)
+            ($1, $2, $3, $4, $5, $6, $7, $8, 'RECEIVED', $9)
           RETURNING id, status
         `,
           [
@@ -695,6 +776,9 @@ async function handleC2BCallback(req, res) {
             normalizedRef || null,
             amountValue,
             msisdn,
+            msisdn_normalized || null,
+            display_msisdn || null,
+            msisdn_source || null,
             mpesa_receipt || null,
             body,
           ]

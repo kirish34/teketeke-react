@@ -70,8 +70,9 @@ type WithdrawalInlineEdit = {
 type C2bPaymentRow = {
   id?: string
   receipt?: string
-  msisdn?: string
+  display_msisdn_safe?: string
   display_msisdn?: string
+  msisdn_normalized?: string | null
   amount?: number
   paybill_number?: string
   account_reference?: string
@@ -3748,7 +3749,7 @@ const SystemDashboard = () => {
     const headers: CsvHeader[] = [
       { key: 'id', label: 'ID' },
       { key: 'receipt', label: 'M-Pesa Receipt' },
-      { key: 'msisdn', label: 'Phone' },
+      { key: 'display_msisdn_safe', label: 'Phone' },
       { key: 'amount', label: 'Amount' },
       { key: 'paybill_number', label: 'Paybill' },
       { key: 'account_reference', label: 'Account' },
@@ -3758,7 +3759,7 @@ const SystemDashboard = () => {
     const rows: CsvRow[] = c2bRows.map((row) => ({
       id: row.id || '',
       receipt: row.receipt || '',
-      msisdn: row.msisdn || '',
+      display_msisdn_safe: row.display_msisdn_safe || row.display_msisdn || 'Unknown',
       amount: row.amount ?? 0,
       paybill_number: row.paybill_number || '',
       account_reference: row.account_reference || '',
@@ -7952,7 +7953,7 @@ const SystemDashboard = () => {
                           {row.created_at ? new Date(row.created_at).toLocaleString() : '-'}
                         </td>
                         <td className="mono">{row.receipt || row.id || '-'}</td>
-                        <td>{row.display_msisdn || row.msisdn || '-'}</td>
+                        <td>{row.display_msisdn_safe || row.display_msisdn || 'Unknown'}</td>
                         <td>{formatKes(row.amount)}</td>
                         <td>{row.paybill_number || '-'}</td>
                         <td className="mono">{row.account_reference || '-'}</td>
@@ -9029,7 +9030,7 @@ const SystemDashboard = () => {
                           {row.created_at ? new Date(row.created_at).toLocaleString() : '-'}
                         </td>
                         <td className="mono">{row.receipt || row.id || '-'}</td>
-                        <td>{row.msisdn || '-'}</td>
+                        <td>{row.display_msisdn_safe || row.display_msisdn || 'Unknown'}</td>
                         <td>{formatKes(row.amount)}</td>
                         <td className="mono">{row.account_reference || '-'}</td>
                         <td>

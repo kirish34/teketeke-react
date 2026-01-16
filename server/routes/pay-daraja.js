@@ -5,6 +5,7 @@ const pool = require('../db/pool');
 const { creditFareWithFeesByWalletId } = require('../wallet/wallet.service');
 const { normalizeRef, isPlateRef, resolveWalletByRef } = require('../wallet/wallet.aliases');
 const { applyRiskRules } = require('../mpesa/c2bRisk');
+const { normalizeMsisdn, maskMsisdn, extractMsisdnFromRaw } = require('../utils/msisdn');
 const router = express.Router();
 const WEBHOOK_SECRET = process.env.DARAJA_WEBHOOK_SECRET || null;
 
@@ -84,16 +85,30 @@ router.post('/stk', async (req,res)=>{
     const j = await r.json();
     if(!r.ok) return res.status(500).json(j);
     const checkoutRequestId = j.CheckoutRequestID || null;
+    const normalizedMsisdn = normalizeMsisdn(phone);
+    const displayMsisdn = maskMsisdn(normalizedMsisdn);
+    const msisdnSource = phone ? 'mpesa' : 'missing';
+
     if (checkoutRequestId) {
       try {
         await pool.query(
           `
             INSERT INTO mpesa_c2b_payments
-              (paybill_number, account_reference, amount, msisdn, receipt, status, raw, checkout_request_id)
+              (paybill_number, account_reference, amount, msisdn, msisdn_normalized, display_msisdn, msisdn_source, receipt, status, raw, checkout_request_id)
             VALUES
-              ($1, $2, $3, $4, null, 'RECEIVED', $5, $6)
+              ($1, $2, $3, $4, $5, $6, $7, null, 'RECEIVED', $8, $9)
           `,
-          [shortcode || null, plateRef, Number(amount || 0), phone || null, { request: payload, response: j }, checkoutRequestId]
+          [
+            shortcode || null,
+            plateRef,
+            Number(amount || 0),
+            normalizedMsisdn || null,
+            normalizedMsisdn || null,
+            displayMsisdn || null,
+            msisdnSource,
+            { request: payload, response: j },
+            checkoutRequestId,
+          ]
         );
       } catch (err) {
         console.warn('Failed to record STK request:', err.message);
@@ -129,7 +144,10 @@ router.post('/stk/callback', async (req,res)=>{
 
     const receipt = getItem('MpesaReceiptNumber') || null;
     const amount  = Number(getItem('Amount') || 0);
-    const msisdn  = String(getItem('PhoneNumber') || '');
+    const msisdnRaw  = String(getItem('PhoneNumber') || '');
+    const normalizedMsisdn = normalizeMsisdn(msisdnRaw);
+    const displayMsisdn = maskMsisdn(normalizedMsisdn);
+    const msisdnSource = msisdnRaw ? 'mpesa' : 'missing';
 
     let paymentRow = null;
     if (checkoutRequestId) {
@@ -160,12 +178,15 @@ router.post('/stk/callback', async (req,res)=>{
           const insertRes = await pool.query(
             `
               INSERT INTO mpesa_c2b_payments
-                (receipt, msisdn, amount, status, raw, checkout_request_id)
+                (receipt, msisdn, msisdn_normalized, display_msisdn, msisdn_source, amount, status, raw, checkout_request_id)
               VALUES
-                ($1, $2, $3, 'QUARANTINED', $4, $5)
+                ($1, $2, $3, $4, $5, $6, 'QUARANTINED', $7, $8)
               ON CONFLICT (checkout_request_id) DO UPDATE
                 SET receipt = COALESCE(EXCLUDED.receipt, mpesa_c2b_payments.receipt),
                     msisdn = COALESCE(EXCLUDED.msisdn, mpesa_c2b_payments.msisdn),
+                    msisdn_normalized = COALESCE(EXCLUDED.msisdn_normalized, mpesa_c2b_payments.msisdn_normalized),
+                    display_msisdn = COALESCE(EXCLUDED.display_msisdn, mpesa_c2b_payments.display_msisdn),
+                    msisdn_source = COALESCE(EXCLUDED.msisdn_source, mpesa_c2b_payments.msisdn_source),
                     amount = COALESCE(EXCLUDED.amount, mpesa_c2b_payments.amount),
                     raw = EXCLUDED.raw,
                     status = CASE
@@ -174,7 +195,16 @@ router.post('/stk/callback', async (req,res)=>{
                     END
               RETURNING id, status
             `,
-            [receipt, msisdn || null, amount, mergedRaw, checkoutRequestId]
+            [
+              receipt,
+              normalizedMsisdn || null,
+              normalizedMsisdn || null,
+              displayMsisdn || null,
+              msisdnSource,
+              amount,
+              mergedRaw,
+              checkoutRequestId,
+            ]
           );
           paymentId = insertRes.rows[0]?.id || null;
           paymentStatus = insertRes.rows[0]?.status || null;
@@ -182,12 +212,21 @@ router.post('/stk/callback', async (req,res)=>{
           const insertRes = await pool.query(
             `
               INSERT INTO mpesa_c2b_payments
-                (receipt, msisdn, amount, status, raw, checkout_request_id)
+                (receipt, msisdn, msisdn_normalized, display_msisdn, msisdn_source, amount, status, raw, checkout_request_id)
               VALUES
-                ($1, $2, $3, 'QUARANTINED', $4, $5)
+                ($1, $2, $3, $4, $5, $6, 'QUARANTINED', $7, $8)
               RETURNING id, status
             `,
-            [receipt, msisdn || null, amount, mergedRaw, null]
+            [
+              receipt,
+              normalizedMsisdn || null,
+              normalizedMsisdn || null,
+              displayMsisdn || null,
+              msisdnSource,
+              amount,
+              mergedRaw,
+              null,
+            ]
           );
           paymentId = insertRes.rows[0]?.id || null;
           paymentStatus = insertRes.rows[0]?.status || null;
@@ -226,28 +265,44 @@ router.post('/stk/callback', async (req,res)=>{
           UPDATE mpesa_c2b_payments
           SET receipt = COALESCE($1, receipt),
               msisdn = COALESCE($2, msisdn),
-              amount = COALESCE($3, amount),
+              msisdn_normalized = COALESCE($3, msisdn_normalized),
+              display_msisdn = COALESCE($4, display_msisdn),
+              msisdn_source = COALESCE($5, msisdn_source),
+              amount = COALESCE($6, amount),
               status = CASE
                 WHEN status IN ('CREDITED', 'REJECTED', 'QUARANTINED') THEN status
-                ELSE $4
+                ELSE $7
               END,
-              raw = $5
-          WHERE id = $6
+              raw = $8
+          WHERE id = $9
           RETURNING id, account_reference, status, raw
         `,
-        [receipt, msisdn || null, amount, nextStatus, mergedRaw, paymentRow.id]
+        [
+          receipt,
+          normalizedMsisdn || null,
+          normalizedMsisdn || null,
+          displayMsisdn || null,
+          msisdnSource,
+          amount,
+          nextStatus,
+          mergedRaw,
+          paymentRow.id,
+        ]
       );
       paymentRow = updateRes.rows[0] || paymentRow;
     } else if (checkoutRequestId) {
       const insertRes = await pool.query(
         `
           INSERT INTO mpesa_c2b_payments
-            (receipt, msisdn, amount, status, raw, checkout_request_id)
+            (receipt, msisdn, msisdn_normalized, display_msisdn, msisdn_source, amount, status, raw, checkout_request_id)
           VALUES
-            ($1, $2, $3, $4, $5, $6)
+            ($1, $2, $3, $4, $5, $6, $7, $8, $9)
           ON CONFLICT (checkout_request_id) DO UPDATE
             SET receipt = COALESCE(EXCLUDED.receipt, mpesa_c2b_payments.receipt),
                 msisdn = COALESCE(EXCLUDED.msisdn, mpesa_c2b_payments.msisdn),
+                msisdn_normalized = COALESCE(EXCLUDED.msisdn_normalized, mpesa_c2b_payments.msisdn_normalized),
+                display_msisdn = COALESCE(EXCLUDED.display_msisdn, mpesa_c2b_payments.display_msisdn),
+                msisdn_source = COALESCE(EXCLUDED.msisdn_source, mpesa_c2b_payments.msisdn_source),
                 amount = COALESCE(EXCLUDED.amount, mpesa_c2b_payments.amount),
                 raw = EXCLUDED.raw,
                 status = CASE
@@ -256,7 +311,17 @@ router.post('/stk/callback', async (req,res)=>{
                 END
           RETURNING id, account_reference, status, raw
         `,
-        [receipt, msisdn || null, amount, resultCode === 0 ? 'RECEIVED' : 'REJECTED', mergedRaw, checkoutRequestId]
+        [
+          receipt,
+          normalizedMsisdn || null,
+          normalizedMsisdn || null,
+          displayMsisdn || null,
+          msisdnSource,
+          amount,
+          resultCode === 0 ? 'RECEIVED' : 'REJECTED',
+          mergedRaw,
+          checkoutRequestId,
+        ]
       );
       paymentRow = insertRes.rows[0];
     }

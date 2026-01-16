@@ -1,27 +1,30 @@
 const express = require('express');
 const pool = require('../db/pool');
-const { supabaseAdmin } = require('../supabase');
 const { requireUser } = require('../middleware/auth');
 
 const router = express.Router();
 
-if (!supabaseAdmin) {
-  throw new Error('SUPABASE_SERVICE_ROLE_KEY is required to serve wallet ledger endpoints');
-}
-
 router.use(requireUser);
 
+const ROLES = {
+  SYSTEM_ADMIN: 'SYSTEM_ADMIN',
+  SACCO_ADMIN: 'SACCO_ADMIN',
+  SACCO_STAFF: 'SACCO_STAFF',
+  OWNER: 'OWNER',
+  MATATU_STAFF: 'MATATU_STAFF',
+  DRIVER: 'DRIVER',
+};
+
 // Normalize role aliases so access checks can apply consistent guardrails.
-function normalizeRoleName(role, row = null) {
+function normalizeRoleName(role) {
   const raw = String(role || '').trim().toUpperCase();
   if (!raw) return null;
-  if (raw === 'MATATU_OWNER' || raw === 'OWNER') return 'OWNER';
-  if (raw === 'SACCO' || raw === 'SACCO_ADMIN') return 'SACCO_ADMIN';
-  if (raw === 'SACCO_STAFF') return 'SACCO_STAFF';
-  if (raw === 'STAFF') return row?.sacco_id ? 'SACCO_STAFF' : 'STAFF';
-  if (raw === 'SYSTEM_ADMIN') return 'SYSTEM_ADMIN';
-  if (raw === 'BODA' || raw === 'BODABODA') return 'BODA';
-  if (raw === 'TAXI') return 'TAXI';
+  if (raw === 'MATATU_OWNER' || raw === 'OWNER') return ROLES.OWNER;
+  if (raw === 'SACCO' || raw === 'SACCO_ADMIN') return ROLES.SACCO_ADMIN;
+  if (raw === 'SACCO_STAFF') return ROLES.SACCO_STAFF;
+  if (raw === 'MATATU_STAFF') return ROLES.MATATU_STAFF;
+  if (raw === 'DRIVER') return ROLES.DRIVER;
+  if (raw === 'SYSTEM_ADMIN') return ROLES.SYSTEM_ADMIN;
   return raw;
 }
 
@@ -50,171 +53,45 @@ function normalizeDateBounds(fromRaw, toRaw) {
   return { from, to, error: null };
 }
 
-async function isSystemAdmin(userId) {
-  if (!userId) return false;
-  const { data, error } = await supabaseAdmin
-    .from('staff_profiles')
-    .select('role')
-    .eq('user_id', userId)
-    .maybeSingle();
-  if (error) throw error;
-  return normalizeRoleName(data?.role) === 'SYSTEM_ADMIN';
-}
-
-async function getUserRole(userId) {
+async function resolveUserContext(userId) {
   if (!userId) return null;
-  const { data, error } = await supabaseAdmin
-    .from('user_roles')
-    .select('role,sacco_id,matatu_id')
-    .eq('user_id', userId)
-    .maybeSingle();
-  if (error) throw error;
-  return data || null;
-}
-
-async function getStaffRole(userId) {
-  if (!userId) return null;
-  const { data, error } = await supabaseAdmin
-    .from('staff_profiles')
-    .select('role,sacco_id,matatu_id,phone,name')
-    .eq('user_id', userId)
-    .maybeSingle();
-  if (error) throw error;
-  return data || null;
-}
-
-async function resolveRoleRow(userId) {
-  const userRole = await getUserRole(userId);
-  if (userRole) return userRole;
-  return getStaffRole(userId);
-}
-
-async function hasOwnerAccessGrant(userId, matatuId) {
-  if (!userId || !matatuId) return false;
-  const { data, error } = await supabaseAdmin
-    .from('access_grants')
-    .select('user_id')
-    .eq('user_id', userId)
-    .eq('scope_id', matatuId)
-    .eq('is_active', true)
-    .in('scope_type', ['OWNER', 'MATATU'])
-    .maybeSingle();
-  if (error) throw error;
-  return !!data;
-}
-
-async function matchesOwnerWallet({ role, wallet }) {
-  if (!role?.matatu_id) return false;
-  const walletMatatuId =
-    wallet.matatu_id ||
-    (['MATATU', 'TAXI', 'BODA', 'BODABODA'].includes(String(wallet.entity_type || '').toUpperCase())
-      ? wallet.entity_id
-      : null);
-  if (!walletMatatuId) return false;
-
-  const baseRes = await pool.query(
-    `SELECT owner_name, owner_phone FROM matatus WHERE id = $1 LIMIT 1`,
-    [role.matatu_id],
-  );
-  const targetRes = await pool.query(
-    `SELECT owner_name, owner_phone FROM matatus WHERE id = $1 LIMIT 1`,
-    [walletMatatuId],
-  );
-  const base = baseRes.rows[0];
-  const target = targetRes.rows[0];
-  if (!base || !target) return false;
-
-  const basePhone = String(base.owner_phone || '').trim();
-  const targetPhone = String(target.owner_phone || '').trim();
-  if (basePhone && targetPhone && basePhone === targetPhone) return true;
-
-  const baseName = String(base.owner_name || '').trim().toLowerCase();
-  const targetName = String(target.owner_name || '').trim().toLowerCase();
-  if (baseName && targetName && baseName === targetName) return true;
-
-  return false;
-}
-
-async function loadMatatuBasic(matatuId) {
-  if (!matatuId) return null;
-  const res = await pool.query(
-    `SELECT id, sacco_id, number_plate, owner_name, owner_phone FROM matatus WHERE id = $1 LIMIT 1`,
-    [matatuId],
-  );
-  return res.rows[0] || null;
-}
-
-async function findMatatuByOwnerContact({ phone, name }) {
-  const phoneValue = String(phone || '').trim();
-  const nameValue = String(name || '').trim();
-  if (!phoneValue && !nameValue) return null;
-  // Match by owner phone/name to let owners with missing matatu_id recover context without broadening scope.
   const res = await pool.query(
     `
-      SELECT id, sacco_id, number_plate, owner_name, owner_phone
-      FROM matatus
-      WHERE (($1::text IS NOT NULL AND owner_phone = $1)
-        OR ($2::text IS NOT NULL AND LOWER(owner_name) = LOWER($2)))
-      ORDER BY created_at DESC
+      SELECT effective_role, sacco_id, matatu_id
+      FROM public.app_user_context
+      WHERE user_id = $1
       LIMIT 1
     `,
-    [phoneValue || null, nameValue || null],
+    [userId],
   );
-  return res.rows[0] || null;
+  const row = res.rows[0];
+  if (!row) return null;
+  const role = normalizeRoleName(row.effective_role);
+  return {
+    role,
+    saccoId: row.sacco_id || null,
+    matatuId: row.matatu_id || null,
+  };
 }
 
-async function canAccessWalletLedger(userId, wallet) {
-  if (!userId || !wallet) return false;
-  if (await isSystemAdmin(userId)) return true;
+function walletMatatuId(wallet) {
+  if (!wallet) return null;
+  if (wallet.matatu_id) return wallet.matatu_id;
+  const et = String(wallet.entity_type || '').toUpperCase();
+  if (['MATATU', 'TAXI', 'BODA', 'BODABODA'].includes(et)) return wallet.entity_id || null;
+  return null;
+}
 
-  const role = (await getUserRole(userId)) || (await getStaffRole(userId));
-  if (!role) return false;
-
-  const roleName = normalizeRoleName(role.role, role);
-  const walletMatatuId =
-    wallet.matatu_id ||
-    (['MATATU', 'TAXI', 'BODA', 'BODABODA'].includes(String(wallet.entity_type || '').toUpperCase())
-      ? wallet.entity_id
-      : null);
-  const saccoMatch =
-    ['SACCO_ADMIN', 'SACCO_STAFF'].includes(roleName) &&
-    role.sacco_id &&
-    wallet.sacco_id &&
-    String(role.sacco_id) === String(wallet.sacco_id);
-  if (saccoMatch) {
-    logWalletAuthDebug({
-      user_id: userId,
-      role: roleName,
-      reason: 'sacco_match',
-      wallet_id: wallet.id || null,
-      sacco_id: wallet.sacco_id || null,
-    });
-    return true;
+function canAccessWalletWithContext(userCtx, wallet) {
+  if (!userCtx || !userCtx.role || !wallet) return false;
+  if (userCtx.role === ROLES.SYSTEM_ADMIN) return true;
+  const matatuId = walletMatatuId(wallet);
+  if ([ROLES.SACCO_ADMIN, ROLES.SACCO_STAFF].includes(userCtx.role)) {
+    return userCtx.saccoId && wallet.sacco_id && String(userCtx.saccoId) === String(wallet.sacco_id);
   }
-
-  if (walletMatatuId && role.matatu_id && String(role.matatu_id) === String(walletMatatuId)) {
-    logWalletAuthDebug({
-      user_id: userId,
-      role: roleName,
-      reason: 'matatu_match',
-      wallet_id: wallet.id || null,
-      matatu_id: walletMatatuId,
-    });
-    return true;
+  if ([ROLES.OWNER, ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx.role)) {
+    return matatuId && userCtx.matatuId && String(userCtx.matatuId) === String(matatuId);
   }
-
-  if (roleName === 'OWNER') {
-    const allowed = await matchesOwnerWallet({ role, wallet });
-    logWalletAuthDebug({
-      user_id: userId,
-      role: roleName,
-      reason: allowed ? 'owner_match' : 'owner_no_match',
-      wallet_id: wallet.id || null,
-      matatu_id: walletMatatuId || null,
-    });
-    return allowed;
-  }
-
   return false;
 }
 
@@ -276,6 +153,12 @@ router.get('/wallets/:id/ledger', async (req, res) => {
   if (error) return res.status(400).json({ ok: false, error });
 
   try {
+    const userCtx = await resolveUserContext(req.user?.id);
+    if (!userCtx || !userCtx.role) {
+      logWalletAuthDebug({ user_id: req.user?.id || null, reason: 'missing_context' });
+      return res.status(403).json({ ok: false, error: 'forbidden' });
+    }
+
     const walletRes = await pool.query(
       `
         SELECT id, sacco_id, matatu_id, entity_type, entity_id
@@ -288,8 +171,18 @@ router.get('/wallets/:id/ledger', async (req, res) => {
     if (!walletRes.rows.length) return res.status(404).json({ ok: false, error: 'wallet not found' });
     const wallet = walletRes.rows[0];
 
-    const allowed = await canAccessWalletLedger(req.user?.id, wallet);
-    if (!allowed) return res.status(403).json({ ok: false, error: 'forbidden' });
+    const allowed = canAccessWalletWithContext(userCtx, wallet);
+    if (!allowed) {
+      logWalletAuthDebug({
+        user_id: req.user?.id || null,
+        role: userCtx.role,
+        sacco_id: userCtx.saccoId || null,
+        matatu_id: userCtx.matatuId || null,
+        wallet_id: wallet.id,
+        reason: 'wallet_scope_mismatch',
+      });
+      return res.status(403).json({ ok: false, error: 'forbidden' });
+    }
 
     const result = await fetchLedgerForWallet(walletId, { from, to, limit, offset });
     return res.json({ ok: true, wallet_id: walletId, total: result.total, items: result.items });
@@ -303,8 +196,10 @@ router.get('/admin/wallet-ledger', async (req, res) => {
   if (!walletId) return res.status(400).json({ ok: false, error: 'wallet_id required' });
 
   try {
-    const isAdmin = await isSystemAdmin(req.user?.id);
-    if (!isAdmin) return res.status(403).json({ ok: false, error: 'forbidden' });
+    const userCtx = await resolveUserContext(req.user?.id);
+    if (!userCtx || userCtx.role !== ROLES.SYSTEM_ADMIN) {
+      return res.status(403).json({ ok: false, error: 'forbidden' });
+    }
 
     const walletRes = await pool.query(
       `SELECT id, wallet_kind, sacco_id, virtual_account_code FROM wallets WHERE id = $1 LIMIT 1`,
@@ -339,23 +234,28 @@ function isMatatuOwnerWalletKind(value) {
   return ['MATATU_OWNER', 'MATATU_VEHICLE'].includes(normalized);
 }
 
-async function resolveSaccoIdForUser(userId) {
-  const role = await getUserRole(userId);
-  if (role?.sacco_id) return role.sacco_id;
-  if (!userId) return null;
-  const { data, error } = await supabaseAdmin
-    .from('staff_profiles')
-    .select('sacco_id')
-    .eq('user_id', userId)
-    .maybeSingle();
-  if (error) throw error;
-  return data?.sacco_id || null;
-}
-
 router.get('/sacco/wallet-ledger', async (req, res) => {
   try {
-    const saccoId = await resolveSaccoIdForUser(req.user?.id);
-    if (!saccoId) return res.status(403).json({ ok: false, error: 'forbidden' });
+    const requestedSaccoId = String(req.query.sacco_id || '').trim();
+    if (!requestedSaccoId) return res.status(400).json({ ok: false, error: 'sacco_id required' });
+
+    const userCtx = await resolveUserContext(req.user?.id);
+    if (!userCtx || !userCtx.role) return res.status(403).json({ ok: false, error: 'forbidden' });
+    const saccoAllowed =
+      userCtx.role === ROLES.SYSTEM_ADMIN ||
+      ([ROLES.SACCO_ADMIN, ROLES.SACCO_STAFF].includes(userCtx.role) &&
+        userCtx.saccoId &&
+        String(userCtx.saccoId) === String(requestedSaccoId));
+    if (!saccoAllowed) {
+      logWalletAuthDebug({
+        user_id: req.user?.id || null,
+        role: userCtx.role,
+        sacco_id: userCtx.saccoId || null,
+        requested_sacco_id: requestedSaccoId,
+        reason: 'sacco_scope_mismatch',
+      });
+      return res.status(403).json({ ok: false, error: 'forbidden' });
+    }
 
     const kindRaw = String(req.query.wallet_kind || '').trim().toUpperCase();
     const walletKind = kindRaw && isSaccoWalletKind(kindRaw) ? kindRaw : null;
@@ -372,7 +272,7 @@ router.get('/sacco/wallet-ledger', async (req, res) => {
           AND ($2::text IS NULL OR wallet_kind = $2)
         ORDER BY wallet_kind
       `,
-      [saccoId, walletKind],
+      [requestedSaccoId, walletKind],
     );
     const wallets = walletsRes.rows || [];
     const results = [];
@@ -390,7 +290,7 @@ router.get('/sacco/wallet-ledger', async (req, res) => {
 
     return res.json({
       ok: true,
-      sacco_id: saccoId,
+      sacco_id: requestedSaccoId,
       wallet_kind: walletKind,
       wallets: results,
     });
@@ -401,80 +301,47 @@ router.get('/sacco/wallet-ledger', async (req, res) => {
 
 router.get('/wallets/owner-ledger', async (req, res) => {
   try {
-    const userId = req.user?.id;
-    const userRole = (await getUserRole(userId)) || null;
-    const staffRole = (await getStaffRole(userId)) || null;
-    const effectiveRole = userRole || staffRole;
-    if (!effectiveRole) {
-      logWalletAuthDebug({ user_id: userId || null, reason: 'missing_role' });
-      return res.status(403).json({ ok: false, error: 'forbidden' });
-    }
-
-    const roleName = normalizeRoleName(effectiveRole.role, effectiveRole);
-    if (!roleName) {
-      logWalletAuthDebug({ user_id: userId || null, reason: 'missing_role_normalized' });
+    const userCtx = await resolveUserContext(req.user?.id);
+    if (!userCtx || !userCtx.role) {
+      logWalletAuthDebug({ user_id: req.user?.id || null, reason: 'missing_context' });
       return res.status(403).json({ ok: false, error: 'forbidden' });
     }
 
     const requestedMatatuIdRaw = String(req.query.matatu_id || '').trim();
-    const roleMatatuId = effectiveRole?.matatu_id || null;
-    let matatuId = requestedMatatuIdRaw || roleMatatuId || null;
-
-    let baseMatatu = roleMatatuId ? await loadMatatuBasic(roleMatatuId) : null;
-
-    if (!matatuId && roleName === 'OWNER' && (staffRole?.phone || staffRole?.name)) {
-      const inferred = await findMatatuByOwnerContact({
-        phone: staffRole?.phone,
-        name: staffRole?.name,
-      });
-      if (inferred) {
-        matatuId = String(inferred.id);
-        baseMatatu = inferred;
-      }
-    }
-
+    const matatuId = requestedMatatuIdRaw || userCtx.matatuId || null;
     if (!matatuId) {
-      logWalletAuthDebug({ user_id: userId || null, role: roleName, reason: 'missing_matatu_id' });
+      logWalletAuthDebug({ user_id: req.user?.id || null, role: userCtx.role, reason: 'missing_matatu_id' });
       return res.status(403).json({ ok: false, error: 'forbidden' });
     }
 
-    // Resolve matatu's sacco_id to use for permission checks when wallets lack sacco_id
     const matatuRes = await pool.query(
-      `SELECT id, sacco_id, owner_name, owner_phone FROM matatus WHERE id = $1 LIMIT 1`,
+      `SELECT id, sacco_id FROM matatus WHERE id = $1 LIMIT 1`,
       [matatuId],
     );
     const matatu = matatuRes.rows[0] || null;
     if (!matatu) return res.status(404).json({ ok: false, error: 'matatu not found' });
 
-    // Normalize/infer role context
-    const saccoIdFromRole = effectiveRole?.sacco_id || null;
-    let saccoId = saccoIdFromRole || null;
-    if ((roleName === 'SACCO_STAFF' || roleName === 'SACCO_ADMIN') && !saccoId && matatu.sacco_id) {
-      saccoId = matatu.sacco_id;
+    const roleAllowsMatatu =
+      userCtx.role === ROLES.SYSTEM_ADMIN ||
+      ([ROLES.SACCO_ADMIN, ROLES.SACCO_STAFF].includes(userCtx.role) &&
+        userCtx.saccoId &&
+        matatu.sacco_id &&
+        String(userCtx.saccoId) === String(matatu.sacco_id)) ||
+      ([ROLES.OWNER, ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx.role) &&
+        userCtx.matatuId &&
+        String(userCtx.matatuId) === String(matatu.id));
+
+    if (!roleAllowsMatatu) {
+      logWalletAuthDebug({
+        user_id: req.user?.id || null,
+        role: userCtx.role,
+        sacco_id: userCtx.saccoId || null,
+        matatu_id: userCtx.matatuId || null,
+        requested_matatu_id: matatuId,
+        reason: 'matatu_scope_mismatch',
+      });
+      return res.status(403).json({ ok: false, error: 'forbidden' });
     }
-
-    // Owners only gain scoped access when we can tie them to the vehicle via phone/name or explicit matatu_id.
-    const ownerContactMatch =
-      roleName === 'OWNER' &&
-      !!baseMatatu &&
-      ((baseMatatu.owner_phone &&
-        matatu.owner_phone &&
-        String(baseMatatu.owner_phone) === String(matatu.owner_phone)) ||
-        (baseMatatu.owner_name &&
-          matatu.owner_name &&
-          String(baseMatatu.owner_name).trim().toLowerCase() ===
-            String(matatu.owner_name).trim().toLowerCase()));
-
-    const saccoScoped =
-      !!saccoId &&
-      !!matatu.sacco_id &&
-      String(saccoId) === String(matatu.sacco_id) &&
-      ['SACCO_STAFF', 'SACCO_ADMIN', 'SYSTEM_ADMIN'].includes(roleName);
-    const superUser = roleName === 'SYSTEM_ADMIN';
-    const ownerScoped =
-      roleName === 'OWNER' &&
-      (!!roleMatatuId ? String(roleMatatuId) === String(matatu.id) : ownerContactMatch);
-    const hasGrant = await hasOwnerAccessGrant(userId, matatu.id);
 
     const kindRaw = String(req.query.wallet_kind || '').trim().toUpperCase();
     const walletKind = kindRaw && isMatatuOwnerWalletKind(kindRaw) ? kindRaw : null;
@@ -494,37 +361,20 @@ router.get('/wallets/owner-ledger', async (req, res) => {
       [matatuId, walletKind],
     );
     const wallets = walletsRes.rows || [];
-    const allowedWallets = [];
-    const debugCtx = {
-      user_id: userId || null,
-      role_row: effectiveRole,
-      role: roleName || null,
-      sacco_id: saccoId || null,
-      matatu_id: matatuId,
-      saccoScoped,
-      ownerScoped,
-      ownerContactMatch,
-      hasGrant,
-      wallet_count: wallets.length,
-    };
-    for (const wallet of wallets) {
-      // If wallet lacks sacco_id, fall back to the matatu's sacco for permission checks
-      const enrichedWallet = { ...wallet, sacco_id: wallet.sacco_id || matatu.sacco_id || null };
-      const allowed =
-        superUser ||
-        saccoScoped ||
-        ownerScoped ||
-        hasGrant ||
-        (await canAccessWalletLedger(userId, enrichedWallet));
-      if (allowed) allowedWallets.push(wallet);
-    }
+    const allowedWallets = wallets.filter((wallet) =>
+      canAccessWalletWithContext(userCtx, { ...wallet, sacco_id: wallet.sacco_id || matatu.sacco_id || null }),
+    );
 
     if (!allowedWallets.length) {
-      logWalletAuthDebug({ ...debugCtx, allowed_wallet_count: 0 });
+      logWalletAuthDebug({
+        user_id: req.user?.id || null,
+        role: userCtx.role,
+        matatu_id: matatuId,
+        wallet_count: wallets.length,
+        allowed_wallet_count: 0,
+      });
       return res.status(403).json({ ok: false, error: 'forbidden' });
     }
-
-    logWalletAuthDebug({ ...debugCtx, allowed_wallet_count: allowedWallets.length });
 
     const results = [];
     for (const wallet of allowedWallets) {
@@ -552,9 +402,8 @@ router.get('/wallets/owner-ledger', async (req, res) => {
 
 router.__test = {
   normalizeRoleName,
-  canAccessWalletLedger,
-  matchesOwnerWallet,
-  resolveRoleRow,
+  resolveUserContext,
+  canAccessWalletWithContext,
 };
 
 module.exports = router;
