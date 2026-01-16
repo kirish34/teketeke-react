@@ -632,7 +632,7 @@ async function handleC2BCallback(req, res) {
   const msisdn_raw = phone_number || null;
   const msisdn_normalized = normalizeMsisdn(msisdn_raw);
   const display_msisdn = maskMsisdn(msisdn_normalized);
-  const msisdn = msisdn_normalized || null;
+  const msisdn = msisdn_normalized || msisdn_raw || 'unknown';
   const msisdn_source = msisdn_raw ? 'mpesa' : 'missing';
   const normalizedRef = normalizeRef(account_reference);
   const amountNumber = Number(amount);

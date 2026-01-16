@@ -88,6 +88,7 @@ router.post('/stk', async (req,res)=>{
     const normalizedMsisdn = normalizeMsisdn(phone);
     const displayMsisdn = maskMsisdn(normalizedMsisdn);
     const msisdnSource = phone ? 'mpesa' : 'missing';
+    const msisdnValue = normalizedMsisdn || phone || 'unknown';
 
     if (checkoutRequestId) {
       try {
@@ -102,7 +103,7 @@ router.post('/stk', async (req,res)=>{
             shortcode || null,
             plateRef,
             Number(amount || 0),
-            normalizedMsisdn || null,
+            msisdnValue,
             normalizedMsisdn || null,
             displayMsisdn || null,
             msisdnSource,
@@ -148,6 +149,7 @@ router.post('/stk/callback', async (req,res)=>{
     const normalizedMsisdn = normalizeMsisdn(msisdnRaw);
     const displayMsisdn = maskMsisdn(normalizedMsisdn);
     const msisdnSource = msisdnRaw ? 'mpesa' : 'missing';
+    const msisdnValue = normalizedMsisdn || msisdnRaw || 'unknown';
 
     let paymentRow = null;
     if (checkoutRequestId) {
@@ -197,7 +199,7 @@ router.post('/stk/callback', async (req,res)=>{
             `,
             [
               receipt,
-              normalizedMsisdn || null,
+              msisdnValue,
               normalizedMsisdn || null,
               displayMsisdn || null,
               msisdnSource,
@@ -219,7 +221,7 @@ router.post('/stk/callback', async (req,res)=>{
             `,
             [
               receipt,
-              normalizedMsisdn || null,
+              msisdnValue,
               normalizedMsisdn || null,
               displayMsisdn || null,
               msisdnSource,
@@ -313,7 +315,7 @@ router.post('/stk/callback', async (req,res)=>{
         `,
         [
           receipt,
-          normalizedMsisdn || null,
+          msisdnValue,
           normalizedMsisdn || null,
           displayMsisdn || null,
           msisdnSource,
