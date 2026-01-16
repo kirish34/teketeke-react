@@ -124,6 +124,7 @@ app.use('/api', skipMpesa(registryRouter));
 app.use('/api', skipMpesa(telemetryRouter));
 app.use('/api', skipMpesa(darajaB2CRouter));
 app.use('/api', skipMpesa(payoutReadinessRouter));
+app.use('/api/auth', require('./routes/auth'));
 app.use('/api/sacco', require('./routes/sacco-payouts'));
 app.use('/api', skipMpesa(walletLedgerRouter));
 app.use('/test', require('./routes/wallet'));

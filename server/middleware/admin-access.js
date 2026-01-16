@@ -1,5 +1,5 @@
-const { supaForToken } = require('./auth');
-const { supabaseAnon } = require('../supabase');
+const { supaForToken, debugAuth } = require('./auth');
+const { supabaseAdmin } = require('../supabase');
 
 /**
  * Allows access if:
@@ -21,14 +21,16 @@ async function requireAdminAccess(req, res, next) {
   }
 
   try {
-    const { data, error } = await supabaseAnon.auth.getUser(headerToken);
+    const { data, error } = await supabaseAdmin.auth.getUser(headerToken);
     if (error || !data?.user) {
+      debugAuth({ token_length: headerToken.length, reason: 'admin_invalid' });
       return res.status(401).json({ error: 'unauthorized' });
     }
     req.user = data.user;
     req.supa = supaForToken(headerToken);
     return next();
   } catch (e) {
+    debugAuth({ token_length: headerToken.length, reason: 'admin_exception', error: e?.message });
     return res.status(401).json({ error: 'unauthorized' });
   }
 }

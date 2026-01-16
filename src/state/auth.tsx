@@ -28,7 +28,7 @@ function mapRole(role?: string | null): Role | null {
 }
 
 async function fetchProfile(token?: string | null): Promise<SessionUser> {
-  const res = await authFetch("/u/me", {
+  const res = await authFetch("/api/auth/me", {
     headers: {
       Accept: "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -39,14 +39,14 @@ async function fetchProfile(token?: string | null): Promise<SessionUser> {
     throw new Error(text || res.statusText || "Failed to load profile");
   }
   const data = (await res.json()) as any;
-  const role = mapRole(data.role);
+  const role = mapRole(data.context?.effective_role || data.role);
   if (!role) throw new Error("No role assigned to this account");
   return {
-    id: data.id || "",
-    email: data.email || null,
+    id: data.user?.id || data.id || "",
+    email: data.user?.email || data.email || null,
     role,
-    sacco_id: data.sacco_id ?? null,
-    matatu_id: data.matatu_id ?? null,
+    sacco_id: data.context?.sacco_id ?? data.sacco_id ?? null,
+    matatu_id: data.context?.matatu_id ?? data.matatu_id ?? null,
   };
 }
 
@@ -117,7 +117,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     refreshProfile();
   }, [refreshProfile]);
 
-  // Do not clear auth storage on refresh; keep session unless user explicitly logs out.
+  // Keep session refreshed and synced with Supabase auth events
+  useEffect(() => {
+    const client = ensureSupabaseClient();
+    if (!client) return;
+    const { data: subscription } = client.auth.onAuthStateChange((event, session) => {
+      const nextToken = session?.access_token || null;
+      if (nextToken) {
+        persistToken(nextToken);
+        setToken(nextToken);
+        if (event === "TOKEN_REFRESHED" || event === "SIGNED_IN") {
+          void refreshProfile();
+        }
+      } else if (event === "SIGNED_OUT") {
+        clearAuthStorage();
+        setUser(null);
+        setToken(null);
+      }
+    });
+    return () => {
+      subscription?.subscription?.unsubscribe();
+    };
+  }, [refreshProfile]);
 
   const value = useMemo<AuthCtx>(
     () => ({
