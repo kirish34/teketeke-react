@@ -4306,17 +4306,10 @@ const SystemDashboard = () => {
     }
   }
 
-  useEffect(() => {
-    async function bootstrap() {
-      void refreshOverview()
-      fetchList<SaccoRow>('/api/admin/saccos')
-        .then((rows) => setSaccos(rows))
-        .catch((err) => setSaccosError(err instanceof Error ? err.message : String(err)))
-      fetchList<VehicleRow>('/api/admin/matatus')
-        .then((rows) => setMatatus(rows))
-        .catch((err) => console.warn('matatu load failed', err))
-      await loadPaybillAliases()
-      Promise.all([
+  const refreshFinance = useCallback(async () => {
+    try {
+      setFinanceError(null)
+      const [todayTotals, weekTotals, monthTotals] = await Promise.all([
         fetchJson<PlatformTotals>(
           '/api/admin/platform-overview?from=' + getRange('today').from + '&to=' + getRange('today').to,
         ).catch(() => null),
@@ -4327,10 +4320,23 @@ const SystemDashboard = () => {
           '/api/admin/platform-overview?from=' + getRange('month').from + '&to=' + getRange('month').to,
         ).catch(() => null),
       ])
-        .then(([todayTotals, weekTotals, monthTotals]) =>
-          setFinance({ today: todayTotals || undefined, week: weekTotals || undefined, month: monthTotals || undefined }),
-        )
-        .catch((err) => setFinanceError(err instanceof Error ? err.message : String(err)))
+      setFinance({ today: todayTotals || undefined, week: weekTotals || undefined, month: monthTotals || undefined })
+    } catch (err) {
+      setFinanceError(err instanceof Error ? err.message : String(err))
+    }
+  }, [])
+
+  useEffect(() => {
+    async function bootstrap() {
+      void refreshOverview()
+      fetchList<SaccoRow>('/api/admin/saccos')
+        .then((rows) => setSaccos(rows))
+        .catch((err) => setSaccosError(err instanceof Error ? err.message : String(err)))
+      fetchList<VehicleRow>('/api/admin/matatus')
+        .then((rows) => setMatatus(rows))
+        .catch((err) => console.warn('matatu load failed', err))
+      await loadPaybillAliases()
+      await refreshFinance()
 
       await loadSaccoSummary('month')
       await loadWithdrawals('', getRange('month'))
@@ -4349,7 +4355,13 @@ const SystemDashboard = () => {
       await loadLogins()
     }
     void bootstrap()
-  }, [])
+  }, [refreshFinance])
+
+  useEffect(() => {
+    if (activeTab === 'finance') {
+      void refreshFinance()
+    }
+  }, [activeTab, refreshFinance])
 
   const counts = overview?.counts || {}
   const pool = overview?.ussd_pool || {}
