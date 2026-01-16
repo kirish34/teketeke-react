@@ -117,17 +117,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     refreshProfile();
   }, [refreshProfile]);
 
-  useEffect(() => {
-    const handleLeave = () => {
-      clearAuthStorage();
-    };
-    window.addEventListener("pagehide", handleLeave);
-    window.addEventListener("beforeunload", handleLeave);
-    return () => {
-      window.removeEventListener("pagehide", handleLeave);
-      window.removeEventListener("beforeunload", handleLeave);
-    };
-  }, []);
+  // Do not clear auth storage on refresh; keep session unless user explicitly logs out.
 
   const value = useMemo<AuthCtx>(
     () => ({
