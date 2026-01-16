@@ -60,6 +60,21 @@ function extractMsisdnFromRaw(raw) {
       if (payload.Result[k]) candidates.push(payload.Result[k]);
     });
   }
+  const cbItems =
+    payload?.Body?.stkCallback?.CallbackMetadata?.Item ||
+    payload?.stkCallback?.CallbackMetadata?.Item ||
+    payload?.CallbackMetadata?.Item ||
+    payload?.Result?.CallbackMetadata?.Item ||
+    null;
+  if (Array.isArray(cbItems)) {
+    cbItems.forEach((item) => {
+      if (!item || typeof item !== 'object') return;
+      const name = String(item.Name || item.name || '').toLowerCase();
+      if (name === 'phonenumber' || name === 'msisdn' || name === 'phone') {
+        candidates.push(item.Value || item.value || null);
+      }
+    });
+  }
   for (const candidate of candidates) {
     const norm = normalizeMsisdnDisplay(candidate);
     if (norm) return norm;

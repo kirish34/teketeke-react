@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react'
-import { useEffect } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../state/auth'
 
@@ -32,16 +31,6 @@ export const navLinks: Array<{ to: string; label: string; allow: string[] }> = [
 export function DashboardShell({ title, subtitle, actions, nav, navLabel, hideShellChrome, hideNav, children }: Props) {
   const { user, logout, loading, error } = useAuth()
   const navigate = useNavigate()
-
-  useEffect(() => {
-    const handleLeave = () => {
-      logout().catch(() => {})
-    }
-    window.addEventListener('beforeunload', handleLeave)
-    return () => {
-      window.removeEventListener('beforeunload', handleLeave)
-    }
-  }, [logout])
 
   const visibleLinks = user ? navLinks.filter((l) => l.allow.includes(user.role)) : navLinks
 
