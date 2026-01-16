@@ -131,7 +131,9 @@ type ReconciliationCombinedRow = {
 type QuarantineRow = {
   id?: string
   receipt?: string
-  msisdn?: string
+  display_msisdn_safe?: string
+  display_msisdn?: string
+  msisdn_normalized?: string | null
   amount?: number
   paybill_number?: string
   account_reference?: string
