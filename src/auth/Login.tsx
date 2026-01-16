@@ -75,23 +75,6 @@ export function Login() {
     }
   }, []);
 
-  useEffect(() => {
-    if (!supabase) return;
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.access_token && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED")) {
-        persistToken(session.access_token);
-        await refreshProfile();
-        setStatus(session.user?.email ? `Signed in as ${session.user.email}` : "Signed in");
-        redirect();
-      } else if (event === "SIGNED_OUT") {
-        setStatus("Not signed in");
-      }
-    });
-    return () => subscription.unsubscribe();
-  }, [refreshProfile, redirect, supabase]);
-
   const handlePasswordSignIn = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault();
