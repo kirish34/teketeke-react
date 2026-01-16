@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import DashboardShell from '../components/DashboardShell'
 import PaybillCodeCard from '../components/PaybillCodeCard'
@@ -3542,7 +3542,7 @@ const SystemDashboard = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
 
-  async function loadWallet(code: string) {
+  const loadWallet = useCallback(async (code: string, opts?: { keepAuto?: boolean }) => {
     const clean = code.trim()
     if (!clean) return
     setWalletError(null)
@@ -3553,20 +3553,24 @@ const SystemDashboard = () => {
       )
       setWalletSummary(summary.wallet || (summary as unknown as WalletSummary))
       setWalletTx(tx.transactions || tx.data || [])
-      setWalletAutoRefreshCode(clean)
+      if (!opts?.keepAuto) {
+        setWalletAutoRefreshCode(clean)
+      }
     } catch (err) {
       setWalletSummary(null)
       setWalletTx([])
       setWalletError(err instanceof Error ? err.message : String(err))
-      setWalletAutoRefreshCode('')
+      if (!opts?.keepAuto) {
+        setWalletAutoRefreshCode('')
+      }
     }
-  }
+  }, [])
 
   // Auto-refresh the inspected wallet every 5 seconds so admins see fresh balances/ledger entries.
   useEffect(() => {
     if (!walletAutoRefreshCode) return
     const id = window.setInterval(() => {
-      void loadWallet(walletAutoRefreshCode)
+      void loadWallet(walletAutoRefreshCode, { keepAuto: true })
     }, 5000)
     return () => window.clearInterval(id)
   }, [walletAutoRefreshCode])
