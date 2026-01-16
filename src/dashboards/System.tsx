@@ -71,6 +71,7 @@ type C2bPaymentRow = {
   id?: string
   receipt?: string
   msisdn?: string
+  display_msisdn?: string
   amount?: number
   paybill_number?: string
   account_reference?: string
