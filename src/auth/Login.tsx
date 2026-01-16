@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
-import { ensureSupabaseClient, persistToken, signOutEverywhere } from "../lib/auth";
+import { ensureSupabaseClient, signOutEverywhere } from "../lib/auth";
 import { env } from "../lib/env";
 import { useAuth } from "../state/auth";
 
@@ -21,11 +21,11 @@ function buildLoginReturnUrl(next: string) {
 }
 
 export function Login() {
-  const { loginWithPassword, refreshProfile, status, user } = useAuth();
+  const { loginWithPassword, status, user } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [status, setStatus] = useState("Not signed in");
+  const [statusLabel, setStatusLabel] = useState("Not signed in");
   const [message, setMessage] = useState<{ text: string; tone: Tone }>({ text: "", tone: "muted" });
   const [busy, setBusy] = useState(false);
   const [magicBusy, setMagicBusy] = useState(false);
@@ -45,14 +45,14 @@ export function Login() {
 
   useEffect(() => {
     if (status === "booting") {
-      setStatus("Checking session...");
+      setStatusLabel("Checking session...");
       return;
     }
     if (status === "authenticated" && user) {
-      setStatus(user.email ? `Signed in as ${user.email}` : "Signed in");
+      setStatusLabel(user.email ? `Signed in as ${user.email}` : "Signed in");
       redirect(120);
     } else {
-      setStatus("Not signed in");
+      setStatusLabel("Not signed in");
     }
   }, [redirect, status, user]);
 
@@ -125,8 +125,8 @@ export function Login() {
 
   const handleSignOut = useCallback(async () => {
     await signOutEverywhere();
-    setStatus("Not signed in");
-    setMessage({ text: "Signed out", tone: "ok" });
+      setStatusLabel("Not signed in");
+      setMessage({ text: "Signed out", tone: "ok" });
   }, []);
 
   return (
@@ -153,7 +153,7 @@ export function Login() {
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <div className="badge" style={{ background: "#e2e8f0", color: "#0f172a" }}>
-            {status}
+            {statusLabel}
           </div>
           <Link to="/role" className="badge" style={{ background: "#e0f2fe", color: "#0f172a" }}>
             Role Select
