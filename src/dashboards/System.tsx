@@ -4358,6 +4358,12 @@ const SystemDashboard = () => {
   }, [refreshFinance])
 
   useEffect(() => {
+    if (activeTab === 'c2b') {
+      void loadC2bPayments({ page: 1 })
+    }
+  }, [activeTab])
+
+  useEffect(() => {
     if (activeTab === 'finance') {
       void refreshFinance()
     }
