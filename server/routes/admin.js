@@ -24,6 +24,49 @@ const { validatePaybillCode } = require('../wallet/paybillCode.util');
 const { requireUser } = require('../middleware/auth');
 const router = express.Router();
 
+function normalizeMsisdnDisplay(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return null;
+  if (/^2547\d{8}$/.test(digits)) return digits;
+  if (/^07\d{8}$/.test(digits)) return `254${digits.slice(1)}`;
+  if (/^1?\d{10,12}$/.test(digits) && digits.startsWith('7')) return `254${digits.slice(-9)}`;
+  return null;
+}
+
+function extractMsisdnFromRaw(raw) {
+  if (!raw) return null;
+  let payload = raw;
+  if (typeof raw === 'string') {
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      const norm = normalizeMsisdnDisplay(raw);
+      return norm;
+    }
+  }
+  if (!payload || typeof payload !== 'object') return null;
+  const candidates = [];
+  const keys = ['MSISDN', 'msisdn', 'phone', 'phone_number', 'payer_phone', 'customer_msisdn', 'customer_number'];
+  keys.forEach((k) => {
+    if (payload[k]) candidates.push(payload[k]);
+  });
+  if (payload.Body && typeof payload.Body === 'object') {
+    keys.forEach((k) => {
+      if (payload.Body[k]) candidates.push(payload.Body[k]);
+    });
+  }
+  if (payload.Result && typeof payload.Result === 'object') {
+    keys.forEach((k) => {
+      if (payload.Result[k]) candidates.push(payload.Result[k]);
+    });
+  }
+  for (const candidate of candidates) {
+    const norm = normalizeMsisdnDisplay(candidate);
+    if (norm) return norm;
+  }
+  return null;
+}
+
 // Require a signed-in Supabase user with role SYSTEM_ADMIN
 async function requireSystemAdmin(req, res, next){
   if (!supabaseAdmin) {
@@ -443,7 +486,8 @@ router.get('/c2b-payments', async (req, res) => {
           paybill_number,
           account_reference,
           status,
-          created_at
+          created_at,
+          raw
         FROM mpesa_c2b_payments
         ${whereClause}
         ORDER BY created_at DESC NULLS LAST, id DESC
@@ -452,7 +496,15 @@ router.get('/c2b-payments', async (req, res) => {
       `,
       params
     );
-    res.json({ ok: true, items: rows || [], total, limit, offset });
+    const items = (rows || []).map((row) => {
+      const display_msisdn =
+        normalizeMsisdnDisplay(row.msisdn) ||
+        extractMsisdnFromRaw(row.raw) ||
+        null;
+      const { raw, ...rest } = row;
+      return { ...rest, display_msisdn };
+    });
+    res.json({ ok: true, items, total, limit, offset });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }

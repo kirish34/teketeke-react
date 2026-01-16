@@ -7929,7 +7929,7 @@ const SystemDashboard = () => {
                           {row.created_at ? new Date(row.created_at).toLocaleString() : '-'}
                         </td>
                         <td className="mono">{row.receipt || row.id || '-'}</td>
-                        <td>{row.msisdn || '-'}</td>
+                        <td>{row.display_msisdn || row.msisdn || '-'}</td>
                         <td>{formatKes(row.amount)}</td>
                         <td>{row.paybill_number || '-'}</td>
                         <td className="mono">{row.account_reference || '-'}</td>
