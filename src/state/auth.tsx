@@ -1,11 +1,12 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { clearAuthStorage, ensureSupabaseClient, getAccessToken, persistToken, signOutEverywhere } from "../lib/auth";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { clearAuthStorage, ensureSupabaseClient, persistToken, signOutEverywhere } from "../lib/auth";
 import type { Role, SessionUser } from "../lib/types";
 import { authFetch } from "../lib/auth";
 
 type AuthCtx = {
   user: SessionUser | null;
   token: string | null;
+  status: "booting" | "authenticated" | "unauthenticated";
   loading: boolean;
   error: string | null;
   loginWithPassword: (email: string, password: string) => Promise<void>;
@@ -53,33 +54,53 @@ async function fetchProfile(token?: string | null): Promise<SessionUser> {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<"booting" | "authenticated" | "unauthenticated">("booting");
   const [error, setError] = useState<string | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
   const supabase = useMemo(() => ensureSupabaseClient(), []);
+  const fetchingProfile = useRef(false);
+
+  const withDebug = (msg: string, payload?: Record<string, unknown>) => {
+    if (import.meta.env.VITE_DEBUG_AUTH === "1") {
+      console.log("[auth]", msg, payload || {});
+    }
+  };
+
+  const clearState = useCallback(() => {
+    setUser(null);
+    setToken(null);
+    setError(null);
+    setStatus("unauthenticated");
+  }, []);
 
   const refreshProfile = useCallback(async () => {
-    setLoading(true);
+    if (fetchingProfile.current) return;
+    fetchingProfile.current = true;
+    setProfileLoading(true);
     try {
-      const accessToken = (await getAccessToken()) || null;
+      const { data } = await supabase?.auth.getSession()!;
+      const accessToken = data.session?.access_token || null;
       if (!accessToken) {
-        setUser(null);
-        setToken(null);
-        setError(null);
+        clearAuthStorage();
+        clearState();
         return;
       }
+      persistToken(accessToken);
       const profile = await fetchProfile(accessToken);
       setUser(profile);
       setToken(accessToken);
       setError(null);
+      setStatus("authenticated");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to load profile";
       setError(msg);
-      setUser(null);
-      setToken(null);
+      clearAuthStorage();
+      clearState();
     } finally {
-      setLoading(false);
+      fetchingProfile.current = false;
+      setProfileLoading(false);
     }
-  }, []);
+  }, [clearState, supabase]);
 
   const loginWithPassword = useCallback(
     async (email: string, password: string) => {
@@ -89,14 +110,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         password,
       });
       if (error) throw error;
-      let accessToken = data.session?.access_token || null;
-      if (!accessToken) {
-        const sessionRes = await supabase.auth.getSession();
-        accessToken = sessionRes.data.session?.access_token || null;
-      }
+      const sessionRes = data.session || (await supabase.auth.getSession()).data.session;
+      const accessToken = sessionRes?.access_token || null;
       if (!accessToken) throw new Error("No session returned from Supabase");
       persistToken(accessToken);
       setToken(accessToken);
+      setStatus("booting");
       await refreshProfile();
     },
     [refreshProfile, supabase],
@@ -107,50 +126,74 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await signOutEverywhere();
     } finally {
       clearAuthStorage();
-      setUser(null);
-      setToken(null);
-      setError(null);
+      clearState();
     }
-  }, []);
+  }, [clearState]);
 
+  // Initial session load
   useEffect(() => {
-    refreshProfile();
-  }, [refreshProfile]);
+    let cancelled = false;
+    (async () => {
+      setStatus("booting");
+      try {
+        const { data } = await supabase?.auth.getSession()!;
+        const sess = data.session;
+        if (!sess?.access_token) {
+          if (!cancelled) {
+            clearState();
+          }
+          return;
+        }
+        persistToken(sess.access_token);
+        await refreshProfile();
+      } catch (err) {
+        if (!cancelled) {
+          clearAuthStorage();
+          clearState();
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clearState, refreshProfile, supabase]);
 
   // Keep session refreshed and synced with Supabase auth events
   useEffect(() => {
     const client = ensureSupabaseClient();
     if (!client) return;
     const { data: subscription } = client.auth.onAuthStateChange((event, session) => {
+      withDebug("auth_event", { event, hasToken: Boolean(session?.access_token) });
       const nextToken = session?.access_token || null;
-      if (nextToken) {
+      if (event === "SIGNED_OUT") {
+        clearAuthStorage();
+        clearState();
+        return;
+      }
+      if (nextToken && (event === "TOKEN_REFRESHED" || event === "SIGNED_IN")) {
         persistToken(nextToken);
         setToken(nextToken);
-        if (event === "TOKEN_REFRESHED" || event === "SIGNED_IN") {
-          void refreshProfile();
-        }
-      } else if (event === "SIGNED_OUT") {
-        clearAuthStorage();
-        setUser(null);
-        setToken(null);
+        setStatus("booting");
+        void refreshProfile();
       }
     });
     return () => {
       subscription?.subscription?.unsubscribe();
     };
-  }, [refreshProfile]);
+  }, [clearState, refreshProfile, withDebug]);
 
   const value = useMemo<AuthCtx>(
     () => ({
       user,
       token,
-      loading,
+      loading: status === "booting" || profileLoading,
+      status,
       error,
       loginWithPassword,
       logout,
       refreshProfile,
     }),
-    [error, loading, loginWithPassword, logout, refreshProfile, token, user],
+    [error, loginWithPassword, logout, profileLoading, refreshProfile, status, token, user],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

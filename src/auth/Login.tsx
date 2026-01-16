@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
-import { ensureSupabaseClient, getAccessToken, persistToken, signOutEverywhere } from "../lib/auth";
+import { ensureSupabaseClient, persistToken, signOutEverywhere } from "../lib/auth";
 import { env } from "../lib/env";
 import { useAuth } from "../state/auth";
 
@@ -21,7 +21,7 @@ function buildLoginReturnUrl(next: string) {
 }
 
 export function Login() {
-  const { loginWithPassword, refreshProfile } = useAuth();
+  const { loginWithPassword, refreshProfile, status, user } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -43,30 +43,18 @@ export function Login() {
     [nav, next],
   );
 
-  const refreshSessionState = useCallback(async () => {
-    if (!supabase) {
-      setStatus("Supabase not configured");
+  useEffect(() => {
+    if (status === "booting") {
+      setStatus("Checking session...");
       return;
     }
-    try {
-      const { data } = await supabase.auth.getSession();
-      const emailValue = data.session?.user?.email;
-      if (data.session?.access_token) {
-        persistToken(data.session.access_token);
-        await refreshProfile();
-      }
-      setStatus(emailValue ? `Signed in as ${emailValue}` : "Not signed in");
-      if (data.session?.access_token) {
-        redirect(80);
-      }
-    } catch (err) {
+    if (status === "authenticated" && user) {
+      setStatus(user.email ? `Signed in as ${user.email}` : "Signed in");
+      redirect(120);
+    } else {
       setStatus("Not signed in");
     }
-  }, [redirect, refreshProfile, supabase]);
-
-  useEffect(() => {
-    refreshSessionState();
-  }, [refreshSessionState]);
+  }, [redirect, status, user]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -91,13 +79,13 @@ export function Login() {
     if (!supabase) return;
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.access_token) {
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.access_token && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED")) {
         persistToken(session.access_token);
         await refreshProfile();
         setStatus(session.user?.email ? `Signed in as ${session.user.email}` : "Signed in");
         redirect();
-      } else {
+      } else if (event === "SIGNED_OUT") {
         setStatus("Not signed in");
       }
     });
@@ -157,17 +145,6 @@ export function Login() {
     setStatus("Not signed in");
     setMessage({ text: "Signed out", tone: "ok" });
   }, []);
-
-  useEffect(() => {
-    // On load, if we already have a stored token, try to use it before re-auth
-    (async () => {
-      const token = await getAccessToken();
-      if (token) {
-        setStatus("Restoring session...");
-        redirect(100);
-      }
-    })();
-  }, [redirect]);
 
   return (
     <div

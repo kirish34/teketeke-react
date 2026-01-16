@@ -29,7 +29,7 @@ export const navLinks: Array<{ to: string; label: string; allow: string[] }> = [
 ]
 
 export function DashboardShell({ title, subtitle, actions, nav, navLabel, hideShellChrome, hideNav, children }: Props) {
-  const { user, logout, loading, error } = useAuth()
+  const { user, logout, status, error } = useAuth()
   const navigate = useNavigate()
 
   const visibleLinks = user ? navLinks.filter((l) => l.allow.includes(user.role)) : navLinks
@@ -58,9 +58,9 @@ export function DashboardShell({ title, subtitle, actions, nav, navLabel, hideSh
           </div>
         </div>
         <div className="badge" aria-live="polite">
-          {loading && 'Checking sign-in...'}
+          {status === 'booting' && 'Checking sign-in...'}
           {error && `Auth error: ${error}`}
-          {!loading && !error && (user?.email ? `Signed in as ${user.email}` : 'Not signed in')}
+          {status !== 'booting' && !error && (user?.email ? `Signed in as ${user.email}` : 'Not signed in')}
         </div>
         <button type="button" className="btn ghost" onClick={handleLogout}>
           Logout
