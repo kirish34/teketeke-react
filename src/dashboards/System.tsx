@@ -1144,6 +1144,7 @@ const SystemDashboard = () => {
   const [payoutApprovalReadiness, setPayoutApprovalReadiness] = useState<BatchReadiness | null>(null)
 
   const [walletCode, setWalletCode] = useState('')
+  const [walletAutoRefreshCode, setWalletAutoRefreshCode] = useState('')
   const [walletSummary, setWalletSummary] = useState<WalletSummary | null>(null)
   const [walletTx, setWalletTx] = useState<WalletTx[]>([])
   const [walletError, setWalletError] = useState<string | null>(null)
@@ -3551,12 +3552,23 @@ const SystemDashboard = () => {
       )
       setWalletSummary(summary.wallet || (summary as unknown as WalletSummary))
       setWalletTx(tx.transactions || tx.data || [])
+      setWalletAutoRefreshCode(clean)
     } catch (err) {
       setWalletSummary(null)
       setWalletTx([])
       setWalletError(err instanceof Error ? err.message : String(err))
+      setWalletAutoRefreshCode('')
     }
   }
+
+  // Auto-refresh the inspected wallet every 5 seconds so admins see fresh balances/ledger entries.
+  useEffect(() => {
+    if (!walletAutoRefreshCode) return
+    const id = window.setInterval(() => {
+      void loadWallet(walletAutoRefreshCode)
+    }, 5000)
+    return () => window.clearInterval(id)
+  }, [walletAutoRefreshCode])
 
   async function submitWalletCredit() {
     const code = walletCreditForm.wallet_code.trim()
