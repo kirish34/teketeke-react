@@ -391,9 +391,12 @@ router.get('/wallets/owner-ledger', async (req, res) => {
       [matatuId, walletKind],
     );
     const wallets = walletsRes.rows || [];
-    const allowedWallets = wallets.filter((wallet) =>
-      canAccessWalletWithContext(userCtx, { ...wallet, sacco_id: wallet.sacco_id || matatu.sacco_id || null }),
-    );
+    const canSeeWallets = roleAllowsMatatu;
+    const allowedWallets = canSeeWallets
+      ? wallets
+      : wallets.filter((wallet) =>
+          canAccessWalletWithContext(userCtx, { ...wallet, sacco_id: wallet.sacco_id || matatu.sacco_id || null }),
+        );
 
     if (!allowedWallets.length) {
       logWalletAuthDebug({
