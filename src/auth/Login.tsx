@@ -125,8 +125,8 @@ export function Login() {
 
   const handleSignOut = useCallback(async () => {
     await signOutEverywhere();
-      setStatusLabel("Not signed in");
-      setMessage({ text: "Signed out", tone: "ok" });
+    setStatusLabel("Not signed in");
+    setMessage({ text: "Signed out", tone: "ok" });
   }, []);
 
   return (
@@ -214,10 +214,7 @@ export function Login() {
           </label>
 
           {message.text ? (
-            <div
-              className={`badge${message.tone === "err" ? " err" : ""}`}
-              role={message.tone === "err" ? "alert" : "status"}
-            >
+            <div className={`badge${message.tone === "err" ? " err" : ""}`} role={message.tone === "err" ? "alert" : "status"}>
               {message.text}
             </div>
           ) : null}
