@@ -302,6 +302,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         void runProfileFetch(nextSession);
       }
     });
+    subscriptionCount.current += 1;
+    logDebug("auth_subscription_added", { count: subscriptionCount.current });
     return () => {
       subscription?.subscription?.unsubscribe();
       subscriptionCount.current = Math.max(subscriptionCount.current - 1, 0);
