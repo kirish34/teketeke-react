@@ -78,10 +78,11 @@ export async function getAccessToken() {
   if (!client) return fallback || null
   try {
     const { data } = await client.auth.getSession()
-    return data.session?.access_token || fallback || null
+    // If Supabase is available, prefer the live session token and avoid stale storage.
+    return data.session?.access_token || null
   } catch (err) {
     console.warn('[auth] session lookup failed', err)
-    return fallback || null
+    return null
   }
 }
 

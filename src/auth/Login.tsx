@@ -21,7 +21,7 @@ function buildLoginReturnUrl(next: string) {
 }
 
 export function Login() {
-  const { loginWithPassword, status, user } = useAuth();
+  const { loginWithPassword, status, user, loading } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -128,6 +128,41 @@ export function Login() {
     setStatusLabel("Not signed in");
     setMessage({ text: "Signed out", tone: "ok" });
   }, []);
+
+  const showLoading = status === "booting" || loading;
+  const showAuthedRedirect = status === "authenticated" && user;
+  if (showLoading || showAuthedRedirect) {
+    const text = showLoading ? "Loading session..." : "Restoring session...";
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          background: "linear-gradient(135deg, #0ea5e9 0%, #2563eb 40%, #e0f2fe 100%)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 16,
+        }}
+      >
+        <div
+          className="card"
+          style={{
+            width: "100%",
+            maxWidth: 420,
+            textAlign: "center",
+            background: "rgba(255,255,255,0.96)",
+            borderRadius: 18,
+            boxShadow: "0 24px 70px rgba(15,23,42,0.22)",
+            padding: 24,
+            border: "1px solid rgba(226,232,240,0.8)",
+          }}
+        >
+          <div style={{ fontWeight: 800, fontSize: 18, color: "#0f172a", marginBottom: 8 }}>{text}</div>
+          <div style={{ color: "#475569" }}>Please wait…</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

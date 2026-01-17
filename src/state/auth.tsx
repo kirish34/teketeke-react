@@ -1,10 +1,12 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
 import { clearAuthStorage, ensureSupabaseClient, persistToken, signOutEverywhere } from "../lib/auth";
 import type { Role, SessionUser } from "../lib/types";
 import { authFetch } from "../lib/auth";
 
 type AuthCtx = {
   user: SessionUser | null;
+  session: Session | null;
   token: string | null;
   status: "booting" | "authenticated" | "unauthenticated";
   loading: boolean;
@@ -37,7 +39,9 @@ async function fetchProfile(token?: string | null): Promise<SessionUser> {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || res.statusText || "Failed to load profile");
+    const err = new Error(text || res.statusText || "Failed to load profile") as Error & { status?: number };
+    err.status = res.status;
+    throw err;
   }
   const data = (await res.json()) as any;
   const role = mapRole(data.context?.effective_role || data.role);
@@ -53,12 +57,13 @@ async function fetchProfile(token?: string | null): Promise<SessionUser> {
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<SessionUser | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [status, setStatus] = useState<"booting" | "authenticated" | "unauthenticated">("booting");
   const [error, setError] = useState<string | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const supabase = useMemo(() => ensureSupabaseClient(), []);
-  const fetchingProfile = useRef(false);
+  const profileLock = useRef<Promise<void> | null>(null);
 
   const withDebug = (msg: string, payload?: Record<string, unknown>) => {
     if (import.meta.env.VITE_DEBUG_AUTH === "1") {
@@ -66,41 +71,70 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const clearState = useCallback(() => {
+  const clearState = useCallback((nextStatus: "unauthenticated" | "booting" = "unauthenticated") => {
     setUser(null);
+    setSession(null);
     setToken(null);
     setError(null);
-    setStatus("unauthenticated");
+    setStatus(nextStatus);
   }, []);
 
-  const refreshProfile = useCallback(async () => {
-    if (fetchingProfile.current) return;
-    fetchingProfile.current = true;
-    setProfileLoading(true);
-    try {
-      const { data } = await supabase?.auth.getSession()!;
-      const accessToken = data.session?.access_token || null;
+  const runProfileFetch = useCallback(
+    async (accessToken: string | null | undefined) => {
       if (!accessToken) {
         clearAuthStorage();
-        clearState();
+        clearState("unauthenticated");
         return;
       }
-      persistToken(accessToken);
-      const profile = await fetchProfile(accessToken);
-      setUser(profile);
-      setToken(accessToken);
-      setError(null);
-      setStatus("authenticated");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to load profile";
-      setError(msg);
-      clearAuthStorage();
-      clearState();
-    } finally {
-      fetchingProfile.current = false;
-      setProfileLoading(false);
+      if (profileLock.current) return profileLock.current;
+
+      const task = (async () => {
+        setProfileLoading(true);
+        setError(null);
+        persistToken(accessToken);
+        try {
+          const profile = await fetchProfile(accessToken);
+          setUser(profile);
+          setToken(accessToken);
+          setStatus("authenticated");
+          withDebug("profile_loaded", { role: profile.role });
+        } catch (err) {
+          const statusCode = (err as any)?.status;
+          const msg = err instanceof Error ? err.message : "Failed to load profile";
+          setError(msg);
+          withDebug("profile_error", { status: statusCode, msg });
+          if (statusCode === 401 || statusCode === 403) {
+            await signOutEverywhere();
+            clearAuthStorage();
+          }
+          clearState("unauthenticated");
+        } finally {
+          profileLock.current = null;
+          setProfileLoading(false);
+        }
+      })();
+
+      profileLock.current = task;
+      return task;
+    },
+    [clearState, withDebug],
+  );
+
+  const refreshProfile = useCallback(async () => {
+    if (!supabase) {
+      clearState("unauthenticated");
+      return;
     }
-  }, [clearState, supabase]);
+    const { data } = await supabase.auth.getSession();
+    const accessToken = data.session?.access_token || null;
+    setSession(data.session || null);
+    if (!accessToken) {
+      clearAuthStorage();
+      clearState("unauthenticated");
+      return;
+    }
+    await runProfileFetch(accessToken);
+  }, [clearState, runProfileFetch, supabase]);
 
   const loginWithPassword = useCallback(
     async (email: string, password: string) => {
@@ -113,12 +147,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const sessionRes = data.session || (await supabase.auth.getSession()).data.session;
       const accessToken = sessionRes?.access_token || null;
       if (!accessToken) throw new Error("No session returned from Supabase");
-      persistToken(accessToken);
-      setToken(accessToken);
       setStatus("booting");
-      await refreshProfile();
+      setSession(sessionRes || null);
+      await runProfileFetch(accessToken);
     },
-    [refreshProfile, supabase],
+    [runProfileFetch, supabase],
   );
 
   const logout = useCallback(async () => {
@@ -134,29 +167,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      if (!supabase) {
+        clearState("unauthenticated");
+        return;
+      }
       setStatus("booting");
       try {
-        const { data } = await supabase?.auth.getSession()!;
+        const { data } = await supabase.auth.getSession();
+        if (cancelled) return;
         const sess = data.session;
-        if (!sess?.access_token) {
-          if (!cancelled) {
-            clearState();
-          }
+        setSession(sess || null);
+        const accessToken = sess?.access_token || null;
+        if (!accessToken) {
+          clearAuthStorage();
+          clearState("unauthenticated");
           return;
         }
-        persistToken(sess.access_token);
-        await refreshProfile();
+        await runProfileFetch(accessToken);
       } catch (err) {
         if (!cancelled) {
+          withDebug("initial_session_error", {
+            error: err instanceof Error ? err.message : String(err),
+          });
           clearAuthStorage();
-          clearState();
+          clearState("unauthenticated");
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [clearState, refreshProfile, supabase]);
+  }, [clearState, runProfileFetch, supabase, withDebug]);
 
   // Keep session refreshed and synced with Supabase auth events
   useEffect(() => {
@@ -166,25 +207,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       withDebug("auth_event", { event, hasToken: Boolean(session?.access_token) });
       const nextToken = session?.access_token || null;
       if (event === "SIGNED_OUT") {
+        profileLock.current = null;
         clearAuthStorage();
         clearState();
         return;
       }
       if (nextToken && (event === "TOKEN_REFRESHED" || event === "SIGNED_IN")) {
-        persistToken(nextToken);
-        setToken(nextToken);
+        setSession(session || null);
         setStatus("booting");
-        void refreshProfile();
+        void runProfileFetch(nextToken);
       }
     });
     return () => {
       subscription?.subscription?.unsubscribe();
     };
-  }, [clearState, refreshProfile, withDebug]);
+  }, [clearState, runProfileFetch, withDebug]);
 
   const value = useMemo<AuthCtx>(
     () => ({
       user,
+      session,
       token,
       loading: status === "booting" || profileLoading,
       status,
@@ -193,7 +235,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       logout,
       refreshProfile,
     }),
-    [error, loginWithPassword, logout, profileLoading, refreshProfile, status, token, user],
+    [error, loginWithPassword, logout, profileLoading, refreshProfile, session, status, token, user],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
