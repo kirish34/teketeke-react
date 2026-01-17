@@ -64,8 +64,9 @@ export function resolveHomePath(role: Role | null | undefined): string {
     case "driver":
       return "/app/matatu-staff";
     case "taxi":
+      return "/taxi";
     case "boda":
-      return "/dash";
+      return "/boda";
     default:
       return "/login";
   }
