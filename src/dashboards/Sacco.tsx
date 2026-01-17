@@ -2007,11 +2007,16 @@ export default function SaccoDashboard() {
   }
 
   async function loadLedger(kind?: string) {
+    if (!currentSacco) {
+      setLedgerError('Choose a SACCO to load ledger')
+      return
+    }
     setLedgerLoading(true)
     setLedgerError(null)
     try {
       const params = new URLSearchParams()
       params.set('limit', '200')
+      params.set('sacco_id', currentSacco)
       if (ledgerFrom) params.set('from', ledgerFrom)
       if (ledgerTo) params.set('to', ledgerTo)
       if (kind) params.set('wallet_kind', kind)
