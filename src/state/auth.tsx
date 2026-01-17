@@ -8,6 +8,7 @@ type AuthStatus = "booting" | "authenticated" | "unauthenticated";
 type AuthContext = {
   user: SessionUser | null;
   context: UserContext | null;
+  contextMissing: boolean;
   session: Session | null;
   token: string | null;
   status: AuthStatus;
@@ -45,6 +46,8 @@ function stripAppPrefix(path: string) {
 
 export function resolveHomePath(role: Role | null | undefined): string {
   switch ((role || "").toLowerCase()) {
+    case "user":
+      return "/app/pending";
     case "super_admin":
     case "system_admin":
       return "/app/system";
@@ -72,6 +75,8 @@ export function isPathAllowedForRole(role: Role | null | undefined, rawPath: str
   if (!role) return false;
   const normalized = stripAppPrefix(normalizePath(rawPath));
   const r = role;
+  if (normalized.startsWith("/pending")) return true;
+  if (normalized.startsWith("/app/pending")) return true;
   if (normalized.startsWith("/system") || normalized.startsWith("/ops")) {
     return r === "system_admin" || r === "super_admin";
   }
@@ -95,6 +100,7 @@ export function isPathAllowedForRole(role: Role | null | undefined, rawPath: str
 
 function mapRole(role?: string | null): Role | null {
   const r = (role || "").toUpperCase();
+  if (r === "USER") return "user";
   if (r === "SUPER_ADMIN") return "super_admin";
   if (r === "SYSTEM_ADMIN") return "system_admin";
   if (r === "SACCO" || r === "SACCO_ADMIN") return "sacco_admin";
@@ -106,7 +112,7 @@ function mapRole(role?: string | null): Role | null {
   return null;
 }
 
-async function fetchProfile(token: string): Promise<{ user: SessionUser; context: UserContext }> {
+async function fetchProfile(token: string): Promise<{ user: SessionUser; context: UserContext; contextMissing: boolean }> {
   logDebug("fetch_me_start");
   const res = await authFetch("/api/auth/me", {
     headers: {
@@ -121,7 +127,7 @@ async function fetchProfile(token: string): Promise<{ user: SessionUser; context
     throw err;
   }
   const data = (await res.json()) as any;
-  const role = mapRole(data.context?.effective_role || data.role);
+  const role = mapRole(data.context?.effective_role || data.role || "USER");
   if (!role) throw new Error("No role assigned to this account");
   const ctx: UserContext = {
     effective_role: role,
@@ -135,13 +141,15 @@ async function fetchProfile(token: string): Promise<{ user: SessionUser; context
     sacco_id: ctx.sacco_id,
     matatu_id: ctx.matatu_id,
   };
-  logDebug("fetch_me_success", { role });
-  return { user, context: ctx };
+  const contextMissing = Boolean(data.context_missing);
+  logDebug("fetch_me_success", { role, contextMissing });
+  return { user, context: ctx, contextMissing };
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [context, setContext] = useState<UserContext | null>(null);
+  const [contextMissing, setContextMissing] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [status, setStatus] = useState<AuthStatus>("booting");
@@ -157,6 +165,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const clearState = useCallback((nextStatus: AuthStatus = "unauthenticated") => {
     setUser(null);
     setContext(null);
+    setContextMissing(false);
     setSession(null);
     setToken(null);
     setError(null);
@@ -190,9 +199,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfileLoading(true);
         setError(null);
         try {
-          const { user: u, context: ctx } = await fetchProfile(accessToken);
+          const { user: u, context: ctx, contextMissing: ctxMissing } = await fetchProfile(accessToken);
           setUser(u);
           setContext(ctx);
+          setContextMissing(ctxMissing);
           setToken(accessToken);
           setStatus("authenticated");
         } catch (err) {
@@ -318,8 +328,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loginWithPassword,
       logout,
       refreshProfile,
+      contextMissing,
     }),
-    [context, error, loginWithPassword, logout, profileLoading, refreshProfile, session, status, token, user],
+    [context, contextMissing, error, loginWithPassword, logout, profileLoading, refreshProfile, session, status, token, user],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -17,6 +17,7 @@ import OpsDashboard from "../dashboards/Ops";
 import DashHome from "../dashboards/DashHome";
 import SaccoApprovals from "../pages/SaccoApprovals";
 import WithdrawalPhonesRoute from "../pages/WithdrawalPhonesRoute";
+import PendingAccess from "../pages/PendingAccess";
 
 export const routes: RouteObject[] = [
   { path: "/", element: <Navigate to="/role" replace /> },
@@ -28,6 +29,26 @@ export const routes: RouteObject[] = [
   { path: "/app/sacco-staff", element: <Navigate to="/sacco/staff" replace /> },
   { path: "/app/matatu-owner", element: <Navigate to="/matatu/owner" replace /> },
   { path: "/app/matatu-staff", element: <Navigate to="/matatu/staff" replace /> },
+  {
+    path: "/app/pending",
+    element: (
+      <RequireRole
+        allow={[
+          "user",
+          "super_admin",
+          "system_admin",
+          "sacco_admin",
+          "sacco_staff",
+          "matatu_owner",
+          "matatu_staff",
+          "taxi",
+          "boda",
+        ]}
+      >
+        <PendingAccess />
+      </RequireRole>
+    ),
+  },
   {
     path: "/dash",
     element: (

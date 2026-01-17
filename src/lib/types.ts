@@ -1,4 +1,5 @@
 export type Role =
+  | "user"
   | "super_admin"
   | "system_admin"
   | "sacco_admin"

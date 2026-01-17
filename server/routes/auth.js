@@ -35,7 +35,19 @@ async function handleMe(req, res) {
     const ctx = await loadUserContext(userId);
     if (!ctx) {
       debugAuth({ user_id: userId, reason: 'missing_context' });
-      return res.status(403).json({ error: 'forbidden' });
+      return res.json({
+        ok: true,
+        user: {
+          id: userId,
+          email: req.user?.email || null,
+        },
+        context: {
+          effective_role: 'USER',
+          sacco_id: null,
+          matatu_id: null,
+        },
+        context_missing: true,
+      });
     }
     debugAuth({
       user_id: userId,
@@ -54,6 +66,7 @@ async function handleMe(req, res) {
         sacco_id: ctx.sacco_id,
         matatu_id: ctx.matatu_id,
       },
+      context_missing: false,
     });
   } catch (err) {
     return res.status(500).json({ error: err.message || 'Failed to load auth context' });
@@ -61,6 +74,16 @@ async function handleMe(req, res) {
 }
 
 router.get('/me', handleMe);
+router.get('/context', async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'missing user' });
+  try {
+    const ctx = await loadUserContext(userId);
+    return res.json({ ok: true, context: ctx || null });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message || 'Failed to load context' });
+  }
+});
 
 router.__test = { handleMe, loadUserContext };
 
