@@ -151,6 +151,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const supabase = useMemo(() => ensureSupabaseClient(), []);
   const inflightProfile = useRef<Promise<void> | null>(null);
   const signingOut = useRef(false);
+  const subscriptionCount = useRef(0);
+  const lastStatus = useRef<AuthStatus>(status);
 
   const clearState = useCallback((nextStatus: AuthStatus = "unauthenticated") => {
     setUser(null);
@@ -292,8 +294,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
     return () => {
       subscription?.subscription?.unsubscribe();
+      subscriptionCount.current = Math.max(subscriptionCount.current - 1, 0);
+      logDebug("auth_subscription_removed", { count: subscriptionCount.current });
     };
   }, [runProfileFetch, signOutOnce]);
+
+  useEffect(() => {
+    if (lastStatus.current !== status) {
+      logDebug("status_transition", { from: lastStatus.current, to: status });
+      lastStatus.current = status;
+    }
+  }, [status]);
 
   const value = useMemo<AuthContext>(
     () => ({
