@@ -22,6 +22,12 @@ export const routes: RouteObject[] = [
   { path: "/", element: <Navigate to="/role" replace /> },
   { path: "/login", element: <Login /> },
   { path: "/role", element: <RoleSelect /> },
+  { path: "/app", element: <Navigate to="/dash" replace /> },
+  { path: "/app/system", element: <Navigate to="/system" replace /> },
+  { path: "/app/sacco-admin", element: <Navigate to="/sacco" replace /> },
+  { path: "/app/sacco-staff", element: <Navigate to="/sacco/staff" replace /> },
+  { path: "/app/matatu-owner", element: <Navigate to="/matatu/owner" replace /> },
+  { path: "/app/matatu-staff", element: <Navigate to="/matatu/staff" replace /> },
   {
     path: "/dash",
     element: (

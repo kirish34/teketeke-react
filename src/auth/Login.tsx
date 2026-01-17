@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { ensureSupabaseClient, signOutEverywhere } from "../lib/auth";
 import { env } from "../lib/env";
-import { useAuth } from "../state/auth";
+import { isPathAllowedForRole, resolveHomePath, useAuth } from "../state/auth";
 
 type Tone = "muted" | "ok" | "err";
 const LOGIN_PREFILL_KEY = "tt_login_prefill";
@@ -29,6 +29,7 @@ export function Login() {
   const [message, setMessage] = useState<{ text: string; tone: Tone }>({ text: "", tone: "muted" });
   const [busy, setBusy] = useState(false);
   const [magicBusy, setMagicBusy] = useState(false);
+  const redirected = useRef(false);
 
   const nav = useNavigate();
   const location = useLocation();
@@ -36,11 +37,13 @@ export function Login() {
   const next = useMemo(() => sanitizeNext(search.get("next")), [search]);
   const supabase = useMemo(() => ensureSupabaseClient(), []);
 
-  const redirect = useCallback(
-    (delayMs = 120) => {
-      setTimeout(() => nav(next, { replace: true }), delayMs);
+  const redirectOnce = useCallback(
+    (dest: string, delayMs = 50) => {
+      if (redirected.current) return;
+      redirected.current = true;
+      setTimeout(() => nav(dest, { replace: true }), delayMs);
     },
-    [nav, next],
+    [nav],
   );
 
   useEffect(() => {
@@ -50,11 +53,13 @@ export function Login() {
     }
     if (status === "authenticated" && user) {
       setStatusLabel(user.email ? `Signed in as ${user.email}` : "Signed in");
-      redirect(120);
+      const allowedNext = isPathAllowedForRole(user.role, next) ? next : resolveHomePath(user.role);
+      redirectOnce(allowedNext || resolveHomePath(user.role));
     } else {
       setStatusLabel("Not signed in");
+      redirected.current = false;
     }
-  }, [redirect, status, user]);
+  }, [next, redirectOnce, status, user]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -84,15 +89,15 @@ export function Login() {
       try {
         await loginWithPassword(email, password);
         setMessage({ text: "Signed in. Redirecting...", tone: "ok" });
-        redirect();
       } catch (err) {
         const text = err instanceof Error ? err.message : "Sign-in failed";
         setMessage({ text, tone: "err" });
+        redirected.current = false;
       } finally {
         setBusy(false);
       }
     },
-    [email, loginWithPassword, password, redirect],
+    [email, loginWithPassword, password],
   );
 
   const handleMagicLink = useCallback(async () => {
@@ -127,12 +132,12 @@ export function Login() {
     await signOutEverywhere();
     setStatusLabel("Not signed in");
     setMessage({ text: "Signed out", tone: "ok" });
+    redirected.current = false;
   }, []);
 
-  const showLoading = status === "booting" || loading;
-  const showAuthedRedirect = status === "authenticated" && user;
-  if (showLoading || showAuthedRedirect) {
-    const text = showLoading ? "Loading session..." : "Restoring session...";
+  const showLoading = status === "booting" || loading || (status === "authenticated" && user && !redirected.current);
+  if (showLoading) {
+    const text = status === "authenticated" ? "Restoring session..." : "Loading session...";
     return (
       <div
         style={{
@@ -158,7 +163,7 @@ export function Login() {
           }}
         >
           <div style={{ fontWeight: 800, fontSize: 18, color: "#0f172a", marginBottom: 8 }}>{text}</div>
-          <div style={{ color: "#475569" }}>Please wait…</div>
+          <div style={{ color: "#475569" }}>Please wait...</div>
         </div>
       </div>
     );

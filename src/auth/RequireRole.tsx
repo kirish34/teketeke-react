@@ -1,5 +1,5 @@
 import { Navigate, useLocation } from "react-router-dom";
-import { useAuth } from "../state/auth";
+import { isPathAllowedForRole, resolveHomePath, useAuth } from "../state/auth";
 import type { Role } from "../lib/types";
 
 export function RequireRole({ allow, children }: { allow: Role[]; children: React.ReactNode }) {
@@ -22,7 +22,8 @@ export function RequireRole({ allow, children }: { allow: Role[]; children: Reac
   }
 
   if (!allow.includes(user.role)) {
-    return <Navigate to={loginUrl} replace />;
+    const target = isPathAllowedForRole(user.role, next) ? next : resolveHomePath(user.role);
+    return <Navigate to={target} replace />;
   }
 
   return <>{children}</>;
