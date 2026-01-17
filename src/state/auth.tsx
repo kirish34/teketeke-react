@@ -188,8 +188,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const runProfileFetch = useCallback(
     async (nextSession?: Session | null) => {
-      const activeSession = nextSession ?? session;
-      const accessToken = activeSession?.access_token || null;
+      const accessToken = nextSession?.access_token || null;
       if (!accessToken) {
         await signOutOnce();
         return;
@@ -222,7 +221,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })();
       return inflightProfile.current;
     },
-    [clearState, session, signOutOnce],
+    [clearState, signOutOnce],
   );
 
   const refreshProfile = useCallback(async () => {
