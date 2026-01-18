@@ -12,6 +12,7 @@ const telemetryRouter = require('./routes/telemetry');
 const darajaB2CRouter = require('./routes/daraja-b2c');
 const payoutReadinessRouter = require('./routes/payout-readiness');
 const walletLedgerRouter = require('./routes/wallet-ledger');
+const authRouter = require('./routes/auth');
 const mpesaRouter = require('./routes/mpesa');
 
 const app = express();
@@ -83,6 +84,17 @@ const apiLimiter = rateLimit({
 });
 app.use('/api', apiLimiter);
 
+// Optional whitelist bypass for auth endpoints to skip any upstream guards.
+if (process.env.AUTH_WHITELIST_BYPASS === '1') {
+  app.use((req, res, next) => {
+    const p = req.path;
+    if (p === '/api/auth/me' || p === '/api/auth/context') {
+      return authRouter(req, res, next);
+    }
+    return next();
+  });
+}
+
 // robots for sensitive public pages
 app.use((req, res, next) => {
   if (req.path === '/public/auth/login.html' || req.path === '/public/system/dashboard.html') {
@@ -102,6 +114,14 @@ if (fs.existsSync(path.join(reactDist, 'index.html'))) {
     res.sendFile(path.join(reactDist, 'index.html'));
   });
 }
+
+// Auth routes mounted early to avoid greedy /api guards.
+app.use('/api/auth', (req, _res, next) => {
+  if (process.env.DEBUG_AUTH_MOUNT === '1') {
+    console.log('[mount] /api/auth hit', req.method, req.path);
+  }
+  next();
+}, authRouter);
 
 // routes
 app.use('/u', require('./routes/user'));
@@ -124,7 +144,6 @@ app.use('/api', skipMpesa(registryRouter));
 app.use('/api', skipMpesa(telemetryRouter));
 app.use('/api', skipMpesa(darajaB2CRouter));
 app.use('/api', skipMpesa(payoutReadinessRouter));
-app.use('/api/auth', require('./routes/auth'));
 app.use('/api/sacco', require('./routes/sacco-payouts'));
 app.use('/api', skipMpesa(walletLedgerRouter));
 app.use('/test', require('./routes/wallet'));
