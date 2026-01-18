@@ -142,7 +142,7 @@ async function fetchProfile(token: string): Promise<{ user: SessionUser; context
     sacco_id: ctx.sacco_id,
     matatu_id: ctx.matatu_id,
   };
-  const contextMissing = Boolean(data.context_missing);
+  const contextMissing = Boolean(data.context_missing ?? data.needs_setup);
   logDebug("fetch_me_success", { role, contextMissing });
   return { user, context: ctx, contextMissing };
 }
@@ -210,8 +210,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const msg = err instanceof Error ? err.message : "Failed to load profile";
           setError(msg);
           logDebug("fetch_me_error", { status: statusCode, msg });
-          if (statusCode === 401 || statusCode === 403) {
+          if (statusCode === 401) {
             await signOutOnce();
+          } else if (statusCode === 403 && nextSession) {
+            // Token is valid but profile/context is missing or forbidden; keep session intact.
+            const fallbackUser: SessionUser = {
+              id: nextSession.user?.id || "",
+              email: (nextSession.user as any)?.email ?? null,
+              role: "user",
+              sacco_id: null,
+              matatu_id: null,
+            };
+            setUser(fallbackUser);
+            setContext({
+              effective_role: "user",
+              sacco_id: null,
+              matatu_id: null,
+            });
+            setContextMissing(true);
+            setToken(accessToken);
+            setStatus("authenticated");
           } else {
             clearState("unauthenticated");
           }

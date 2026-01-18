@@ -1,5 +1,4 @@
 const express = require('express');
-const pool = require('../db/pool');
 const { requireUser, debugAuth } = require('../middleware/auth');
 
 const router = express.Router();
@@ -16,6 +15,10 @@ async function loadUserContext(userId) {
       matatu_id: 'mock-matatu',
     };
   }
+  if (process.env.MOCK_AUTH_CONTEXT === 'missing') {
+    return null;
+  }
+  const pool = require('../db/pool');
   const res = await pool.query(
     `
       SELECT user_id, email, effective_role, sacco_id, matatu_id
@@ -33,20 +36,27 @@ async function handleMe(req, res) {
   if (!userId) return res.status(401).json({ error: 'missing user' });
   try {
     const ctx = await loadUserContext(userId);
+    const fallbackRole =
+      ctx?.effective_role ||
+      req.user?.app_metadata?.role ||
+      req.user?.user_metadata?.role ||
+      'USER';
+    const baseUser = {
+      id: userId,
+      email: req.user?.email || ctx?.email || null,
+    };
     if (!ctx) {
       debugAuth({ user_id: userId, reason: 'missing_context' });
       return res.json({
         ok: true,
-        user: {
-          id: userId,
-          email: req.user?.email || null,
-        },
+        user: baseUser,
         context: {
-          effective_role: 'USER',
+          effective_role: fallbackRole,
           sacco_id: null,
           matatu_id: null,
         },
         context_missing: true,
+        needs_setup: true,
       });
     }
     debugAuth({
@@ -57,16 +67,14 @@ async function handleMe(req, res) {
     });
     return res.json({
       ok: true,
-      user: {
-        id: userId,
-        email: req.user?.email || ctx.email || null,
-      },
+      user: baseUser,
       context: {
         effective_role: ctx.effective_role,
         sacco_id: ctx.sacco_id,
         matatu_id: ctx.matatu_id,
       },
       context_missing: false,
+      needs_setup: false,
     });
   } catch (err) {
     return res.status(500).json({ error: err.message || 'Failed to load auth context' });

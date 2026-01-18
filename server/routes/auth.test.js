@@ -64,4 +64,33 @@ describe('/api/auth/me handler', () => {
     expect(res.body?.user?.id).toBe('user-1');
     expect(res.body?.context?.effective_role).toBe('OWNER');
   });
+
+  it('returns needs_setup when context is missing', async () => {
+    const prevMockContext = process.env.MOCK_AUTH_CONTEXT;
+    process.env.MOCK_AUTH_CONTEXT = 'missing';
+    const mod = await import('./auth.js');
+    const { handleMe } = mod.__test;
+    mockQuery.mockResolvedValueOnce({ rows: [] });
+    const req = { user: { id: 'user-2', email: 'b@example.com', app_metadata: { role: 'SACCO_ADMIN' } } };
+    const res = {
+      statusCode: 200,
+      body: null,
+      status(code) {
+        this.statusCode = code;
+        return this;
+      },
+      json(payload) {
+        this.body = payload;
+        return this;
+      },
+    };
+    await handleMe(req, res);
+    process.env.MOCK_AUTH_CONTEXT = prevMockContext;
+    expect(res.statusCode).toBe(200);
+    expect(res.body?.ok).toBe(true);
+    expect(res.body?.context_missing).toBe(true);
+    expect(res.body?.needs_setup).toBe(true);
+    expect(res.body?.context?.effective_role).toBe('SACCO_ADMIN');
+    expect(res.body?.user?.email).toBe('b@example.com');
+  });
 });
