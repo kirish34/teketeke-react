@@ -1,5 +1,10 @@
 const express = require('express');
 const { requireUser, debugAuth } = require('../middleware/auth');
+const {
+  upsertAppUserContext,
+  ensureAppUserContextFromUserRoles,
+  normalizeEffectiveRole,
+} = require('../services/appUserContext.service');
 
 const router = express.Router();
 
@@ -41,51 +46,42 @@ async function loadUserContext(userId) {
 }
 
 async function ensureUserContext(userId, email, fallbackRole) {
-  const pool = getPool();
-  const insertRes = await pool.query(
-    `
-      INSERT INTO public.app_user_context (user_id, email, effective_role)
-      VALUES ($1, $2, $3)
-      ON CONFLICT (user_id) DO NOTHING
-      RETURNING user_id, email, effective_role, sacco_id, matatu_id
-    `,
-    [userId, email || null, fallbackRole],
-  );
-  if (insertRes.rows[0]) return insertRes.rows[0];
-  const selectRes = await pool.query(
-    `
-      SELECT user_id, email, effective_role, sacco_id, matatu_id
-      FROM public.app_user_context
-      WHERE user_id = $1
-      LIMIT 1
-    `,
-    [userId],
-  );
-  return selectRes.rows[0] || null;
+  return upsertAppUserContext({
+    user_id: userId,
+    email: email || null,
+    effective_role: normalizeEffectiveRole(fallbackRole),
+    sacco_id: null,
+    matatu_id: null,
+  });
 }
 
 async function handleMe(req, res) {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'missing user' });
   try {
-    const ctx = await loadUserContext(userId);
-    const fallbackRole =
+    let ctx = await loadUserContext(userId);
+    const fallbackRole = normalizeEffectiveRole(
       ctx?.effective_role ||
-      req.user?.app_metadata?.role ||
-      req.user?.user_metadata?.role ||
-      'USER';
+        req.user?.app_metadata?.role ||
+        req.user?.user_metadata?.role ||
+        'USER',
+    );
     const baseUser = {
       id: userId,
       email: req.user?.email || ctx?.email || null,
     };
     if (!ctx) {
+      const repaired = await ensureAppUserContextFromUserRoles(userId, baseUser.email);
+      ctx = repaired || null;
+    }
+    if (!ctx) {
       debugAuth({ user_id: userId, reason: 'missing_context' });
-      const created = await ensureUserContext(userId, baseUser.email, fallbackRole);
+      const created = await ensureUserContext(userId, baseUser.email, fallbackRole || 'USER');
       return res.json({
         ok: true,
         user: baseUser,
         context: {
-          effective_role: created?.effective_role || fallbackRole,
+          effective_role: created?.effective_role || fallbackRole || 'USER',
           sacco_id: created?.sacco_id || null,
           matatu_id: created?.matatu_id || null,
         },

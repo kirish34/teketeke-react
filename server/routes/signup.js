@@ -1,5 +1,6 @@
 const express = require('express');
 const { supabaseAdmin } = require('../supabase');
+const { upsertAppUserContext, normalizeEffectiveRole } = require('../services/appUserContext.service');
 
 const router = express.Router();
 
@@ -151,6 +152,13 @@ router.post('/taxi', async (req, res) => {
       sacco_id: null,
       matatu_id: matatuId,
     });
+    await upsertAppUserContext({
+      user_id: userId,
+      email: value.email,
+      effective_role: normalizeEffectiveRole('TAXI'),
+      sacco_id: null,
+      matatu_id: matatuId,
+    });
 
     res.json({ ok: true, user_id: userId, matatu_id: matatuId, role: 'TAXI' });
   } catch (e) {
@@ -183,6 +191,13 @@ router.post('/boda', async (req, res) => {
       sacco_id: null,
       matatu_id: matatuId,
     });
+    await upsertAppUserContext({
+      user_id: userId,
+      email: value.email,
+      effective_role: normalizeEffectiveRole('BODA'),
+      sacco_id: null,
+      matatu_id: matatuId,
+    });
 
     res.json({ ok: true, user_id: userId, matatu_id: matatuId, role: 'BODA' });
   } catch (e) {
@@ -191,4 +206,3 @@ router.post('/boda', async (req, res) => {
 });
 
 module.exports = router;
-

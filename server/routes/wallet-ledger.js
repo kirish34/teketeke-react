@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../db/pool');
 const { requireUser } = require('../middleware/auth');
+const { ensureAppUserContextFromUserRoles, normalizeEffectiveRole } = require('../services/appUserContext.service');
 
 const router = express.Router();
 
@@ -55,18 +56,40 @@ function normalizeDateBounds(fromRaw, toRaw) {
 
 async function resolveUserContext(userId) {
   if (!userId) return null;
-  const res = await pool.query(
-    `
-      SELECT effective_role, sacco_id, matatu_id
-      FROM public.app_user_context
-      WHERE user_id = $1
-      LIMIT 1
-    `,
-    [userId],
-  );
-  const row = res.rows[0];
-  if (!row) return null;
-  const role = normalizeRoleName(row.effective_role);
+  const loadCtx = async () => {
+    const res = await pool.query(
+      `
+        SELECT effective_role, sacco_id, matatu_id
+        FROM public.app_user_context
+        WHERE user_id = $1
+        LIMIT 1
+      `,
+      [userId],
+    );
+    return res.rows[0] || null;
+  };
+
+  const needsRepair = (row, roleNorm) => {
+    if (!row || !roleNorm) return true;
+    if (roleNorm === 'USER' || roleNorm === 'PENDING') return true;
+    if ([ROLES.OWNER, ROLES.MATATU_STAFF, ROLES.DRIVER].includes(roleNorm) && !row.matatu_id) return true;
+    return false;
+  };
+
+  let row = await loadCtx();
+  let role = normalizeRoleName(row?.effective_role);
+  if (needsRepair(row, role)) {
+    try {
+      const repaired = await ensureAppUserContextFromUserRoles(userId, row?.email || null);
+      if (repaired) {
+        row = repaired;
+        role = normalizeRoleName(normalizeEffectiveRole(repaired.effective_role));
+      }
+    } catch (err) {
+      logWalletAuthDebug({ user_id: userId, reason: 'context_repair_failed', error: err.message });
+    }
+  }
+  if (!row || !role) return null;
   return {
     role,
     saccoId: row.sacco_id || null,

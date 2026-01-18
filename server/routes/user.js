@@ -3,6 +3,7 @@ const { requireUser } = require('../middleware/auth');
 const { supabaseAdmin } = require('../supabase');
 const pool = require('../db/pool');
 const { ensurePlateAlias } = require('../wallet/wallet.aliases');
+const { upsertAppUserContext, normalizeEffectiveRole } = require('../services/appUserContext.service');
 
 if (!supabaseAdmin) {
   throw new Error('SUPABASE_SERVICE_ROLE_KEY is required to serve mobile endpoints');
@@ -1227,6 +1228,17 @@ router.post('/sacco/:id/staff', async (req,res)=>{
         .from('user_roles')
         .upsert({ user_id: userId, role: normalizedRole, sacco_id: saccoId, matatu_id: null }, { onConflict: 'user_id' });
       if (urErr) return res.status(500).json({ error: urErr.message || 'Failed to upsert user role' });
+      try {
+        await upsertAppUserContext({
+          user_id: userId,
+          email,
+          effective_role: normalizeEffectiveRole(roleReq),
+          sacco_id: saccoId,
+          matatu_id: null,
+        });
+      } catch (ctxErr) {
+        console.warn('[user] upsert app_user_context failed', ctxErr.message);
+      }
     }
 
     const { data, error } = await supabaseAdmin
@@ -1303,6 +1315,17 @@ router.patch('/sacco/:id/staff/:staffId', async (req,res)=>{
           { onConflict: 'user_id' }
         );
       if (urErr) throw urErr;
+      try {
+        await upsertAppUserContext({
+          user_id: data.user_id,
+          email: data.email || null,
+          effective_role: normalizeEffectiveRole(roleReq),
+          sacco_id: saccoId,
+          matatu_id: null,
+        });
+      } catch (ctxErr) {
+        console.warn('[user] upsert app_user_context failed', ctxErr.message);
+      }
     }
 
     res.json(data);
@@ -1797,6 +1820,17 @@ router.post("/matatu/:id/staff", async (req,res)=>{
           { onConflict: 'user_id' },
         );
       if (urErr) throw urErr;
+      try {
+        await upsertAppUserContext({
+          user_id: userId,
+          email,
+          effective_role: normalizeEffectiveRole(role),
+          sacco_id: matatu.sacco_id || null,
+          matatu_id: matatu.id,
+        });
+      } catch (ctxErr) {
+        console.warn('[user] upsert app_user_context failed', ctxErr.message);
+      }
     }
 
     if (staffId) {
@@ -1901,6 +1935,17 @@ router.patch('/matatu/:id/staff/:staff_id', async (req,res)=>{
         .eq('user_id', data.user_id)
         .eq('matatu_id', matatu.id);
       if (urErr) throw urErr;
+      try {
+        await upsertAppUserContext({
+          user_id: data.user_id,
+          email: data.email || null,
+          effective_role: normalizeEffectiveRole(requestedRole),
+          sacco_id: matatu.sacco_id || null,
+          matatu_id: data.matatu_id || matatu.id,
+        });
+      } catch (ctxErr) {
+        console.warn('[user] upsert app_user_context failed', ctxErr.message);
+      }
     }
     if (nextMatatu && data?.user_id) {
       const { error: urErr } = await supabaseAdmin
@@ -1908,6 +1953,17 @@ router.patch('/matatu/:id/staff/:staff_id', async (req,res)=>{
         .update({ matatu_id: nextMatatu.id, sacco_id: nextMatatu.sacco_id || null })
         .eq('user_id', data.user_id);
       if (urErr) throw urErr;
+      try {
+        await upsertAppUserContext({
+          user_id: data.user_id,
+          email: data.email || null,
+          effective_role: normalizeEffectiveRole(requestedRole || data.role),
+          sacco_id: nextMatatu.sacco_id || null,
+          matatu_id: nextMatatu.id,
+        });
+      } catch (ctxErr) {
+        console.warn('[user] upsert app_user_context failed', ctxErr.message);
+      }
     }
 
     res.json(data);
