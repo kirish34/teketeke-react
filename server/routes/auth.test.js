@@ -28,6 +28,7 @@ beforeAll(() => {
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'service';
   process.env.MOCK_SUPABASE_AUTH = '1';
   process.env.MOCK_AUTH_CONTEXT = '1';
+  global.__testPool = { query: mockQuery };
 });
 
 describe('/api/auth/me handler', () => {
@@ -70,7 +71,19 @@ describe('/api/auth/me handler', () => {
     process.env.MOCK_AUTH_CONTEXT = 'missing';
     const mod = await import('./auth.js');
     const { handleMe } = mod.__test;
-    mockQuery.mockResolvedValueOnce({ rows: [] });
+    mockQuery.mockReset();
+    // ensureUserContext insert returns a created row
+    mockQuery.mockResolvedValueOnce({
+      rows: [
+        {
+          user_id: 'user-2',
+          email: 'b@example.com',
+          effective_role: 'SACCO_ADMIN',
+          sacco_id: null,
+          matatu_id: null,
+        },
+      ],
+    });
     const req = { user: { id: 'user-2', email: 'b@example.com', app_metadata: { role: 'SACCO_ADMIN' } } };
     const res = {
       statusCode: 200,
@@ -88,7 +101,7 @@ describe('/api/auth/me handler', () => {
     process.env.MOCK_AUTH_CONTEXT = prevMockContext;
     expect(res.statusCode).toBe(200);
     expect(res.body?.ok).toBe(true);
-    expect(res.body?.context_missing).toBe(true);
+    expect(res.body?.context_missing).toBe(false);
     expect(res.body?.needs_setup).toBe(true);
     expect(res.body?.context?.effective_role).toBe('SACCO_ADMIN');
     expect(res.body?.user?.email).toBe('b@example.com');

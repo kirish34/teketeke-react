@@ -212,26 +212,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           logDebug("fetch_me_error", { status: statusCode, msg });
           if (statusCode === 401) {
             await signOutOnce();
-          } else if (statusCode === 403 && nextSession) {
-            // Token is valid but profile/context is missing or forbidden; keep session intact.
-            const fallbackUser: SessionUser = {
-              id: nextSession.user?.id || "",
-              email: (nextSession.user as any)?.email ?? null,
-              role: "user",
-              sacco_id: null,
-              matatu_id: null,
-            };
-            setUser(fallbackUser);
-            setContext({
-              effective_role: "user",
-              sacco_id: null,
-              matatu_id: null,
-            });
-            setContextMissing(true);
-            setToken(accessToken);
-            setStatus("authenticated");
           } else {
-            clearState("unauthenticated");
+            // After backend fixes, 403 should indicate a real forbidden account.
+            if (statusCode === 403) {
+              setStatus("unauthenticated");
+              setError("This account has no access to this app. Contact support.");
+            } else {
+              clearState("unauthenticated");
+            }
           }
         } finally {
           inflightProfile.current = null;

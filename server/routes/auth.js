@@ -5,6 +5,15 @@ const router = express.Router();
 
 router.use(requireUser);
 
+function getPool() {
+  if (process.env.NODE_ENV === 'test' && global.__testPool) {
+    return global.__testPool;
+  }
+  // Lazy require to keep tests fast and allow mocking.
+  // eslint-disable-next-line global-require
+  return require('../db/pool');
+}
+
 async function loadUserContext(userId) {
   if (process.env.MOCK_AUTH_CONTEXT === '1') {
     return {
@@ -18,7 +27,7 @@ async function loadUserContext(userId) {
   if (process.env.MOCK_AUTH_CONTEXT === 'missing') {
     return null;
   }
-  const pool = require('../db/pool');
+  const pool = getPool();
   const res = await pool.query(
     `
       SELECT user_id, email, effective_role, sacco_id, matatu_id
@@ -29,6 +38,30 @@ async function loadUserContext(userId) {
     [userId],
   );
   return res.rows[0] || null;
+}
+
+async function ensureUserContext(userId, email, fallbackRole) {
+  const pool = getPool();
+  const insertRes = await pool.query(
+    `
+      INSERT INTO public.app_user_context (user_id, email, effective_role)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (user_id) DO NOTHING
+      RETURNING user_id, email, effective_role, sacco_id, matatu_id
+    `,
+    [userId, email || null, fallbackRole],
+  );
+  if (insertRes.rows[0]) return insertRes.rows[0];
+  const selectRes = await pool.query(
+    `
+      SELECT user_id, email, effective_role, sacco_id, matatu_id
+      FROM public.app_user_context
+      WHERE user_id = $1
+      LIMIT 1
+    `,
+    [userId],
+  );
+  return selectRes.rows[0] || null;
 }
 
 async function handleMe(req, res) {
@@ -47,15 +80,16 @@ async function handleMe(req, res) {
     };
     if (!ctx) {
       debugAuth({ user_id: userId, reason: 'missing_context' });
+      const created = await ensureUserContext(userId, baseUser.email, fallbackRole);
       return res.json({
         ok: true,
         user: baseUser,
         context: {
-          effective_role: fallbackRole,
-          sacco_id: null,
-          matatu_id: null,
+          effective_role: created?.effective_role || fallbackRole,
+          sacco_id: created?.sacco_id || null,
+          matatu_id: created?.matatu_id || null,
         },
-        context_missing: true,
+        context_missing: !created,
         needs_setup: true,
       });
     }
@@ -93,6 +127,6 @@ router.get('/context', async (req, res) => {
   }
 });
 
-router.__test = { handleMe, loadUserContext };
+router.__test = { handleMe, loadUserContext, ensureUserContext };
 
 module.exports = router;
