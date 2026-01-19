@@ -81,7 +81,7 @@ async function handleMe(req, res) {
         ok: true,
         user: baseUser,
         context: {
-          effective_role: created?.effective_role || fallbackRole || 'USER',
+          effective_role: normalizeEffectiveRole(created?.effective_role || fallbackRole || 'USER'),
           sacco_id: created?.sacco_id || null,
           matatu_id: created?.matatu_id || null,
         },
@@ -99,7 +99,7 @@ async function handleMe(req, res) {
       ok: true,
       user: baseUser,
       context: {
-        effective_role: ctx.effective_role,
+        effective_role: normalizeEffectiveRole(ctx.effective_role),
         sacco_id: ctx.sacco_id,
         matatu_id: ctx.matatu_id,
       },
