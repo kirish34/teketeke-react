@@ -14,6 +14,7 @@ export async function api<T = any>(path: string, opts: ApiOpts = {}): Promise<T>
     headers: {
       "Content-Type": "application/json",
       ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}),
+      ...(opts.saccoId ? { "x-active-sacco-id": opts.saccoId } : {}),
     },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });

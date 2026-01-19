@@ -2,7 +2,7 @@ const express = require('express');
 const pool = require('../db/pool');
 const { requireUser } = require('../middleware/auth');
 const { ensureAppUserContextFromUserRoles, normalizeEffectiveRole } = require('../services/appUserContext.service');
-const { requireSaccoMembership } = require('../services/saccoAccess.service');
+const { requireSaccoMembership, resolveSaccoAuthContext } = require('../services/saccoAuth.service');
 
 const router = express.Router();
 
@@ -285,10 +285,20 @@ function isMatatuOwnerWalletKind(value) {
   return ['MATATU_OWNER', 'MATATU_VEHICLE'].includes(normalized);
 }
 
-router.get('/sacco/wallet-ledger', requireSaccoMembership({ allowRoles: ['SACCO_ADMIN', 'SACCO_STAFF', 'SYSTEM_ADMIN'] }), async (req, res) => {
+router.get(
+  '/sacco/wallet-ledger',
+  requireSaccoMembership({ allowRoles: ['SACCO_ADMIN', 'SACCO_STAFF', 'SYSTEM_ADMIN'], allowStaff: true }),
+  async (req, res) => {
   try {
     const requestedSaccoId = req.saccoId || String(req.query.sacco_id || '').trim();
-    if (!requestedSaccoId) return res.status(400).json({ ok: false, error: 'sacco_id required', request_id: req.requestId || null });
+    if (!requestedSaccoId) {
+      return res.status(400).json({
+        ok: false,
+        error: 'bad_request',
+        code: 'SACCO_ID_REQUIRED',
+        request_id: req.requestId || null,
+      });
+    }
 
     const kindRaw = String(req.query.wallet_kind || '').trim().toUpperCase();
     const walletKind = kindRaw && isSaccoWalletKind(kindRaw) ? kindRaw : null;
@@ -381,8 +391,12 @@ router.get('/wallets/owner-ledger', async (req, res) => {
     const superUser = userCtx.role === ROLES.SYSTEM_ADMIN;
     let saccoScoped = false;
     if ([ROLES.SACCO_ADMIN, ROLES.SACCO_STAFF].includes(userCtx.role) && matatu.sacco_id) {
-      const mem = await resolveSaccoMembership(req.user?.id, matatu.sacco_id);
-      saccoScoped = Boolean(mem.ok);
+      try {
+        const membershipCtx = await resolveSaccoAuthContext({ userId: req.user?.id });
+        saccoScoped = membershipCtx.allowed_sacco_ids.includes(String(matatu.sacco_id));
+      } catch {
+        saccoScoped = false;
+      }
     }
     const matatuScoped =
       [ROLES.OWNER, ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx.role) &&
@@ -419,6 +433,7 @@ router.get('/wallets/owner-ledger', async (req, res) => {
           user_sacco_id: userCtx.saccoId || null,
           matatu_id: matatuId,
           matatu_sacco_id: matatu.sacco_id || null,
+          allowed_sacco_ids: userCtx.allowed_sacco_ids || [],
         },
         request_id: req.requestId || null,
       });

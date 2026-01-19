@@ -11,7 +11,7 @@ function getGitShaFallback() {
 
 const commit =
   process.env.RAILWAY_GIT_COMMIT_SHA ||
-  process.env.GIT_COMMIT ||
+  process.env.GIT_COMMIT_SHA ||
   process.env.VERCEL_GIT_COMMIT_SHA ||
   getGitShaFallback();
 
