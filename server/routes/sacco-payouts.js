@@ -1,4 +1,6 @@
 const express = require('express');
+
+console.log('[load] sacco-payouts.js loaded (2026-01-19_v2)');
 const crypto = require('crypto');
 const pool = require('../db/pool');
 const { supabaseAdmin } = require('../supabase');

@@ -29,6 +29,7 @@ app.use((req, res, next) => {
   const id = incoming || randomUUID();
   req.requestId = id;
   res.set('x-request-id', id);
+  res.set('x-teketeke-build', 'SERVERJS_2026-01-19_A');
   next();
 });
 
@@ -177,6 +178,7 @@ app.get('/api/version', (_req, res) => {
   res.json({ ok: true, commit, deployed_at: new Date().toISOString() });
 });
 
+console.log('[mount] /api/sacco -> sacco-payouts router loaded');
 // Daraja C2B aliases (Safaricom blocks "mpesa" substring in RegisterURL)
 if (mpesaRouter.handleC2BValidation) {
   app.post('/validation', mpesaRouter.handleC2BValidation);
