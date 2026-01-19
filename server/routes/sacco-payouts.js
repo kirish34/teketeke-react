@@ -61,7 +61,7 @@ function normalizeDateOnly(value) {
   return trimmed;
 }
 
-router.get('/payout-destinations', requireSaccoAdmin, async (req, res) => {
+router.get('/payout-destinations', async (req, res) => {
   try {
     const { rows } = await pool.query(
       `
@@ -78,7 +78,7 @@ router.get('/payout-destinations', requireSaccoAdmin, async (req, res) => {
   }
 });
 
-router.post('/payout-destinations', requireSaccoAdmin, async (req, res) => {
+router.post('/payout-destinations', async (req, res) => {
   try {
     const id = req.body?.id || null;
     const typeRaw = String(req.body?.destination_type || '').trim().toUpperCase();
@@ -140,7 +140,7 @@ router.post('/payout-destinations', requireSaccoAdmin, async (req, res) => {
   }
 });
 
-router.get('/payout-readiness', requireSaccoAdmin, async (req, res) => {
+router.get('/payout-readiness', async (req, res) => {
   const dateFrom = normalizeDateOnly(req.query.date_from);
   const dateTo = normalizeDateOnly(req.query.date_to);
   if (!dateFrom || !dateTo) {
@@ -274,7 +274,7 @@ router.get('/payout-readiness', requireSaccoAdmin, async (req, res) => {
   }
 });
 
-router.post('/payout-batches', requireSaccoAdmin, async (req, res) => {
+router.post('/payout-batches', async (req, res) => {
   const dateFrom = normalizeDateOnly(req.body?.date_from);
   const dateTo = normalizeDateOnly(req.body?.date_to);
   if (!dateFrom || !dateTo) {
@@ -497,7 +497,7 @@ router.post('/payout-batches', requireSaccoAdmin, async (req, res) => {
   }
 });
 
-router.post('/payout-batches/:id/submit', requireSaccoAdmin, async (req, res) => {
+router.post('/payout-batches/:id/submit', async (req, res) => {
   const batchId = req.params.id;
   if (!batchId) return res.status(400).json({ ok: false, error: 'batch id required' });
   try {
@@ -533,7 +533,7 @@ router.post('/payout-batches/:id/submit', requireSaccoAdmin, async (req, res) =>
   }
 });
 
-router.get('/payout-batches', requireSaccoAdmin, async (req, res) => {
+router.get('/payout-batches', async (req, res) => {
   try {
     const params = [req.saccoId];
     const where = ['sacco_id = $1'];
@@ -564,7 +564,7 @@ router.get('/payout-batches', requireSaccoAdmin, async (req, res) => {
   }
 });
 
-router.get('/payout-batches/:id', requireSaccoAdmin, async (req, res) => {
+router.get('/payout-batches/:id', async (req, res) => {
   const batchId = req.params.id;
   if (!batchId) return res.status(400).json({ ok: false, error: 'batch id required' });
   try {
@@ -616,7 +616,7 @@ router.get('/payout-batches/:id', requireSaccoAdmin, async (req, res) => {
   }
 });
 
-router.delete('/payout-batches/:id', requireSaccoAdmin, async (req, res) => {
+router.delete('/payout-batches/:id', async (req, res) => {
   const batchId = req.params.id;
   if (!batchId) return res.status(400).json({ ok: false, error: 'batch id required' });
   try {
@@ -637,7 +637,7 @@ router.delete('/payout-batches/:id', requireSaccoAdmin, async (req, res) => {
   }
 });
 
-router.post('/payout-batches/:id/update', requireSaccoAdmin, async (req, res) => {
+router.post('/payout-batches/:id/update', async (req, res) => {
   const batchId = req.params.id;
   if (!batchId) return res.status(400).json({ ok: false, error: 'batch id required' });
 
