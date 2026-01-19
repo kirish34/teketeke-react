@@ -3,7 +3,11 @@ const { requireUser } = require('../middleware/auth');
 const { supabaseAdmin } = require('../supabase');
 const pool = require('../db/pool');
 const { ensurePlateAlias } = require('../wallet/wallet.aliases');
-const { upsertAppUserContext, normalizeEffectiveRole } = require('../services/appUserContext.service');
+const {
+  upsertAppUserContext,
+  normalizeEffectiveRole,
+  ensureAppUserContextFromUserRoles,
+} = require('../services/appUserContext.service');
 
 if (!supabaseAdmin) {
   throw new Error('SUPABASE_SERVICE_ROLE_KEY is required to serve mobile endpoints');
@@ -83,16 +87,92 @@ async function attachOperatorNames(items) {
 }
 
 async function getSaccoContext(userId) {
-  const role = await getRoleRow(userId);
-  if (!role) return { role: null, saccoId: null, matatu: null };
-  if (role.sacco_id) {
-    return { role, saccoId: role.sacco_id, matatu: null };
+  const normalizeSaccoRole = (role) => {
+    const r = String(role || '').trim().toUpperCase();
+    if (!r) return null;
+    if (r === 'SACCO') return 'SACCO_ADMIN';
+    if (r === 'SACCO_ADMIN') return 'SACCO_ADMIN';
+    if (r === 'SACCO_STAFF') return 'SACCO_STAFF';
+    if (r === 'SYSTEM_ADMIN') return 'SYSTEM_ADMIN';
+    return r;
+  };
+
+  const loadCtx = async () => {
+    const res = await pool.query(
+      `
+        SELECT user_id, email, effective_role, sacco_id, matatu_id
+        FROM public.app_user_context
+        WHERE user_id = $1
+        LIMIT 1
+      `,
+      [userId],
+    );
+    return res.rows[0] || null;
+  };
+
+  const mapCtxRow = (row) => {
+    if (!row) return { role: null, saccoId: null, matatu: null };
+    const roleNorm = normalizeSaccoRole(row.effective_role);
+    return {
+      role: roleNorm
+        ? { role: roleNorm, sacco_id: row.sacco_id || null, matatu_id: row.matatu_id || null }
+        : null,
+      saccoId: row.sacco_id || null,
+      matatu: null,
+    };
+  };
+
+  let ctxRow = await loadCtx();
+  let mapped = mapCtxRow(ctxRow);
+
+  const needsRepair =
+    !mapped.role ||
+    !mapped.saccoId ||
+    mapped.role.role === 'USER' ||
+    mapped.role.role === 'PENDING';
+
+  if (needsRepair) {
+    try {
+      const repaired = await ensureAppUserContextFromUserRoles(userId, ctxRow?.email || null);
+      if (repaired) {
+        ctxRow = repaired;
+        mapped = mapCtxRow(repaired);
+      }
+    } catch (e) {
+      // fall through to staff_profiles lookup
+    }
   }
-  if (role.matatu_id) {
-    const matatu = await getMatatu(role.matatu_id);
-    return { role, saccoId: matatu?.sacco_id || null, matatu };
+
+  if ((!mapped.role || !mapped.saccoId) && userId) {
+    try {
+      const { data: staffRow } = await supabaseAdmin
+        .from('staff_profiles')
+        .select('role,sacco_id,email')
+        .eq('user_id', userId)
+        .maybeSingle();
+      const roleNorm = normalizeSaccoRole(staffRow?.role);
+      const saccoId = staffRow?.sacco_id || null;
+      if (roleNorm && saccoId) {
+        const repaired = await upsertAppUserContext({
+          user_id: userId,
+          email: staffRow?.email || ctxRow?.email || null,
+          effective_role: roleNorm,
+          sacco_id: saccoId,
+          matatu_id: ctxRow?.matatu_id || null,
+        });
+        mapped = mapCtxRow(repaired || { effective_role: roleNorm, sacco_id: saccoId, matatu_id: ctxRow?.matatu_id || null });
+      }
+    } catch {
+      // ignore staff lookup failures
+    }
   }
-  return { role, saccoId: null, matatu: null };
+
+  if (mapped.role?.matatu_id) {
+    const matatu = await getMatatu(mapped.role.matatu_id);
+    mapped.matatu = matatu || null;
+  }
+
+  return mapped;
 }
 
 async function ensureSaccoAccess(userId, requestedId) {
