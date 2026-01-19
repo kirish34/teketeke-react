@@ -4,6 +4,7 @@ type ApiOpts = {
   method?: string;
   body?: any;
   token?: string | null;
+  saccoId?: string | null;
 };
 
 export async function api<T = any>(path: string, opts: ApiOpts = {}): Promise<T> {
