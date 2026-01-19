@@ -8,6 +8,7 @@ const helmet = require('helmet');
 const cors = require('cors');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
+const buildInfo = require('./buildInfo');
 const registryRouter = require('./routes/registry');
 const telemetryRouter = require('./routes/telemetry');
 const darajaB2CRouter = require('./routes/daraja-b2c');
@@ -29,12 +30,8 @@ app.use((req, res, next) => {
   const id = incoming || randomUUID();
   req.requestId = id;
   res.set('x-request-id', id);
-  const buildId =
-    process.env.RAILWAY_GIT_COMMIT_SHA ||
-    process.env.GIT_COMMIT ||
-    process.env.VERCEL_GIT_COMMIT_SHA ||
-    'unknown';
-  res.set('x-teketeke-build', buildId);
+  res.set('x-teketeke-build', buildInfo.commit);
+  res.set('x-deployed-at', buildInfo.deployed_at);
   next();
 });
 
@@ -85,7 +82,7 @@ app.use(cors({
     return cb(new Error('Not allowed by CORS'), false);
   },
   credentials: true,
-  exposedHeaders: ['x-teketeke-build', 'x-request-id', 'x-railway-request-id', 'x-sacco-payouts-build'],
+  exposedHeaders: ['x-teketeke-build', 'x-deployed-at', 'x-request-id', 'x-railway-request-id', 'x-sacco-payouts-build'],
 }));
 
 // Security & logs
@@ -174,19 +171,16 @@ app.use('/', require('./routes/sacco'));
 
 // simple version endpoint
 app.get('/api/version', (_req, res) => {
-  const commit =
-    process.env.RAILWAY_GIT_COMMIT_SHA ||
-    process.env.RAILWAY_GIT_COMMIT ||
-    process.env.VERCEL_GIT_COMMIT_SHA ||
-    process.env.COMMIT_HASH ||
-    null;
-  const buildId =
-    process.env.RAILWAY_GIT_COMMIT_SHA ||
-    process.env.GIT_COMMIT ||
-    process.env.VERCEL_GIT_COMMIT_SHA ||
-    'unknown';
-  res.set('x-teketeke-build', buildId);
-  res.json({ ok: true, service: 'teketeke-api', build: buildId, commit, deployed_at: new Date().toISOString() });
+  res.set('x-teketeke-build', buildInfo.commit);
+  res.set('x-deployed-at', buildInfo.deployed_at);
+  res.json({
+    ok: true,
+    service: buildInfo.service,
+    build: buildInfo.commit,
+    commit: buildInfo.commit,
+    deployed_at: buildInfo.deployed_at,
+    node_env: process.env.NODE_ENV || 'development',
+  });
 });
 
 console.log('[mount] /api/sacco -> sacco-payouts router loaded');
@@ -202,7 +196,9 @@ if (mpesaRouter.handleC2BConfirmation) {
 app.get(['/healthz', '/api/healthz'], (req, res) => {
   const accept = (req.headers.accept || '').toLowerCase();
   if (accept.includes('application/json')) {
-    return res.status(200).json({ ok: true, mode: 'real' });
+    return res
+      .status(200)
+      .json({ ok: true, service: buildInfo.service, commit: buildInfo.commit, deployed_at: buildInfo.deployed_at });
   }
   return res.status(200).type('text/plain').send('ok');
 });
@@ -210,7 +206,9 @@ app.get(['/healthz', '/api/healthz'], (req, res) => {
 const PORT = Number(process.env.PORT || 8080);
 if (require.main === module) {
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`TekeTeke API listening on ${PORT}`);
+    console.log(
+      `BOOT teketeke-api commit=${buildInfo.commit} deployed_at=${buildInfo.deployed_at} listening on ${PORT}`,
+    );
   });
 }
 

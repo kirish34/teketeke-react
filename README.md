@@ -171,3 +171,19 @@ Suggested quick checks:
 Smoke test requirements:
 - Requires `SUPABASE_DB_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
 - Tests create and clean up temporary records; run against staging, not production
+- ### Railway deploy: make sure latest commit is live
+  - Service must be linked to this GitHub repo on branch `main` with “Deploy on push” enabled.
+  - Ensure the service root/path matches this backend (watch path/rootDir set to repository root).
+  - Start command should run the API (e.g., `node server/server.js`), not a different project.
+  - Custom domain `api.teketeke.org` must be attached to exactly one Railway service; remove from any stale/old services.
+  - To force a fresh deploy of the latest commit:
+    - `git commit --allow-empty -m "trigger railway build"` && `git push`
+    - or use Railway CLI: `railway link`, `railway up`, `railway status`, `railway deployments`
+  - Deployment sanity checks (after deploy):
+    - `curl -i https://api.teketeke.org/api/version` → 200, headers `x-teketeke-build`, `x-deployed-at`.
+    - `curl -i -H "Authorization: Bearer <token>" https://api.teketeke.org/api/auth/me` → 200.
+    - `curl -i -H "Authorization: Bearer <token>" https://api.teketeke.org/api/sacco/payout-destinations` → 200 or structured 403 with code + request_id (not bare forbidden).
+- ### Domain routing sanity
+  - In Railway → Domains, confirm `api.teketeke.org` is attached only to the intended API service.
+  - Detach the domain from any old/stale services to avoid serving outdated code.
+  - After any domain change, re-run the version check to confirm headers and commit match the latest deployment.

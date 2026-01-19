@@ -112,6 +112,49 @@ async function handleMe(req, res) {
 }
 
 router.get('/me', handleMe);
+
+// Authenticated whoami with memberships list
+router.get('/whoami', async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ ok: false, error: 'missing user' });
+  const pool = getPool();
+  try {
+    const ctx = await loadUserContext(userId);
+    const memberships = [];
+    const mapRows = (rows, source) =>
+      (rows || []).forEach((row) => {
+        if (!row) return;
+        memberships.push({
+          sacco_id: row.sacco_id || null,
+          role: normalizeEffectiveRole(row.role),
+          source,
+        });
+      });
+    const { rows: roleRows } = await pool.query(
+      `SELECT sacco_id, role FROM public.user_roles WHERE user_id = $1`,
+      [userId],
+    );
+    mapRows(roleRows, 'user_roles');
+    const { rows: staffRows } = await pool.query(
+      `SELECT sacco_id, role FROM public.staff_profiles WHERE user_id = $1`,
+      [userId],
+    );
+    mapRows(staffRows, 'staff_profiles');
+
+    res.json({
+      ok: true,
+      user: { id: userId, email: req.user?.email || ctx?.email || null },
+      context: {
+        effective_role: ctx?.effective_role || null,
+        sacco_id: ctx?.sacco_id || null,
+        matatu_id: ctx?.matatu_id || null,
+      },
+      memberships: { saccos: memberships },
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || 'Failed to load whoami' });
+  }
+});
 router.get('/context', async (req, res) => {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'missing user' });
