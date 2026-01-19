@@ -260,6 +260,12 @@ function fmtKES(v: number | undefined | null) {
   return `KES ${(Number(v || 0)).toLocaleString('en-KE')}`
 }
 
+function debugAuth(msg: string, payload?: Record<string, unknown>) {
+  if (import.meta.env.VITE_DEBUG_AUTH === '1') {
+    console.log('[sacco]', msg, payload || {})
+  }
+}
+
 function formatKind(kind?: string, feeLabel = 'Daily Fee') {
   const k = (kind || '').toUpperCase()
   if (k === 'SACCO_FEE') return feeLabel
@@ -777,11 +783,14 @@ const { activeSaccoId, setActiveSacco } = useActiveSacco()
         const items = data.items || []
         setSaccos(items)
         setStatusMsg(`${items.length} organization(s)`)
-        if (!activeSaccoId) {
-          if (items.length === 1) {
+        const match = activeSaccoId ? items.find((s) => s.sacco_id === activeSaccoId) : null
+        if (!match) {
+          if (!activeSaccoId && items.length === 1) {
             setActiveSacco(items[0].sacco_id || null, items[0].name || items[0].display_name || null)
-          } else {
+            debugAuth('auto_select_single_sacco', { sacco_id: items[0].sacco_id })
+          } else if (activeSaccoId) {
             setActiveSacco(null)
+            debugAuth('clear_invalid_sacco', { sacco_id: activeSaccoId })
           }
         }
       } catch (err) {
@@ -1724,6 +1733,10 @@ const { activeSaccoId, setActiveSacco } = useActiveSacco()
   }
 
   async function loadPayoutDestinations() {
+    if (!currentSacco) {
+      debugAuth('payout_dest_blocked_no_sacco')
+      return
+    }
     setPayoutDestError(null)
     try {
       const res = await authFetch('/api/sacco/payout-destinations')
@@ -1803,6 +1816,10 @@ const { activeSaccoId, setActiveSacco } = useActiveSacco()
   }
 
   async function loadPayoutBatches() {
+    if (!currentSacco) {
+      debugAuth('payout_batches_blocked_no_sacco')
+      return
+    }
     setPayoutBatchError(null)
     try {
       const res = await authFetch(
@@ -2044,6 +2061,7 @@ const { activeSaccoId, setActiveSacco } = useActiveSacco()
   async function loadLedger(kind?: string) {
     if (!currentSacco) {
       setLedgerError('Choose a SACCO to load ledger')
+      debugAuth('ledger_blocked_no_sacco')
       return
     }
     setLedgerLoading(true)
@@ -2173,7 +2191,7 @@ const { activeSaccoId, setActiveSacco } = useActiveSacco()
         <section className="card">
           <div className="row" style={{ alignItems: 'flex-end', gap: 12 }}>
             <label>
-              <div className="muted small">Organization</div>
+              <div className="muted small">Operate Under</div>
               <select
                 value={currentSacco || ''}
                 onChange={(e) => {
