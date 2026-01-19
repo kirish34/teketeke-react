@@ -3,6 +3,11 @@ const pool = require('../db/pool');
 const { supabaseAdmin } = require('../supabase');
 const { requireUser } = require('../middleware/auth');
 const { checkB2CEnvPresence, buildBatchReadiness } = require('../services/payoutReadiness.service');
+const {
+  normalizeEffectiveRole,
+  ensureAppUserContextFromUserRoles,
+  upsertAppUserContext,
+} = require('../services/appUserContext.service');
 
 const router = express.Router();
 
@@ -11,10 +16,6 @@ if (!supabaseAdmin) {
 }
 
 router.use(requireUser);
-
-function normalizeRole(role) {
-  return String(role || '').trim().toUpperCase();
-}
 
 async function isSystemAdmin(userId) {
   const { data, error } = await supabaseAdmin
@@ -28,22 +29,63 @@ async function isSystemAdmin(userId) {
 }
 
 async function getSaccoContext(userId) {
-  const { data: roleRow, error } = await supabaseAdmin
-    .from('user_roles')
-    .select('role,sacco_id')
-    .eq('user_id', userId)
-    .maybeSingle();
-  if (error) throw error;
-  if (roleRow?.sacco_id) {
-    return { role: normalizeRole(roleRow.role), saccoId: roleRow.sacco_id };
+  if (!userId) return { role: null, saccoId: null };
+  const norm = (r) => normalizeEffectiveRole(r);
+  const ctxRes = await pool.query(
+    `SELECT effective_role, sacco_id FROM public.app_user_context WHERE user_id = $1 LIMIT 1`,
+    [userId],
+  );
+  const ctx = ctxRes.rows[0] || null;
+  const ctxRole = norm(ctx?.effective_role);
+  const ctxSacco = ctx?.sacco_id || null;
+  if (ctxRole && ctxSacco) return { role: ctxRole, saccoId: ctxSacco };
+
+  const roleRes = await pool.query(
+    `SELECT role, sacco_id FROM public.user_roles WHERE user_id = $1 LIMIT 1`,
+    [userId],
+  );
+  const r1 = roleRes.rows[0] || null;
+  const role1 = norm(r1?.role);
+  const sacco1 = r1?.sacco_id || null;
+  if (role1 && sacco1) {
+    await upsertAppUserContext({
+      user_id: userId,
+      email: ctx?.email || null,
+      effective_role: role1,
+      sacco_id: sacco1,
+      matatu_id: ctx?.matatu_id || null,
+    });
+    return { role: role1, saccoId: sacco1 };
   }
+
   const { data: staffRow, error: staffErr } = await supabaseAdmin
     .from('staff_profiles')
-    .select('role,sacco_id')
+    .select('role,sacco_id,email')
     .eq('user_id', userId)
     .maybeSingle();
   if (staffErr) throw staffErr;
-  return { role: normalizeRole(staffRow?.role), saccoId: staffRow?.sacco_id || null };
+  const role2 = norm(staffRow?.role);
+  const sacco2 = staffRow?.sacco_id || null;
+  if (role2 && sacco2) {
+    await upsertAppUserContext({
+      user_id: userId,
+      email: staffRow?.email || ctx?.email || null,
+      effective_role: role2,
+      sacco_id: sacco2,
+      matatu_id: ctx?.matatu_id || null,
+    });
+    return { role: role2, saccoId: sacco2 };
+  }
+
+  try {
+    const repaired = await ensureAppUserContextFromUserRoles(userId, ctx?.email || staffRow?.email || null);
+    if (repaired?.effective_role && repaired?.sacco_id) {
+      return { role: norm(repaired.effective_role), saccoId: repaired.sacco_id };
+    }
+  } catch {
+    // ignore repair errors
+  }
+  return { role: ctxRole || role1 || role2 || null, saccoId: ctxSacco || sacco1 || sacco2 || null };
 }
 
 router.get('/payout-batches/:id/readiness', async (req, res) => {
