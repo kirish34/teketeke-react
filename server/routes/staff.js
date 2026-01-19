@@ -4,6 +4,7 @@ const { requireUser } = require('../middleware/auth');
 const { supabaseAdmin } = require('../supabase');
 const { validate } = require('../middleware/validate');
 const { z } = require('zod');
+const { requireSaccoAccess } = require('../services/saccoContext.service');
 
 // Accept broader inputs for SACCO Staff UI and normalize
 const staffCashSchema = z.object({
@@ -34,8 +35,11 @@ const tripPositionsSchema = z.object({
   })).min(1)
 });
 
+router.use(requireUser);
+router.use(requireSaccoAccess());
+
 // Insert a cash transaction using user-scoped client (RLS enforced)
-router.post('/cash', requireUser, validate(staffCashSchema), async (req, res) => {
+router.post('/cash', validate(staffCashSchema), async (req, res) => {
   try {
     let { sacco_id, matatu_id, kind, amount, payer_name, payer_phone, notes } = req.body;
 

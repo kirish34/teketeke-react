@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { supabaseAdmin } = require('../supabase');
 const { requireUser } = require('../middleware/auth');
+const { getSaccoContext } = require('../services/saccoContext.service');
 
 const router = express.Router();
 
@@ -12,16 +13,8 @@ async function requireSystemAdmin(req, res, next) {
   if (!supabaseAdmin) return res.status(500).json({ error: 'SUPABASE_SERVICE_ROLE_KEY not configured' });
   return requireUser(req, res, async () => {
     try {
-      const uid = req.user?.id;
-      if (!uid) return res.status(401).json({ error: 'missing user' });
-      const { data, error } = await supabaseAdmin
-        .from('staff_profiles')
-        .select('id')
-        .eq('user_id', uid)
-        .eq('role', 'SYSTEM_ADMIN')
-        .maybeSingle();
-      if (error) return res.status(500).json({ error: error.message });
-      if (!data) return res.status(403).json({ error: 'forbidden' });
+      const ctx = await getSaccoContext(req.user?.id);
+      if (ctx.role !== 'SYSTEM_ADMIN') return res.status(403).json({ error: 'forbidden' });
       return next();
     } catch (e) {
       return res.status(500).json({ error: e.message });

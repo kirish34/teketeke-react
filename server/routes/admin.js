@@ -2,6 +2,8 @@ const express = require('express');
 const crypto = require('crypto');
 const { supabaseAdmin } = require('../supabase');
 const pool = require('../db/pool');
+const { upsertAppUserContext, normalizeEffectiveRole } = require('../services/appUserContext.service');
+const { getSaccoContext } = require('../services/saccoContext.service');
 const {
   creditFareWithFees,
   creditFareWithFeesByWalletId,
@@ -32,17 +34,9 @@ async function requireSystemAdmin(req, res, next){
   }
   return requireUser(req, res, async () => {
     try{
-      const uid = req.user?.id;
-      if (!uid) return res.status(401).json({ error: 'missing user' });
-      const { data, error } = await supabaseAdmin
-        .from('staff_profiles')
-        .select('id')
-        .eq('user_id', uid)
-        .eq('role', 'SYSTEM_ADMIN')
-        .maybeSingle();
-      if (error) return res.status(500).json({ error: error.message });
-      if (data) return next();
-      return res.status(403).json({ error: 'forbidden' });
+      const ctx = await getSaccoContext(req.user?.id);
+      if (ctx.role !== 'SYSTEM_ADMIN') return res.status(403).json({ error: 'forbidden' });
+      return next();
     }catch(e){ return res.status(500).json({ error: e.message }); }
   });
 }
