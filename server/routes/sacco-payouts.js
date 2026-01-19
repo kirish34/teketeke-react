@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const pool = require('../db/pool');
 const { supabaseAdmin } = require('../supabase');
 const { requireUser } = require('../middleware/auth');
-const { requireSaccoAccess } = require('../services/saccoContext.service');
+const { requireSaccoMembership } = require('../services/saccoAccess.service');
 const { insertPayoutEvent, normalizePayoutWalletKind } = require('../services/saccoPayouts.service');
 const { checkB2CEnvPresence } = require('../services/payoutReadiness.service');
 
@@ -16,16 +16,11 @@ if (!supabaseAdmin) {
 }
 
 router.use((req, res, next) => {
-  res.set('x-sacco-payouts-build', '2026-01-19_v2');
+  res.set('x-sacco-payouts-build', '2026-01-19_v3');
   next();
 });
 router.use(requireUser);
-router.use(
-  requireSaccoAccess({
-    allowRoles: ['SACCO_ADMIN', 'SYSTEM_ADMIN'],
-    allowStaff: false,
-  }),
-);
+router.use(requireSaccoMembership({ allowRoles: ['SACCO_ADMIN', 'SYSTEM_ADMIN'] }));
 
 const DEST_TYPES = new Set(['PAYBILL_TILL', 'MSISDN']);
 // Note: wallet kinds elsewhere use SACCO_DAILY_FEE; normalizePayoutWalletKind handles mapping.

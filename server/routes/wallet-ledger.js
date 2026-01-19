@@ -2,7 +2,7 @@ const express = require('express');
 const pool = require('../db/pool');
 const { requireUser } = require('../middleware/auth');
 const { ensureAppUserContextFromUserRoles, normalizeEffectiveRole } = require('../services/appUserContext.service');
-const { getSaccoContextUnified } = require('../services/saccoContext.service');
+const { requireSaccoMembership } = require('../services/saccoAccess.service');
 
 const router = express.Router();
 
@@ -275,56 +275,10 @@ function isMatatuOwnerWalletKind(value) {
   return ['MATATU_OWNER', 'MATATU_VEHICLE'].includes(normalized);
 }
 
-router.get('/sacco/wallet-ledger', async (req, res) => {
+router.get('/sacco/wallet-ledger', requireSaccoMembership({ allowRoles: ['SACCO_ADMIN', 'SACCO_STAFF', 'SYSTEM_ADMIN'] }), async (req, res) => {
   try {
-    const requestedSaccoId = String(req.query.sacco_id || '').trim();
+    const requestedSaccoId = req.saccoId || String(req.query.sacco_id || '').trim();
     if (!requestedSaccoId) return res.status(400).json({ ok: false, error: 'sacco_id required', request_id: req.requestId || null });
-
-    const userCtx = await getSaccoContextUnified(req.user?.id);
-    if (!userCtx || !userCtx.role) {
-      logWalletAuthDebug({
-        request_id: req.requestId || null,
-        user_id: req.user?.id || null,
-        role: userCtx?.role || null,
-        sacco_id: userCtx?.saccoId || null,
-        requested_sacco_id: requestedSaccoId,
-        reason: 'missing_context',
-      });
-      return res.status(403).json({
-        ok: false,
-        error: 'forbidden',
-        code: 'SACCO_ACCESS_DENIED',
-        details: { role: userCtx?.role || null, user_sacco_id: userCtx?.saccoId || null, requested_sacco_id: requestedSaccoId, source: userCtx?.source || null },
-        request_id: req.requestId || null,
-      });
-    }
-    const saccoAllowed =
-      userCtx.role === ROLES.SYSTEM_ADMIN ||
-      ([ROLES.SACCO_ADMIN, ROLES.SACCO_STAFF].includes(userCtx.role) &&
-        userCtx.saccoId &&
-        String(userCtx.saccoId) === String(requestedSaccoId));
-    if (!saccoAllowed) {
-      logWalletAuthDebug({
-        request_id: req.requestId || null,
-        user_id: req.user?.id || null,
-        role: userCtx.role,
-        sacco_id: userCtx.saccoId || null,
-        requested_sacco_id: requestedSaccoId,
-        source: userCtx.source || null,
-        reason: 'SACCO_SCOPE_MISMATCH',
-      });
-      return res.status(403).json({
-        ok: false,
-        error: 'forbidden',
-        code: 'SACCO_SCOPE_MISMATCH',
-        details: {
-          user_sacco_id: userCtx.saccoId || null,
-          requested_sacco_id: requestedSaccoId,
-          source: userCtx.source || null,
-        },
-        request_id: req.requestId || null,
-      });
-    }
 
     const kindRaw = String(req.query.wallet_kind || '').trim().toUpperCase();
     const walletKind = kindRaw && isSaccoWalletKind(kindRaw) ? kindRaw : null;

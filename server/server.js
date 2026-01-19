@@ -80,7 +80,7 @@ app.use(cors({
     return cb(new Error('Not allowed by CORS'), false);
   },
   credentials: true,
-  exposedHeaders: ['x-railway-request-id', 'x-request-id'],
+  exposedHeaders: ['x-railway-request-id', 'x-request-id', 'x-sacco-payouts-build'],
 }));
 
 // Security & logs
