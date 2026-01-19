@@ -87,10 +87,26 @@ function requireSaccoAccess({ allowSystemWithoutSacco = false } = {}) {
       if (!uid) return res.status(401).json({ error: 'unauthorized' });
       const ctx = await getSaccoContext(uid);
       if (!ctx?.role || !isSaccoAllowedRole(ctx.role)) {
-        return res.status(403).json({ error: 'forbidden' });
+        if (String(process.env.DEBUG_SACCO_AUTH || '').toLowerCase() === 'true') {
+          console.log('[sacco-auth] deny role', { user_id: uid, role: ctx?.role || null });
+        }
+        return res.status(403).json({
+          ok: false,
+          error: 'forbidden',
+          code: 'SACCO_ACCESS_DENIED',
+          details: { role: ctx?.role || null, user_sacco_id: ctx?.saccoId || null },
+        });
       }
       if (!ctx.saccoId && !(allowSystemWithoutSacco && ctx.role === 'SYSTEM_ADMIN')) {
-        return res.status(403).json({ error: 'forbidden' });
+        if (String(process.env.DEBUG_SACCO_AUTH || '').toLowerCase() === 'true') {
+          console.log('[sacco-auth] deny missing sacco', { user_id: uid, role: ctx.role, user_sacco_id: ctx?.saccoId || null });
+        }
+        return res.status(403).json({
+          ok: false,
+          error: 'forbidden',
+          code: 'SACCO_ACCESS_DENIED',
+          details: { role: ctx?.role || null, user_sacco_id: ctx?.saccoId || null },
+        });
       }
       req.saccoId = ctx.saccoId || null;
       req.saccoRole = ctx.role;

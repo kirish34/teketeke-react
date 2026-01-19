@@ -280,7 +280,21 @@ router.get('/sacco/wallet-ledger', async (req, res) => {
     if (!requestedSaccoId) return res.status(400).json({ ok: false, error: 'sacco_id required' });
 
     const userCtx = await resolveUserContext(req.user?.id);
-    if (!userCtx || !userCtx.role) return res.status(403).json({ ok: false, error: 'forbidden' });
+    if (!userCtx || !userCtx.role) {
+      logWalletAuthDebug({
+        user_id: req.user?.id || null,
+        role: userCtx?.role || null,
+        sacco_id: userCtx?.saccoId || null,
+        requested_sacco_id: requestedSaccoId,
+        reason: 'missing_context',
+      });
+      return res.status(403).json({
+        ok: false,
+        error: 'forbidden',
+        code: 'SACCO_ACCESS_DENIED',
+        details: { role: userCtx?.role || null, user_sacco_id: userCtx?.saccoId || null, requested_sacco_id: requestedSaccoId },
+      });
+    }
     const saccoAllowed =
       userCtx.role === ROLES.SYSTEM_ADMIN ||
       ([ROLES.SACCO_ADMIN, ROLES.SACCO_STAFF].includes(userCtx.role) &&
@@ -292,9 +306,17 @@ router.get('/sacco/wallet-ledger', async (req, res) => {
         role: userCtx.role,
         sacco_id: userCtx.saccoId || null,
         requested_sacco_id: requestedSaccoId,
-        reason: 'sacco_scope_mismatch',
+        reason: 'SACCO_SCOPE_MISMATCH',
       });
-      return res.status(403).json({ ok: false, error: 'forbidden' });
+      return res.status(403).json({
+        ok: false,
+        error: 'forbidden',
+        code: 'SACCO_SCOPE_MISMATCH',
+        details: {
+          user_sacco_id: userCtx.saccoId || null,
+          requested_sacco_id: requestedSaccoId,
+        },
+      });
     }
 
     const kindRaw = String(req.query.wallet_kind || '').trim().toUpperCase();
