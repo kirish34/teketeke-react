@@ -29,7 +29,12 @@ app.use((req, res, next) => {
   const id = incoming || randomUUID();
   req.requestId = id;
   res.set('x-request-id', id);
-  res.set('x-teketeke-build', 'SERVERJS_2026-01-19_A');
+  const buildId =
+    process.env.RAILWAY_GIT_COMMIT_SHA ||
+    process.env.GIT_COMMIT ||
+    process.env.VERCEL_GIT_COMMIT_SHA ||
+    'unknown';
+  res.set('x-teketeke-build', buildId);
   next();
 });
 
@@ -80,7 +85,7 @@ app.use(cors({
     return cb(new Error('Not allowed by CORS'), false);
   },
   credentials: true,
-  exposedHeaders: ['x-railway-request-id', 'x-request-id', 'x-sacco-payouts-build'],
+  exposedHeaders: ['x-teketeke-build', 'x-request-id', 'x-railway-request-id', 'x-sacco-payouts-build'],
 }));
 
 // Security & logs
@@ -175,7 +180,13 @@ app.get('/api/version', (_req, res) => {
     process.env.VERCEL_GIT_COMMIT_SHA ||
     process.env.COMMIT_HASH ||
     null;
-  res.json({ ok: true, commit, deployed_at: new Date().toISOString() });
+  const buildId =
+    process.env.RAILWAY_GIT_COMMIT_SHA ||
+    process.env.GIT_COMMIT ||
+    process.env.VERCEL_GIT_COMMIT_SHA ||
+    'unknown';
+  res.set('x-teketeke-build', buildId);
+  res.json({ ok: true, service: 'teketeke-api', build: buildId, commit, deployed_at: new Date().toISOString() });
 });
 
 console.log('[mount] /api/sacco -> sacco-payouts router loaded');
