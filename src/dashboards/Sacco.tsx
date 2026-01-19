@@ -9,6 +9,7 @@ import { getOperatorConfig, normalizeOperatorType } from '../lib/operatorConfig'
 import VehicleCarePage from '../modules/vehicleCare/VehicleCarePage'
 import { fetchAccessGrants, saveAccessGrant, type AccessGrant } from '../modules/vehicleCare/vehicleCare.api'
 import { useAuth } from '../state/auth'
+import { useActiveSacco } from '../state/activeSacco'
 
 type SaccoOption = {
   sacco_id: string
@@ -290,8 +291,9 @@ const todayIso = () => new Date().toISOString().slice(0, 10)
 
 export default function SaccoDashboard() {
   const { user } = useAuth()
+  const { activeSaccoId, activeSaccoName, setActiveSacco } = useActiveSacco()
+  const currentSacco = activeSaccoId
   const [saccos, setSaccos] = useState<SaccoOption[]>([])
-  const [currentSacco, setCurrentSacco] = useState<string | null>(null)
   const [statusMsg, setStatusMsg] = useState('Loading organizations...')
   const [activeTab, setActiveTab] = useState<SaccoTabId>('overview')
   const [timeLabel, setTimeLabel] = useState('')
@@ -439,14 +441,14 @@ export default function SaccoDashboard() {
   const leafletLoader = useRef<Promise<any> | null>(null)
 
   const operatorType = useMemo(() => {
-    const selected = saccos.find((s) => s.sacco_id === currentSacco)
+    const selected = saccos.find((s) => s.sacco_id === activeSaccoId)
     // TODO: backend should guarantee operator_type on /u/my-saccos for operator typing.
     const rawType = selected?.operator_type || selected?.org_type || selected?.operatorType
     return normalizeOperatorType(rawType)
-  }, [saccos, currentSacco])
+  }, [saccos, activeSaccoId])
 
   const operatorConfig = useMemo(() => getOperatorConfig(operatorType), [operatorType])
-  const currentOperator = useMemo(() => saccos.find((s) => s.sacco_id === currentSacco) || null, [saccos, currentSacco])
+  const currentOperator = useMemo(() => saccos.find((s) => s.sacco_id === activeSaccoId) || null, [saccos, activeSaccoId])
   const operatorRole = (currentOperator?.role || '').toString().toUpperCase()
   const isOperatorAdmin = operatorRole === 'SACCO' || operatorRole === 'SACCO_ADMIN'
   const operatorManagesFleet = currentOperator?.manages_fleet === true
@@ -733,9 +735,9 @@ export default function SaccoDashboard() {
     [],
   )
   const operatorLabel = useMemo(() => {
-    const match = saccos.find((s) => s.sacco_id === currentSacco)
+    const match = saccos.find((s) => s.sacco_id === activeSaccoId)
     return match?.name || 'Operator'
-  }, [currentSacco, saccos])
+  }, [activeSaccoId, saccos])
 
   const staffLabel = useMemo(() => {
     if (!user?.id) return ''
@@ -774,10 +776,12 @@ export default function SaccoDashboard() {
         const items = data.items || []
         setSaccos(items)
         setStatusMsg(`${items.length} organization(s)`)
-        if (items.length) {
-          setCurrentSacco(items[0].sacco_id)
-        } else {
-          setCurrentSacco(null)
+        if (!activeSaccoId) {
+          if (items.length === 1) {
+            setActiveSacco(items[0].sacco_id || null, items[0].name || items[0].display_name || null)
+          } else {
+            setActiveSacco(null)
+          }
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load organizations')
@@ -785,7 +789,7 @@ export default function SaccoDashboard() {
       }
     }
     loadSaccos()
-  }, [])
+  }, [activeSaccoId, setActiveSacco])
 
   useEffect(() => {
     void loadMyAccessGrants()
@@ -919,10 +923,10 @@ export default function SaccoDashboard() {
 
   useEffect(() => {
     if (activeTab === 'overview') {
-      loadLedger()
+      void loadLedger()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab])
+  }, [activeTab, currentSacco])
 
   const filteredTx = useMemo(() => {
     return txs.filter((tx) => {
@@ -1721,8 +1725,23 @@ export default function SaccoDashboard() {
   async function loadPayoutDestinations() {
     setPayoutDestError(null)
     try {
-      const res = await fetchJson<{ destinations?: PayoutDestination[] }>('/api/sacco/payout-destinations')
-      const items = res.destinations || []
+      const res = await authFetch('/api/sacco/payout-destinations')
+      if (!res.ok) {
+        let msg = 'Failed to load payout destinations'
+        try {
+          const body = await res.json()
+          if (res.status === 403 && body?.code === 'SACCO_ACCESS_DENIED') {
+            msg = 'Your account is not authorized to manage SACCO payouts.'
+          }
+        } catch {
+          const text = await res.text()
+          msg = text || msg
+        }
+        setPayoutDestError(msg)
+        return
+      }
+      const data = await res.json()
+      const items = data.destinations || []
       setPayoutDestinations(items)
       setPayoutDestError(null)
       if (items.length) {
@@ -1785,10 +1804,25 @@ export default function SaccoDashboard() {
   async function loadPayoutBatches() {
     setPayoutBatchError(null)
     try {
-      const res = await fetchJson<{ batches?: PayoutBatch[] }>(
+      const res = await authFetch(
         `/api/sacco/payout-batches?from=${encodeURIComponent(payoutFrom)}&to=${encodeURIComponent(payoutTo)}`,
       )
-      setPayoutBatches(res.batches || [])
+      if (!res.ok) {
+        let msg = 'Failed to load payout batches'
+        try {
+          const body = await res.json()
+          if (res.status === 403 && body?.code === 'SACCO_ACCESS_DENIED') {
+            msg = 'Your account is not authorized to manage SACCO payouts.'
+          }
+        } catch {
+          const text = await res.text()
+          msg = text || msg
+        }
+        setPayoutBatchError(msg)
+        return
+      }
+      const data = await res.json()
+      setPayoutBatches(data.batches || [])
       setPayoutBatchError(null)
     } catch (err) {
       setPayoutBatches([])
@@ -2022,8 +2056,20 @@ export default function SaccoDashboard() {
       if (kind) params.set('wallet_kind', kind)
       const res = await authFetch(`/api/sacco/wallet-ledger?${params.toString()}`)
       if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || 'Failed to load wallet ledger')
+        let msg = 'Failed to load wallet ledger'
+        try {
+          const body = await res.json()
+          if (res.status === 403 && body?.code === 'SACCO_ACCESS_DENIED') {
+            msg = 'Your account is not authorized to view this SACCO ledger.'
+          } else if (body?.error) {
+            msg = body.error
+          }
+        } catch {
+          const text = await res.text()
+          msg = text || msg
+        }
+        setLedgerError(msg)
+        return
       }
       const payload = await res.json()
       const wallets = (payload.wallets || []) as LedgerWallet[]
@@ -2129,7 +2175,11 @@ export default function SaccoDashboard() {
               <div className="muted small">Organization</div>
               <select
                 value={currentSacco || ''}
-                onChange={(e) => setCurrentSacco(e.target.value || null)}
+                onChange={(e) => {
+                  const id = e.target.value || null
+                  const name = saccos.find((s) => s.sacco_id === id)?.name || null
+                  setActiveSacco(id, name)
+                }}
                 style={{ padding: 10, minWidth: 200 }}
               >
                 <option value="">- choose -</option>

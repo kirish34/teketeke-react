@@ -744,8 +744,25 @@ const MatatuOwnerDashboard = () => {
       if (ledgerFrom) params.set('from', ledgerFrom)
       if (ledgerTo) params.set('to', ledgerTo)
       if (currentId) params.set('matatu_id', currentId)
-      const res = await fetchJson<{ wallets?: LedgerWallet[] }>(`/api/wallets/owner-ledger?${params.toString()}`)
-      setLedgerWallets(res.wallets || [])
+      const res = await authFetch(`/api/wallets/owner-ledger?${params.toString()}`, {
+        headers: { Accept: 'application/json' },
+      })
+      if (!res.ok) {
+        let msg = 'Failed to load wallet ledger'
+        try {
+          const body = await res.json()
+          if (res.status === 403 && body?.code === 'SACCO_SCOPE_MISMATCH') {
+            msg = 'This vehicle belongs to a different SACCO than your account.'
+          }
+        } catch {
+          const text = await res.text()
+          msg = text || msg
+        }
+        setLedgerError(msg)
+        return
+      }
+      const data = (await res.json()) as any
+      setLedgerWallets(data.wallets || [])
     } catch (err) {
       setLedgerError(err instanceof Error ? err.message : 'Failed to load wallet ledger')
     } finally {
@@ -756,14 +773,6 @@ const MatatuOwnerDashboard = () => {
   useEffect(() => {
     if (activeTab !== 'overview') return
     void loadOwnerLedger()
-  }, [activeTab, loadOwnerLedger])
-
-  useEffect(() => {
-    if (activeTab !== 'overview') return
-    const timer = setInterval(() => {
-      void loadOwnerLedger()
-    }, 5000)
-    return () => clearInterval(timer)
   }, [activeTab, loadOwnerLedger])
 
   function exportOwnerLedgerCsv(wallet: LedgerWallet) {

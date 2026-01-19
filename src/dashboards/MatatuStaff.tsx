@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import DashboardShell from "../components/DashboardShell"
+import { authFetch } from "../lib/auth"
 import { api } from "../services/api"
 import { useAuth } from "../state/auth"
 import VehicleCarePage from "../modules/vehicleCare/VehicleCarePage"
@@ -107,8 +108,26 @@ const MatatuStaffDashboard = () => {
       if (ledgerFrom) params.set("from", ledgerFrom)
       if (ledgerTo) params.set("to", ledgerTo)
       params.set("matatu_id", matatuId)
-      const res = await fetchJson<{ wallets?: LedgerWallet[] }>(`/api/wallets/owner-ledger?${params.toString()}`)
-      setWallets(res.wallets || [])
+      const res = await authFetch(`/api/wallets/owner-ledger?${params.toString()}`, {
+        headers: { Accept: "application/json" },
+      })
+      if (!res.ok) {
+        let msg = "Failed to load wallets"
+        try {
+          const body = await res.json()
+          if (res.status === 403 && (body?.code === "SACCO_SCOPE_MISMATCH" || body?.code === "SACCO_ACCESS_DENIED")) {
+            msg = "This vehicle belongs to a different SACCO than your account."
+          }
+        } catch {
+          const text = await res.text()
+          msg = text || msg
+        }
+        setWalletError(msg)
+        setWallets([])
+        return
+      }
+      const data = (await res.json()) as any
+      setWallets(data.wallets || [])
     } catch (err) {
       setWalletError(err instanceof Error ? err.message : "Failed to load wallets")
       setWallets([])
@@ -167,19 +186,7 @@ const MatatuStaffDashboard = () => {
     if (activeTab === "overview") {
       void loadWallets()
     }
-    const timer = setInterval(() => {
-      void loadTransactions()
-      if (activeTab === "overview") {
-        void loadWallets()
-      }
-    }, 5000)
-    return () => clearInterval(timer)
   }, [activeTab, loadTransactions, loadWallets, saccoId])
-
-  useEffect(() => {
-    if (activeTab !== "overview") return
-    void loadWallets()
-  }, [activeTab, loadWallets])
 
   useEffect(() => {
     void (async () => {
@@ -425,10 +432,10 @@ const MatatuStaffDashboard = () => {
       {activeTab === "overview" ? (
         <>
           <section className="card">
-            <div className="topline" style={{ flexWrap: "wrap", gap: 8 }}>
+              <div className="topline" style={{ flexWrap: "wrap", gap: 8 }}>
               <div>
                 <h3 style={{ margin: 0 }}>Wallets</h3>
-                <div className="muted small">Owner + vehicle wallets (auto-refresh 5 seconds)</div>
+                <div className="muted small">Owner + vehicle wallets</div>
               </div>
               <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
                 <label className="muted small">
