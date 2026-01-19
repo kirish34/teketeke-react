@@ -98,6 +98,16 @@ async function resolveUserContext(userId) {
   };
 }
 
+async function resolveSaccoMembership(userId, saccoId) {
+  if (!userId || !saccoId) return { ok: false };
+  try {
+    const { resolveSaccoMembership } = require('../services/saccoAccess.service');
+    return await resolveSaccoMembership(userId, saccoId, pool);
+  } catch {
+    return { ok: false };
+  }
+}
+
 function walletMatatuId(wallet) {
   if (!wallet) return null;
   if (wallet.matatu_id) return wallet.matatu_id;
@@ -326,15 +336,39 @@ router.get('/wallets/owner-ledger', async (req, res) => {
   try {
     const userCtx = await resolveUserContext(req.user?.id);
     if (!userCtx || !userCtx.role) {
-      logWalletAuthDebug({ user_id: req.user?.id || null, reason: 'missing_context' });
-      return res.status(403).json({ ok: false, error: 'forbidden' });
+      logWalletAuthDebug({
+        request_id: req.requestId || null,
+        user_id: req.user?.id || null,
+        role: userCtx?.role || null,
+        sacco_id: userCtx?.saccoId || null,
+        matatu_id: userCtx?.matatuId || null,
+        reason: 'missing_context',
+      });
+      return res.status(403).json({
+        ok: false,
+        error: 'forbidden',
+        code: 'SACCO_ACCESS_DENIED',
+        details: { user_id: req.user?.id || null, role: userCtx?.role || null },
+        request_id: req.requestId || null,
+      });
     }
 
     const requestedMatatuIdRaw = String(req.query.matatu_id || '').trim();
     const matatuId = requestedMatatuIdRaw || userCtx.matatuId || null;
     if (!matatuId) {
-      logWalletAuthDebug({ user_id: req.user?.id || null, role: userCtx.role, reason: 'missing_matatu_id' });
-      return res.status(403).json({ ok: false, error: 'forbidden' });
+      logWalletAuthDebug({
+        request_id: req.requestId || null,
+        user_id: req.user?.id || null,
+        role: userCtx.role,
+        reason: 'missing_matatu_id',
+      });
+      return res.status(403).json({
+        ok: false,
+        error: 'forbidden',
+        code: 'SACCO_SCOPE_MISMATCH',
+        details: { user_id: req.user?.id || null, role: userCtx.role, requested_matatu_id: null },
+        request_id: req.requestId || null,
+      });
     }
 
     const matatuRes = await pool.query(
@@ -345,11 +379,11 @@ router.get('/wallets/owner-ledger', async (req, res) => {
     if (!matatu) return res.status(404).json({ ok: false, error: 'matatu not found' });
 
     const superUser = userCtx.role === ROLES.SYSTEM_ADMIN;
-    const saccoScoped =
-      [ROLES.SACCO_ADMIN, ROLES.SACCO_STAFF].includes(userCtx.role) &&
-      userCtx.saccoId &&
-      matatu.sacco_id &&
-      String(userCtx.saccoId) === String(matatu.sacco_id);
+    let saccoScoped = false;
+    if ([ROLES.SACCO_ADMIN, ROLES.SACCO_STAFF].includes(userCtx.role) && matatu.sacco_id) {
+      const mem = await resolveSaccoMembership(req.user?.id, matatu.sacco_id);
+      saccoScoped = Boolean(mem.ok);
+    }
     const matatuScoped =
       [ROLES.OWNER, ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx.role) &&
       userCtx.matatuId &&
@@ -386,6 +420,7 @@ router.get('/wallets/owner-ledger', async (req, res) => {
           matatu_id: matatuId,
           matatu_sacco_id: matatu.sacco_id || null,
         },
+        request_id: req.requestId || null,
       });
     }
 
