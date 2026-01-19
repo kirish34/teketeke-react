@@ -78,7 +78,8 @@ app.use(cors({
     }
     return cb(new Error('Not allowed by CORS'), false);
   },
-  credentials: true
+  credentials: true,
+  exposedHeaders: ['x-railway-request-id', 'x-request-id'],
 }));
 
 // Security & logs

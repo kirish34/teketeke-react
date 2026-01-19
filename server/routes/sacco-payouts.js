@@ -49,7 +49,12 @@ async function requireSaccoAdmin(req, res, next) {
         ok: false,
         error: 'forbidden',
         code: 'SACCO_ACCESS_DENIED',
-        details: { role: ctx?.role || null, user_sacco_id: ctx?.saccoId || null, source: ctx?.source || null },
+        details: {
+          role: ctx?.role || null,
+          user_sacco_id: ctx?.saccoId || null,
+          requested_sacco_id: null,
+          source: ctx?.source || null,
+        },
         request_id: req.requestId || null,
       });
     }

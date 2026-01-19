@@ -320,6 +320,7 @@ router.get('/sacco/wallet-ledger', async (req, res) => {
         details: {
           user_sacco_id: userCtx.saccoId || null,
           requested_sacco_id: requestedSaccoId,
+          source: userCtx.source || null,
         },
         request_id: req.requestId || null,
       });
