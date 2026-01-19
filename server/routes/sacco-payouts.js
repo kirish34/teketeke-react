@@ -3,12 +3,7 @@ const crypto = require('crypto');
 const pool = require('../db/pool');
 const { supabaseAdmin } = require('../supabase');
 const { requireUser } = require('../middleware/auth');
-const {
-  normalizeEffectiveRole,
-  ensureAppUserContextFromUserRoles,
-  upsertAppUserContext,
-} = require('../services/appUserContext.service');
-const { getSaccoContextUnified } = require('../services/saccoContext.service');
+const { requireSaccoAccess } = require('../services/saccoContext.service');
 const { insertPayoutEvent, normalizePayoutWalletKind } = require('../services/saccoPayouts.service');
 const { checkB2CEnvPresence } = require('../services/payoutReadiness.service');
 
@@ -18,7 +13,17 @@ if (!supabaseAdmin) {
   throw new Error('SUPABASE_SERVICE_ROLE_KEY is required to serve sacco payout endpoints');
 }
 
+router.use((req, res, next) => {
+  res.set('x-sacco-payouts-build', '2026-01-19_v2');
+  next();
+});
 router.use(requireUser);
+router.use(
+  requireSaccoAccess({
+    allowRoles: ['SACCO_ADMIN', 'SYSTEM_ADMIN'],
+    allowStaff: false,
+  }),
+);
 
 const DEST_TYPES = new Set(['PAYBILL_TILL', 'MSISDN']);
 // Note: wallet kinds elsewhere use SACCO_DAILY_FEE; normalizePayoutWalletKind handles mapping.
@@ -26,45 +31,6 @@ const WALLET_KINDS = ['SACCO_DAILY_FEE', 'SACCO_LOAN', 'SACCO_SAVINGS'];
 
 const MIN_PAYOUT = Number(process.env.MIN_PAYOUT_AMOUNT_KES || 10);
 const MAX_PAYOUT = Number(process.env.MAX_PAYOUT_AMOUNT_KES || 150000);
-
-// Require sacco admin/staff/system and include a clear error payload on deny.
-async function requireSaccoAdmin(req, res, next) {
-  try {
-    const uid = req.user?.id;
-    if (!uid) return res.status(401).json({ error: 'unauthorized', request_id: req.requestId || null });
-    const ctx = await getSaccoContextUnified(uid);
-    const allowed = ctx?.role === 'SYSTEM_ADMIN' || ctx?.role === 'SACCO_ADMIN';
-    if (!ctx?.saccoId || !allowed) {
-      if (String(process.env.DEBUG_SACCO_AUTH || '').toLowerCase() === 'true') {
-        console.log('[sacco-auth] deny payouts', {
-          request_id: req.requestId || null,
-          user_id: uid,
-          role: ctx?.role || null,
-          user_sacco_id: ctx?.saccoId || null,
-          source: ctx?.source || null,
-          path: req.path,
-        });
-      }
-      return res.status(403).json({
-        ok: false,
-        error: 'forbidden',
-        code: 'SACCO_ACCESS_DENIED',
-        details: {
-          role: ctx?.role || null,
-          user_sacco_id: ctx?.saccoId || null,
-          requested_sacco_id: null,
-          source: ctx?.source || null,
-        },
-        request_id: req.requestId || null,
-      });
-    }
-    req.saccoId = ctx.saccoId;
-    req.saccoRole = ctx.role;
-    return next();
-  } catch (err) {
-    return res.status(500).json({ error: err.message || 'Failed to resolve sacco access', request_id: req.requestId || null });
-  }
-}
 
 function normalizeMsisdn(value) {
   const digits = String(value || '').replace(/\D/g, '');

@@ -166,6 +166,17 @@ app.use('/api/admin', require('./routes/admin-vehicle-payout'));
 app.use('/api/admin', require('./routes/admin-sms'));
 app.use('/', require('./routes/sacco'));
 
+// simple version endpoint
+app.get('/api/version', (_req, res) => {
+  const commit =
+    process.env.RAILWAY_GIT_COMMIT_SHA ||
+    process.env.RAILWAY_GIT_COMMIT ||
+    process.env.VERCEL_GIT_COMMIT_SHA ||
+    process.env.COMMIT_HASH ||
+    null;
+  res.json({ ok: true, commit, deployed_at: new Date().toISOString() });
+});
+
 // Daraja C2B aliases (Safaricom blocks "mpesa" substring in RegisterURL)
 if (mpesaRouter.handleC2BValidation) {
   app.post('/validation', mpesaRouter.handleC2BValidation);
