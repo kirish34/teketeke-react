@@ -14,6 +14,7 @@ import { useActiveSacco } from '../state/activeSacco'
 type SaccoOption = {
   sacco_id: string
   name?: string
+  display_name?: string | null
   operator_type?: string | null
   org_type?: string | null
   operatorType?: string | null
@@ -291,7 +292,7 @@ const todayIso = () => new Date().toISOString().slice(0, 10)
 
 export default function SaccoDashboard() {
   const { user } = useAuth()
-  const { activeSaccoId, activeSaccoName, setActiveSacco } = useActiveSacco()
+const { activeSaccoId, setActiveSacco } = useActiveSacco()
   const currentSacco = activeSaccoId
   const [saccos, setSaccos] = useState<SaccoOption[]>([])
   const [statusMsg, setStatusMsg] = useState('Loading organizations...')
