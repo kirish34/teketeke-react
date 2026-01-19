@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const { randomUUID } = require('crypto');
 const path = require('path');
 const fs = require('fs');
 
@@ -21,6 +22,16 @@ const trustProxy =
     ? false
     : process.env.TRUST_PROXY || (process.env.NODE_ENV === 'production' ? 1 : false);
 app.set('trust proxy', trustProxy);
+
+// Request ID middleware (before routes)
+app.use((req, res, next) => {
+  const incoming = (req.headers['x-request-id'] || req.headers['request-id'] || '').toString().trim();
+  const id = incoming || randomUUID();
+  req.requestId = id;
+  res.set('x-request-id', id);
+  next();
+});
+
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false }));
 
@@ -180,14 +191,16 @@ if (require.main === module) {
 
 // 404 fallback to avoid hanging in serverless when route not matched
 app.use((req, res, _next) => {
-  res.status(404).json({ error: 'not_found', path: req.path, url: req.originalUrl });
+  res
+    .status(404)
+    .json({ error: 'not_found', path: req.path, url: req.originalUrl, request_id: req.requestId || null });
 });
 
 // error handler (last)
 app.use((err, req, res, _next) => {
   console.error(err);
-  const id = req.headers['x-request-id'] || '';
-  res.status(500).json({ error: 'server_error', request_id: id });
+  const id = req.requestId || req.headers['x-request-id'] || '';
+  res.status(500).json({ error: 'server_error', request_id: id || null });
 });
 
 module.exports = app;

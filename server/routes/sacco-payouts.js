@@ -8,7 +8,7 @@ const {
   ensureAppUserContextFromUserRoles,
   upsertAppUserContext,
 } = require('../services/appUserContext.service');
-const { getSaccoContext, isSaccoAllowedRole } = require('../services/saccoContext.service');
+const { getSaccoContextUnified } = require('../services/saccoContext.service');
 const { insertPayoutEvent, normalizePayoutWalletKind } = require('../services/saccoPayouts.service');
 const { checkB2CEnvPresence } = require('../services/payoutReadiness.service');
 
@@ -31,21 +31,33 @@ const MAX_PAYOUT = Number(process.env.MAX_PAYOUT_AMOUNT_KES || 150000);
 async function requireSaccoAdmin(req, res, next) {
   try {
     const uid = req.user?.id;
-    if (!uid) return res.status(401).json({ error: 'unauthorized' });
-    const ctx = await getSaccoContext(uid);
-    if (!ctx?.saccoId || !isSaccoAllowedRole(ctx.role)) {
+    if (!uid) return res.status(401).json({ error: 'unauthorized', request_id: req.requestId || null });
+    const ctx = await getSaccoContextUnified(uid);
+    const allowed = ctx?.role === 'SYSTEM_ADMIN' || ctx?.role === 'SACCO_ADMIN';
+    if (!ctx?.saccoId || !allowed) {
+      if (String(process.env.DEBUG_SACCO_AUTH || '').toLowerCase() === 'true') {
+        console.log('[sacco-auth] deny payouts', {
+          request_id: req.requestId || null,
+          user_id: uid,
+          role: ctx?.role || null,
+          user_sacco_id: ctx?.saccoId || null,
+          source: ctx?.source || null,
+          path: req.path,
+        });
+      }
       return res.status(403).json({
         ok: false,
         error: 'forbidden',
         code: 'SACCO_ACCESS_DENIED',
-        details: { role: ctx?.role || null, user_sacco_id: ctx?.saccoId || null },
+        details: { role: ctx?.role || null, user_sacco_id: ctx?.saccoId || null, source: ctx?.source || null },
+        request_id: req.requestId || null,
       });
     }
     req.saccoId = ctx.saccoId;
     req.saccoRole = ctx.role;
     return next();
   } catch (err) {
-    return res.status(500).json({ error: err.message || 'Failed to resolve sacco access' });
+    return res.status(500).json({ error: err.message || 'Failed to resolve sacco access', request_id: req.requestId || null });
   }
 }
 
