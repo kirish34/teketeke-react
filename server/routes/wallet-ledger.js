@@ -388,12 +388,22 @@ router.get('/wallets/owner-ledger', async (req, res) => {
         sacco_id: userCtx.saccoId || null,
         matatu_id: userCtx.matatuId || null,
         requested_matatu_id: matatuId,
+        matatu_sacco_id: matatu.sacco_id || null,
         saccoScoped,
         matatuScoped,
         ownerGrantScoped,
-        reason: 'matatu_scope_mismatch',
+        reason: 'SACCO_SCOPE_MISMATCH',
       });
-      return res.status(403).json({ ok: false, error: 'forbidden' });
+      return res.status(403).json({
+        ok: false,
+        error: 'forbidden',
+        code: 'SACCO_SCOPE_MISMATCH',
+        details: {
+          user_sacco_id: userCtx.saccoId || null,
+          matatu_id: matatuId,
+          matatu_sacco_id: matatu.sacco_id || null,
+        },
+      });
     }
 
     const kindRaw = String(req.query.wallet_kind || '').trim().toUpperCase();

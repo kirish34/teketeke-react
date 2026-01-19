@@ -8,6 +8,7 @@ const {
   ensureAppUserContextFromUserRoles,
   upsertAppUserContext,
 } = require('../services/appUserContext.service');
+const { getSaccoContext, isSaccoAllowedRole } = require('../services/saccoContext.service');
 const { insertPayoutEvent, normalizePayoutWalletKind } = require('../services/saccoPayouts.service');
 const { checkB2CEnvPresence } = require('../services/payoutReadiness.service');
 
@@ -26,75 +27,19 @@ const WALLET_KINDS = ['SACCO_DAILY_FEE', 'SACCO_LOAN', 'SACCO_SAVINGS'];
 const MIN_PAYOUT = Number(process.env.MIN_PAYOUT_AMOUNT_KES || 10);
 const MAX_PAYOUT = Number(process.env.MAX_PAYOUT_AMOUNT_KES || 150000);
 
-function isSaccoAdminRole(role) {
-  return role === 'SACCO_ADMIN' || role === 'SACCO_STAFF' || role === 'SYSTEM_ADMIN';
-}
-
-async function getSaccoContext(userId) {
-  if (!userId) return { role: null, saccoId: null };
-  const norm = (r) => normalizeEffectiveRole(r);
-  // primary: app_user_context
-  const ctxRes = await pool.query(
-    `SELECT effective_role, sacco_id FROM public.app_user_context WHERE user_id = $1 LIMIT 1`,
-    [userId],
-  );
-  const ctxRow = ctxRes.rows[0] || null;
-  const ctxRole = norm(ctxRow?.effective_role);
-  const ctxSacco = ctxRow?.sacco_id || null;
-  if (ctxRole && ctxSacco) return { role: ctxRole, saccoId: ctxSacco };
-
-  // fallback: user_roles
-  const roleRes = await pool.query(
-    `SELECT role, sacco_id FROM public.user_roles WHERE user_id = $1 LIMIT 1`,
-    [userId],
-  );
-  const r1 = roleRes.rows[0] || null;
-  const role1 = norm(r1?.role);
-  const sacco1 = r1?.sacco_id || null;
-  if (role1 && sacco1) {
-    await upsertAppUserContext({ user_id: userId, email: ctxRow?.email || null, effective_role: role1, sacco_id: sacco1, matatu_id: ctxRow?.matatu_id || null });
-    return { role: role1, saccoId: sacco1 };
-  }
-
-  // fallback: staff_profiles
-  const { data: staffRow, error: staffErr } = await supabaseAdmin
-    .from('staff_profiles')
-    .select('role,sacco_id,email')
-    .eq('user_id', userId)
-    .maybeSingle();
-  if (staffErr) throw staffErr;
-  const role2 = norm(staffRow?.role);
-  const sacco2 = staffRow?.sacco_id || null;
-  if (role2 && sacco2) {
-    await upsertAppUserContext({
-      user_id: userId,
-      email: staffRow?.email || ctxRow?.email || null,
-      effective_role: role2,
-      sacco_id: sacco2,
-      matatu_id: ctxRow?.matatu_id || null,
-    });
-    return { role: role2, saccoId: sacco2 };
-  }
-
-  // last resort repair from user_roles helper
-  try {
-    const repaired = await ensureAppUserContextFromUserRoles(userId, ctxRow?.email || staffRow?.email || null);
-    if (repaired?.effective_role && repaired?.sacco_id) {
-      return { role: norm(repaired.effective_role), saccoId: repaired.sacco_id };
-    }
-  } catch {
-    // ignore repair failures
-  }
-  return { role: ctxRole || role2 || role1 || null, saccoId: ctxSacco || sacco1 || sacco2 || null };
-}
-
+// Require sacco admin/staff/system and include a clear error payload on deny.
 async function requireSaccoAdmin(req, res, next) {
   try {
     const uid = req.user?.id;
     if (!uid) return res.status(401).json({ error: 'unauthorized' });
     const ctx = await getSaccoContext(uid);
-    if (!ctx.saccoId || !isSaccoAdminRole(ctx.role)) {
-      return res.status(403).json({ error: 'forbidden' });
+    if (!ctx?.saccoId || !isSaccoAllowedRole(ctx.role)) {
+      return res.status(403).json({
+        ok: false,
+        error: 'forbidden',
+        code: 'SACCO_ACCESS_DENIED',
+        details: { role: ctx?.role || null, user_sacco_id: ctx?.saccoId || null },
+      });
     }
     req.saccoId = ctx.saccoId;
     req.saccoRole = ctx.role;
