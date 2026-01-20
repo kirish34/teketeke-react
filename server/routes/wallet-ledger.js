@@ -156,6 +156,23 @@ async function hasOwnerAccessGrant(userId, matatuId) {
   return res.rows.length > 0;
 }
 
+async function hasMatatuStaffGrant(userId, matatuId) {
+  if (!userId || !matatuId) return false;
+  const res = await pool.query(
+    `
+      SELECT 1
+      FROM access_grants
+      WHERE user_id = $1
+        AND scope_id = $2
+        AND is_active = true
+        AND scope_type IN ('MATATU','OWNER')
+      LIMIT 1
+    `,
+    [userId, matatuId],
+  );
+  return res.rows.length > 0;
+}
+
 async function fetchLedgerForWallet(walletId, { from = null, to = null, limit = 100, offset = 0 } = {}) {
   const params = [walletId];
   const where = ['wallet_id = $1'];
@@ -398,54 +415,61 @@ router.get('/wallets/owner-ledger', async (req, res) => {
     const matatu = matatuRes.rows[0] || null;
     if (!matatu) return res.status(404).json({ ok: false, error: 'matatu not found' });
 
-    const membershipCtx = await resolveSaccoAuthContext({ userId: req.user?.id });
-    const allowedSaccos = membershipCtx.allowed_sacco_ids || [];
-    const superUser = userCtx.role === ROLES.SYSTEM_ADMIN;
-    let saccoScoped = false;
-    if ([ROLES.SACCO_ADMIN, ROLES.SACCO_STAFF].includes(userCtx.role) && matatu.sacco_id) {
-      saccoScoped = allowedSaccos.includes(String(matatu.sacco_id));
-    }
-    const matatuScoped =
-      [ROLES.OWNER, ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx.role) &&
-      userCtx.matatuId &&
-      String(userCtx.matatuId) === String(matatu.id);
-    let ownerGrantScoped = false;
-    if (userCtx.role === ROLES.OWNER && !matatuScoped) {
-      if (userCtx.saccoId && matatu.sacco_id && String(userCtx.saccoId) === String(matatu.sacco_id)) {
-        ownerGrantScoped = true;
-      } else {
-        ownerGrantScoped = await hasOwnerAccessGrant(req.user?.id, matatu.id);
+      const membershipCtx = await resolveSaccoAuthContext({ userId: req.user?.id });
+      const allowedSaccos = membershipCtx.allowed_sacco_ids || [];
+      const superUser = userCtx.role === ROLES.SYSTEM_ADMIN;
+      let saccoScoped = false;
+      if ([ROLES.SACCO_ADMIN, ROLES.SACCO_STAFF].includes(userCtx.role) && matatu.sacco_id) {
+        saccoScoped = allowedSaccos.includes(String(matatu.sacco_id));
       }
-    }
-    const roleAllowsMatatu = superUser || saccoScoped || matatuScoped || ownerGrantScoped;
+      const matatuScoped =
+        [ROLES.OWNER, ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx.role) &&
+        userCtx.matatuId &&
+        String(userCtx.matatuId) === String(matatu.id);
+      let ownerGrantScoped = false;
+      if (userCtx.role === ROLES.OWNER && !matatuScoped) {
+        if (userCtx.saccoId && matatu.sacco_id && String(userCtx.saccoId) === String(matatu.sacco_id)) {
+          ownerGrantScoped = true;
+        } else {
+          ownerGrantScoped = await hasOwnerAccessGrant(req.user?.id, matatu.id);
+        }
+      }
+      const staffGrantScoped =
+        [ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx.role) && (await hasMatatuStaffGrant(req.user?.id, matatu.id));
+      const roleAllowsMatatu = superUser || saccoScoped || matatuScoped || ownerGrantScoped || staffGrantScoped;
 
-    if (!roleAllowsMatatu) {
-      logWalletAuthDebug({
-        user_id: req.user?.id || null,
-        role: userCtx.role,
-        sacco_id: userCtx.saccoId || null,
-        matatu_id: userCtx.matatuId || null,
-        requested_matatu_id: matatuId,
-        matatu_sacco_id: matatu.sacco_id || null,
-        saccoScoped,
-        matatuScoped,
-        ownerGrantScoped,
-        allowed_sacco_ids: allowedSaccos,
-        reason: 'SACCO_SCOPE_MISMATCH',
-      });
-      return deny(
-        res,
-        'SACCO_SCOPE_MISMATCH',
-        {
-          user_sacco_id: userCtx.saccoId || null,
-          matatu_id: matatuId,
+      if (!roleAllowsMatatu) {
+        logWalletAuthDebug({
+          user_id: req.user?.id || null,
+          role: userCtx.role,
+          sacco_id: userCtx.saccoId || null,
+          matatu_id: userCtx.matatuId || null,
+          requested_matatu_id: matatuId,
           matatu_sacco_id: matatu.sacco_id || null,
+          saccoScoped,
+          matatuScoped,
+          ownerGrantScoped,
+          staffGrantScoped,
           allowed_sacco_ids: allowedSaccos,
-        },
-        403,
-        req.requestId || null,
-      );
-    }
+          reason: 'MATATU_ACCESS_DENIED',
+        });
+        return deny(
+          res,
+          'MATATU_ACCESS_DENIED',
+          {
+            user_id: req.user?.id || null,
+            role: userCtx.role,
+            requested_matatu_id: matatuId,
+            active_sacco_id: userCtx.saccoId || null,
+            matatu_sacco_id: matatu.sacco_id || null,
+            staff_grant: staffGrantScoped,
+            owner_grant: ownerGrantScoped,
+            allowed_sacco_ids: allowedSaccos,
+          },
+          403,
+          req.requestId || null,
+        );
+      }
 
     const kindRaw = String(req.query.wallet_kind || '').trim().toUpperCase();
     const walletKind = kindRaw && isMatatuOwnerWalletKind(kindRaw) ? kindRaw : null;
