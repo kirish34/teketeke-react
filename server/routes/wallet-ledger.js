@@ -143,7 +143,7 @@ async function loadAppContext(userId) {
   if (!userId) return null;
   const res = await pool.query(
     `
-      SELECT effective_role, sacco_id, matatu_id, active_sacco_id
+      SELECT effective_role, sacco_id, matatu_id
       FROM public.app_user_context
       WHERE user_id = $1
       LIMIT 1
@@ -422,8 +422,8 @@ router.get('/wallets/owner-ledger', async (req, res) => {
       const normalizedRole = normalizeRoleName(appCtx?.effective_role || req.user?.role);
       req.context = {
         effective_role: appCtx?.effective_role || null,
-        sacco_id: appCtx?.sacco_id || appCtx?.active_sacco_id || null,
-        active_sacco_id: appCtx?.active_sacco_id || appCtx?.sacco_id || null,
+        sacco_id: appCtx?.sacco_id || null,
+        active_sacco_id: null,
       };
       if (normalizedRole) req.user.role = normalizedRole;
 
@@ -482,10 +482,9 @@ router.get('/wallets/owner-ledger', async (req, res) => {
       const membershipCtx = await resolveSaccoAuthContext({ userId: req.user?.id });
       const allowedSaccos = membershipCtx.allowed_sacco_ids || [];
       const superUser = userCtx.role === ROLES.SYSTEM_ADMIN;
-      let saccoScoped = false;
-      if ([ROLES.SACCO_ADMIN, ROLES.SACCO_STAFF].includes(userCtx.role) && matatu.sacco_id) {
-        saccoScoped = allowedSaccos.includes(String(matatu.sacco_id));
-      }
+      const saccoScoped = [ROLES.SACCO_ADMIN].includes(userCtx.role) && userCtx.saccoId && matatu.sacco_id
+        ? String(userCtx.saccoId) === String(matatu.sacco_id)
+        : false;
       const matatuScoped =
         [ROLES.OWNER, ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx.role) &&
         userCtx.matatuId &&
@@ -498,7 +497,13 @@ router.get('/wallets/owner-ledger', async (req, res) => {
       const staffAccess = await resolveMatatuStaffAccess(req.user?.id, matatu.id, matatu.sacco_id);
       const staffGrantScoped =
         [ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx.role) && staffAccess.allowed;
-      const roleAllowsMatatu = superUser || saccoScoped || matatuScoped || ownerOfMatatu || ownerGrantScoped || staffGrantScoped;
+      const roleAllowsMatatu =
+        superUser ||
+        saccoScoped ||
+        ownerOfMatatu ||
+        ownerGrantScoped ||
+        staffGrantScoped ||
+        matatuScoped;
 
       if (!roleAllowsMatatu) {
         logWalletAuthDebug({
