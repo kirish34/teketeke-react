@@ -204,8 +204,7 @@ async function hasMatatuStaffProfileAssignment(userId, matatuId) {
 
 async function resolveMatatuStaffAccess(userId, matatuId, saccoId) {
   if (!userId || !matatuId) return { allowed: false, rowCount: 0, params: {} };
-  if (await hasMatatuStaffGrant(userId, matatuId)) return { allowed: true, rowCount: 1, params: { grant: true } };
-  // also check SACCO-managed assignments table (sacco_id can further scope)
+  const grantExists = await hasMatatuStaffGrant(userId, matatuId);
   const assignRes = await pool.query(
     `
       SELECT 1 FROM matatu_staff_assignments
@@ -214,10 +213,14 @@ async function resolveMatatuStaffAccess(userId, matatuId, saccoId) {
     `,
     [userId, matatuId, saccoId || null],
   );
-  if (assignRes.rows.length > 0)
-    return { allowed: true, rowCount: assignRes.rows.length, params: { userId, matatuId, saccoId } };
-  const prof = await hasMatatuStaffProfileAssignment(userId, matatuId);
-  return { allowed: prof, rowCount: assignRes.rows.length, params: { userId, matatuId, saccoId } };
+  const assignmentExists = assignRes.rows.length > 0;
+  const profileAssign = await hasMatatuStaffProfileAssignment(userId, matatuId);
+  const allowed = grantExists || assignmentExists || profileAssign;
+  return {
+    allowed,
+    rowCount: assignmentExists ? assignRes.rows.length : 0,
+    params: { userId, matatuId, saccoId, grantExists, assignmentExists, profileAssign },
+  };
 }
 
 async function fetchLedgerForWallet(walletId, { from = null, to = null, limit = 100, offset = 0 } = {}) {
@@ -523,6 +526,7 @@ router.get('/wallets/owner-ledger', async (req, res) => {
           role_context: req.context?.effective_role || null,
           assignment_query_params: staffAccess.params || {},
           assignment_rowcount: staffAccess.rowCount || 0,
+          decision: 'deny',
           reason: 'MATATU_ACCESS_DENIED',
         });
         return deny(
@@ -540,6 +544,7 @@ router.get('/wallets/owner-ledger', async (req, res) => {
             allowed_sacco_ids: allowedSaccos,
             assignment_query_params: staffAccess.params || {},
             assignment_rowcount: staffAccess.rowCount || 0,
+            staff_grant: staffGrantScoped,
             reason: staffGrantScoped
               ? 'staff_grant_ok'
               : ownerOfMatatu
