@@ -8,6 +8,16 @@ const router = express.Router();
 
 router.use(requireUser);
 
+function deny(res, code, details, status = 403, requestId = null) {
+  return res.status(status).json({
+    ok: false,
+    error: 'forbidden',
+    code,
+    request_id: requestId,
+    details: details || {},
+  });
+}
+
 const ROLES = {
   SYSTEM_ADMIN: 'SYSTEM_ADMIN',
   SACCO_ADMIN: 'SACCO_ADMIN',
@@ -354,13 +364,13 @@ router.get('/wallets/owner-ledger', async (req, res) => {
         matatu_id: userCtx?.matatuId || null,
         reason: 'missing_context',
       });
-      return res.status(403).json({
-        ok: false,
-        error: 'forbidden',
-        code: 'SACCO_ACCESS_DENIED',
-        details: { user_id: req.user?.id || null, role: userCtx?.role || null },
-        request_id: req.requestId || null,
-      });
+      return deny(
+        res,
+        'SACCO_ACCESS_DENIED',
+        { user_id: req.user?.id || null, role: userCtx?.role || null },
+        403,
+        req.requestId || null,
+      );
     }
 
     const requestedMatatuIdRaw = String(req.query.matatu_id || '').trim();
@@ -372,13 +382,13 @@ router.get('/wallets/owner-ledger', async (req, res) => {
         role: userCtx.role,
         reason: 'missing_matatu_id',
       });
-      return res.status(403).json({
-        ok: false,
-        error: 'forbidden',
-        code: 'SACCO_SCOPE_MISMATCH',
-        details: { user_id: req.user?.id || null, role: userCtx.role, requested_matatu_id: null },
-        request_id: req.requestId || null,
-      });
+      return deny(
+        res,
+        'SACCO_SCOPE_MISMATCH',
+        { user_id: req.user?.id || null, role: userCtx.role, requested_matatu_id: null },
+        403,
+        req.requestId || null,
+      );
     }
 
     const matatuRes = await pool.query(
@@ -423,18 +433,18 @@ router.get('/wallets/owner-ledger', async (req, res) => {
         allowed_sacco_ids: allowedSaccos,
         reason: 'SACCO_SCOPE_MISMATCH',
       });
-      return res.status(403).json({
-        ok: false,
-        error: 'forbidden',
-        code: 'SACCO_SCOPE_MISMATCH',
-        details: {
+      return deny(
+        res,
+        'SACCO_SCOPE_MISMATCH',
+        {
           user_sacco_id: userCtx.saccoId || null,
           matatu_id: matatuId,
           matatu_sacco_id: matatu.sacco_id || null,
           allowed_sacco_ids: allowedSaccos,
         },
-        request_id: req.requestId || null,
-      });
+        403,
+        req.requestId || null,
+      );
     }
 
     const kindRaw = String(req.query.wallet_kind || '').trim().toUpperCase();
