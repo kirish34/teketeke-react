@@ -16,6 +16,8 @@ const payoutReadinessRouter = require('./routes/payout-readiness');
 const walletLedgerRouter = require('./routes/wallet-ledger');
 const walletV2Router = require('./routes/wallet-v2');
 const walletMatatuV2Router = require('./routes/wallet-matatu-v2');
+const saccoStaffAssignmentsRouter = require('./routes/sacco-staff-assignments');
+const debugMatatuAccessRouter = require('./routes/debug-matatu-access');
 const authRouter = require('./routes/auth');
 const mpesaRouter = require('./routes/mpesa');
 
@@ -191,6 +193,8 @@ app.use('/api', skipMpesa(telemetryRouter));
 app.use('/api', skipMpesa(darajaB2CRouter));
 app.use('/api', skipMpesa(payoutReadinessRouter));
 app.use('/api/sacco', require('./routes/sacco-payouts'));
+app.use('/api/sacco', saccoStaffAssignmentsRouter);
+app.use('/api', debugMatatuAccessRouter);
 app.use('/api', skipMpesa(walletLedgerRouter));
 app.use('/test', require('./routes/wallet'));
 app.use('/', require('./routes/wallet-withdraw'));

@@ -98,6 +98,7 @@ const MatatuStaffDashboard = () => {
   const loadWallets = useCallback(async () => {
     if (!matatuId) {
       setWallets([])
+      setWalletError("No matatu assigned yet — contact SACCO admin.")
       return
     }
     setWalletLoading(true)
@@ -115,8 +116,8 @@ const MatatuStaffDashboard = () => {
         let msg = "Failed to load wallets"
         try {
           const body = await res.json()
-          if (res.status === 403 && (body?.code === "SACCO_SCOPE_MISMATCH" || body?.code === "SACCO_ACCESS_DENIED")) {
-            msg = "This vehicle belongs to a different SACCO than your account."
+          if (res.status === 403 && (body?.code === "MATATU_ACCESS_DENIED" || body?.code === "SACCO_SCOPE_MISMATCH")) {
+            msg = "No matatu assignment found for this account. Contact SACCO admin."
           }
         } catch {
           const text = await res.text()

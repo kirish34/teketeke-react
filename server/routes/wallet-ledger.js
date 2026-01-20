@@ -191,6 +191,16 @@ async function hasMatatuStaffProfileAssignment(userId, matatuId) {
 async function resolveMatatuStaffAccess(userId, matatuId) {
   if (!userId || !matatuId) return false;
   if (await hasMatatuStaffGrant(userId, matatuId)) return true;
+  // also check SACCO-managed assignments table
+  const assignRes = await pool.query(
+    `
+      SELECT 1 FROM matatu_staff_assignments
+      WHERE staff_user_id = $1 AND matatu_id = $2
+      LIMIT 1
+    `,
+    [userId, matatuId],
+  );
+  if (assignRes.rows.length > 0) return true;
   return hasMatatuStaffProfileAssignment(userId, matatuId);
 }
 
