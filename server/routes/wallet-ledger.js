@@ -188,17 +188,17 @@ async function hasMatatuStaffProfileAssignment(userId, matatuId) {
   return res.rows.length > 0;
 }
 
-async function resolveMatatuStaffAccess(userId, matatuId) {
+async function resolveMatatuStaffAccess(userId, matatuId, saccoId) {
   if (!userId || !matatuId) return false;
   if (await hasMatatuStaffGrant(userId, matatuId)) return true;
-  // also check SACCO-managed assignments table
+  // also check SACCO-managed assignments table (sacco_id can further scope)
   const assignRes = await pool.query(
     `
       SELECT 1 FROM matatu_staff_assignments
-      WHERE staff_user_id = $1 AND matatu_id = $2
+      WHERE staff_user_id = $1 AND matatu_id = $2 AND ($3::uuid IS NULL OR sacco_id = $3)
       LIMIT 1
     `,
-    [userId, matatuId],
+    [userId, matatuId, saccoId || null],
   );
   if (assignRes.rows.length > 0) return true;
   return hasMatatuStaffProfileAssignment(userId, matatuId);
@@ -402,19 +402,21 @@ router.get(
 
 router.get('/wallets/owner-ledger', async (req, res) => {
   try {
-    const userCtx = await resolveUserContext(req.user?.id);
-    if (!userCtx || !userCtx.role) {
-      logWalletAuthDebug({
-        request_id: req.requestId || null,
-        user_id: req.user?.id || null,
-        role: userCtx?.role || null,
-        sacco_id: userCtx?.saccoId || null,
-        matatu_id: userCtx?.matatuId || null,
-        reason: 'missing_context',
-      });
-      return deny(
-        res,
-        'SACCO_ACCESS_DENIED',
+      const normalizedRole = normalizeRoleName(req.context?.effective_role || req.user?.role);
+
+      const userCtx = await resolveUserContext(req.user?.id);
+      if (!userCtx || !userCtx.role) {
+        logWalletAuthDebug({
+          request_id: req.requestId || null,
+          user_id: req.user?.id || null,
+          role: userCtx?.role || null,
+          sacco_id: userCtx?.saccoId || null,
+          matatu_id: userCtx?.matatuId || null,
+          reason: 'missing_context',
+        });
+        return deny(
+          res,
+          'SACCO_ACCESS_DENIED',
         { user_id: req.user?.id || null, role: userCtx?.role || null },
         403,
         req.requestId || null,
@@ -465,7 +467,7 @@ router.get('/wallets/owner-ledger', async (req, res) => {
       }
       const staffGrantScoped =
         [ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx.role) &&
-        (await resolveMatatuStaffAccess(req.user?.id, matatu.id));
+        (await resolveMatatuStaffAccess(req.user?.id, matatu.id, matatu.sacco_id));
       const roleAllowsMatatu = superUser || saccoScoped || matatuScoped || ownerOfMatatu || ownerGrantScoped || staffGrantScoped;
 
       if (!roleAllowsMatatu) {
@@ -481,6 +483,9 @@ router.get('/wallets/owner-ledger', async (req, res) => {
           ownerGrantScoped,
           staffGrantScoped,
           allowed_sacco_ids: allowedSaccos,
+          role_normalized: normalizedRole,
+          role_header: req.user?.role || null,
+          role_context: req.context?.effective_role || null,
           reason: 'MATATU_ACCESS_DENIED',
         });
         return deny(
@@ -503,6 +508,9 @@ router.get('/wallets/owner-ledger', async (req, res) => {
               : ownerGrantScoped
               ? 'owner_grant_ok'
               : 'no matching staff/owner grant for this matatu',
+            role_normalized: normalizedRole,
+            role_header: req.user?.role || null,
+            role_context: req.context?.effective_role || null,
           },
           403,
           req.requestId || null,
