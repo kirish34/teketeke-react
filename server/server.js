@@ -15,6 +15,7 @@ const darajaB2CRouter = require('./routes/daraja-b2c');
 const payoutReadinessRouter = require('./routes/payout-readiness');
 const walletLedgerRouter = require('./routes/wallet-ledger');
 const walletV2Router = require('./routes/wallet-v2');
+const walletMatatuV2Router = require('./routes/wallet-matatu-v2');
 const authRouter = require('./routes/auth');
 const mpesaRouter = require('./routes/mpesa');
 
@@ -166,6 +167,7 @@ app.get(['/healthz', '/api/healthz'], (req, res) => {
 
 // v2 routes should be reachable before other /api routers
 app.use('/api/v2', walletV2Router);
+app.use('/api/v2/matatu', walletMatatuV2Router);
 
 // routes
 app.use('/u', require('./routes/user'));

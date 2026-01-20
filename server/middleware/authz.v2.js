@@ -121,8 +121,75 @@ function requireSaccoRoleV2(allowRoles = []) {
   };
 }
 
+function requireMatatuRoleV2(allowRoles = []) {
+  const allowed = new Set(allowRoles.map(normalizeRole));
+  return async (req, res, next) => {
+    try {
+      const ctx = await fetchAppUserContext(req.user?.id);
+      req.context = {
+        effective_role: ctx?.effective_role || null,
+        sacco_id: ctx?.sacco_id || null,
+        matatu_id: ctx?.matatu_id || null,
+      };
+      const normalizedRole = normalizeRole(req.context.effective_role);
+      const requestedMatatuId =
+        (req.query?.matatu_id || '').toString().trim() ||
+        (req.headers['x-active-matatu-id'] || '').toString().trim() ||
+        (ctx?.matatu_id ? String(ctx.matatu_id) : '');
+
+      if (!requestedMatatuId) {
+        return res.status(400).json({
+          ok: false,
+          error: 'bad_request',
+          code: 'MATATU_ID_REQUIRED',
+          request_id: req.requestId,
+          details: { user_id: req.user?.id || null },
+        });
+      }
+
+      const roleAllowed = normalizedRole === 'SYSTEM_ADMIN' || allowed.has(normalizedRole);
+      if (!roleAllowed) {
+        if (String(process.env.DEBUG_WALLET_AUTH || '').toLowerCase() === 'true') {
+          console.log('[authz.v2] deny matatu', {
+            request_id: req.requestId,
+            userId: req.user?.id || null,
+            userRole: req.user?.role || null,
+            effectiveRole: req.context?.effective_role || null,
+            normalizedRole,
+            allowedRoles: Array.from(allowed),
+            matatuId: requestedMatatuId,
+            path: req.originalUrl,
+          });
+        }
+        return res.status(403).json({
+          ok: false,
+          error: 'forbidden',
+          code: 'MATATU_ACCESS_DENIED',
+          request_id: req.requestId,
+          details: {
+            user_id: req.user?.id || null,
+            role: normalizedRole || null,
+            requested_matatu_id: requestedMatatuId,
+            active_matatu_id: req.context?.matatu_id || null,
+          },
+        });
+      }
+
+      req.matatuId = requestedMatatuId;
+      return next();
+    } catch (err) {
+      return res.status(500).json({
+        ok: false,
+        error: err.message || 'authz_failed',
+        request_id: req.requestId,
+      });
+    }
+  };
+}
+
 module.exports = {
   normalizeRole,
   requireUserV2,
   requireSaccoRoleV2,
+  requireMatatuRoleV2,
 };

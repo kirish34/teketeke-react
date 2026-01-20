@@ -303,6 +303,7 @@ export default function SaccoDashboard() {
   const isSaccoAdmin = role === 'sacco_admin' || isSystemAdmin
   const isMatatuOwner = role === 'matatu_owner' || role === 'owner'
   const { activeSaccoId, setActiveSacco } = useActiveSacco()
+  const ownerMatatuId = context?.matatu_id || null
   const currentSacco = activeSaccoId
   const [saccos, setSaccos] = useState<SaccoOption[]>([])
   const [statusMsg, setStatusMsg] = useState('Loading organizations...')
@@ -2063,16 +2064,23 @@ export default function SaccoDashboard() {
   }
 
   async function loadLedger(kind?: string) {
-    if (isMatatuOwner) {
-      setLedgerError('Owner accounts should view the owner wallet ledger.')
-      debugAuth('ledger_blocked_owner_role', { role })
-      return
-    }
-    if (!isSaccoAdmin) {
-      setLedgerError('You are not authorized to view this SACCO ledger.')
+    const useSacco = isSaccoAdmin
+    const useOwner = isMatatuOwner && !isSaccoAdmin
+
+    if (!useSacco && !useOwner) {
+      setLedgerError('You are not authorized to view wallet ledgers.')
       debugAuth('ledger_blocked_role', { role })
       return
     }
+
+    const endpoint = useSacco ? '/api/v2/sacco/wallet-ledger' : '/api/v2/matatu/wallet-ledger'
+    const matatuIdForOwner = ownerMatatuId || ''
+    if (useOwner && !matatuIdForOwner) {
+      setLedgerError('No vehicle found in your profile.')
+      debugAuth('ledger_blocked_no_matatu', { role, matatu_id: matatuIdForOwner })
+      return
+    }
+
     setLedgerLoading(true)
     setLedgerError(null)
     try {
@@ -2081,7 +2089,9 @@ export default function SaccoDashboard() {
       if (ledgerFrom) params.set('from', ledgerFrom)
       if (ledgerTo) params.set('to', ledgerTo)
       if (kind) params.set('wallet_kind', kind)
-      const res = await authFetch(`/api/v2/sacco/wallet-ledger?${params.toString()}`)
+      if (useOwner && matatuIdForOwner) params.set('matatu_id', matatuIdForOwner)
+      debugAuth('ledger_fetch', { endpoint, params: Object.fromEntries(params.entries()) })
+      const res = await authFetch(`${endpoint}?${params.toString()}`)
       if (!res.ok) {
         let msg = 'Failed to load wallet ledger'
         try {
