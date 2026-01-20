@@ -388,15 +388,12 @@ router.get('/wallets/owner-ledger', async (req, res) => {
     const matatu = matatuRes.rows[0] || null;
     if (!matatu) return res.status(404).json({ ok: false, error: 'matatu not found' });
 
+    const membershipCtx = await resolveSaccoAuthContext({ userId: req.user?.id });
+    const allowedSaccos = membershipCtx.allowed_sacco_ids || [];
     const superUser = userCtx.role === ROLES.SYSTEM_ADMIN;
     let saccoScoped = false;
     if ([ROLES.SACCO_ADMIN, ROLES.SACCO_STAFF].includes(userCtx.role) && matatu.sacco_id) {
-      try {
-        const membershipCtx = await resolveSaccoAuthContext({ userId: req.user?.id });
-        saccoScoped = membershipCtx.allowed_sacco_ids.includes(String(matatu.sacco_id));
-      } catch {
-        saccoScoped = false;
-      }
+      saccoScoped = allowedSaccos.includes(String(matatu.sacco_id));
     }
     const matatuScoped =
       [ROLES.OWNER, ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx.role) &&
@@ -423,6 +420,7 @@ router.get('/wallets/owner-ledger', async (req, res) => {
         saccoScoped,
         matatuScoped,
         ownerGrantScoped,
+        allowed_sacco_ids: allowedSaccos,
         reason: 'SACCO_SCOPE_MISMATCH',
       });
       return res.status(403).json({
@@ -433,7 +431,7 @@ router.get('/wallets/owner-ledger', async (req, res) => {
           user_sacco_id: userCtx.saccoId || null,
           matatu_id: matatuId,
           matatu_sacco_id: matatu.sacco_id || null,
-          allowed_sacco_ids: userCtx.allowed_sacco_ids || [],
+          allowed_sacco_ids: allowedSaccos,
         },
         request_id: req.requestId || null,
       });

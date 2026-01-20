@@ -98,6 +98,12 @@ async function resolveSaccoAuthContext({ userId, pool = poolDefault }) {
   };
   ctx.effective_role = pickRole();
 
+  // If memberships are empty but active_sacco_id exists, trust it as allowed for backward compatibility
+  if ((!ctx.allowed_sacco_ids || ctx.allowed_sacco_ids.length === 0) && ctx.active_sacco_id) {
+    ctx.allowed_sacco_ids = [String(ctx.active_sacco_id)];
+    ctx.source.membership = ctx.source.membership === 'none' ? ctx.source.active : ctx.source.membership;
+  }
+
   return ctx;
 }
 
@@ -138,6 +144,8 @@ function requireSaccoMembership({ allowRoles = [], allowStaff = true } = {}) {
       if (roleAllowed && saccoAllowed) {
         req.saccoId = String(requested);
         req.saccoAuth = ctx;
+        req.user = req.user || {};
+        req.user.role = req.user.role || role;
         return next();
       }
 
