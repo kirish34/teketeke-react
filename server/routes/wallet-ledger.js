@@ -215,11 +215,11 @@ async function resolveMatatuStaffAccess(userId, matatuId, saccoId) {
   );
   const assignmentExists = assignRes.rows.length > 0;
   const profileAssign = await hasMatatuStaffProfileAssignment(userId, matatuId);
-  const allowed = grantExists || assignmentExists || profileAssign;
+  const staffGrant = grantExists || assignmentExists || profileAssign;
   return {
-    allowed,
+    allowed: staffGrant,
     rowCount: assignmentExists ? assignRes.rows.length : 0,
-    params: { userId, matatuId, saccoId, grantExists, assignmentExists, profileAssign },
+    params: { userId, matatuId, saccoId, grantExists, assignmentExists, profileAssign, staffGrant },
   };
 }
 
@@ -540,16 +540,20 @@ router.get('/wallets/owner-ledger', async (req, res) => {
             matatu_sacco_id: matatu.sacco_id || null,
             staff_grant: staffGrantScoped,
             owner_grant: ownerGrantScoped,
-            owner_of_matatu: ownerOfMatatu,
-            allowed_sacco_ids: allowedSaccos,
-            assignment_query_params: staffAccess.params || {},
-            assignment_rowcount: staffAccess.rowCount || 0,
-            staff_grant: staffGrantScoped,
-            reason: staffGrantScoped
-              ? 'staff_grant_ok'
-              : ownerOfMatatu
-              ? 'owner_of_matatu'
-              : ownerGrantScoped
+          owner_of_matatu: ownerOfMatatu,
+          allowed_sacco_ids: allowedSaccos,
+          assignment_query_params: staffAccess.params || {},
+          assignment_rowcount: staffAccess.rowCount || 0,
+          staff_grant: staffGrantScoped,
+          grantExists: staffAccess.params?.grantExists,
+          assignmentExists: staffAccess.params?.assignmentExists,
+          profileAssign: staffAccess.params?.profileAssign,
+          staffGrant: staffAccess.params?.staffGrant,
+          reason: staffGrantScoped
+            ? 'staff_grant_ok'
+            : ownerOfMatatu
+            ? 'owner_of_matatu'
+            : ownerGrantScoped
               ? 'owner_grant_ok'
               : 'no matching staff/owner grant for this matatu',
             role_normalized: normalizedRole,
