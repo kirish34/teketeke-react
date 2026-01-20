@@ -297,8 +297,12 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 const todayIso = () => new Date().toISOString().slice(0, 10)
 
 export default function SaccoDashboard() {
-  const { user } = useAuth()
-const { activeSaccoId, setActiveSacco } = useActiveSacco()
+  const { user, context } = useAuth()
+  const role = (user?.role || context?.effective_role || '').toLowerCase()
+  const isSystemAdmin = role === 'system_admin'
+  const isSaccoAdmin = role === 'sacco_admin' || isSystemAdmin
+  const isMatatuOwner = role === 'matatu_owner' || role === 'owner'
+  const { activeSaccoId, setActiveSacco } = useActiveSacco()
   const currentSacco = activeSaccoId
   const [saccos, setSaccos] = useState<SaccoOption[]>([])
   const [statusMsg, setStatusMsg] = useState('Loading organizations...')
@@ -457,7 +461,7 @@ const { activeSaccoId, setActiveSacco } = useActiveSacco()
   const operatorConfig = useMemo(() => getOperatorConfig(operatorType), [operatorType])
   const currentOperator = useMemo(() => saccos.find((s) => s.sacco_id === activeSaccoId) || null, [saccos, activeSaccoId])
   const operatorRole = (currentOperator?.role || '').toString().toUpperCase()
-  const isOperatorAdmin = operatorRole === 'SACCO' || operatorRole === 'SACCO_ADMIN'
+  const isOperatorAdmin = isSaccoAdmin || operatorRole === 'SACCO' || operatorRole === 'SACCO_ADMIN'
   const operatorManagesFleet = currentOperator?.manages_fleet === true
   const myOperatorGrant = useMemo(
     () =>
@@ -2059,9 +2063,14 @@ const { activeSaccoId, setActiveSacco } = useActiveSacco()
   }
 
   async function loadLedger(kind?: string) {
-    if (!currentSacco) {
-      setLedgerError('Choose a SACCO to load ledger')
-      debugAuth('ledger_blocked_no_sacco')
+    if (isMatatuOwner) {
+      setLedgerError('Owner accounts should view the owner wallet ledger.')
+      debugAuth('ledger_blocked_owner_role', { role })
+      return
+    }
+    if (!isSaccoAdmin) {
+      setLedgerError('You are not authorized to view this SACCO ledger.')
+      debugAuth('ledger_blocked_role', { role })
       return
     }
     setLedgerLoading(true)
@@ -2069,11 +2078,10 @@ const { activeSaccoId, setActiveSacco } = useActiveSacco()
     try {
       const params = new URLSearchParams()
       params.set('limit', '200')
-      params.set('sacco_id', currentSacco)
       if (ledgerFrom) params.set('from', ledgerFrom)
       if (ledgerTo) params.set('to', ledgerTo)
       if (kind) params.set('wallet_kind', kind)
-      const res = await authFetch(`/api/sacco/wallet-ledger?${params.toString()}`)
+      const res = await authFetch(`/api/v2/sacco/wallet-ledger?${params.toString()}`)
       if (!res.ok) {
         let msg = 'Failed to load wallet ledger'
         try {
