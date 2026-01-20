@@ -17,6 +17,8 @@ router.get('/debug/matatu-access', async (req, res) => {
     const matatu = matatuRes.rows[0] || null;
 
     const ctx = await resolveSaccoAuthContext({ userId: req.user?.id });
+    const roleResolved = ctx.role || (req.user?.role || '').toUpperCase() || null;
+    const activeSaccoId = ctx.saccoId || ctx.active_sacco_id || null;
     const grants = await pool.query(
       `
         SELECT scope_type, scope_id, role, is_active
@@ -32,21 +34,23 @@ router.get('/debug/matatu-access', async (req, res) => {
         FROM matatu_staff_assignments
         WHERE staff_user_id = $1
           AND matatu_id = $2
+          AND ($3::uuid IS NULL OR sacco_id = $3)
       `,
-      [req.user?.id, matatuId],
+      [req.user?.id, matatuId, matatu?.sacco_id || null],
     );
 
     const staff_assignment_exists = (assignments.rows || []).length > 0;
     const is_owner = matatu?.created_by && req.user?.id && String(matatu.created_by) === String(req.user.id);
-    const is_sacco_admin = ctx.role === 'SACCO_ADMIN' || ctx.role === 'SYSTEM_ADMIN';
-    const sacco_match = matatu?.sacco_id && ctx.saccoId && String(matatu.sacco_id) === String(ctx.saccoId);
+    const is_sacco_admin = roleResolved === 'SACCO_ADMIN' || roleResolved === 'SYSTEM_ADMIN';
+    const sacco_match = matatu?.sacco_id && activeSaccoId && String(matatu.sacco_id) === String(activeSaccoId);
     const effective_access = Boolean(is_owner || (is_sacco_admin && sacco_match) || staff_assignment_exists);
 
     return res.json({
       ok: true,
       user_id: req.user?.id || null,
-      role: ctx.role || null,
-      active_sacco_id: ctx.saccoId || null,
+      role: roleResolved,
+      role_context: ctx.role || null,
+      active_sacco_id: activeSaccoId,
       matatu_id: matatu?.id || null,
       sacco_id: matatu?.sacco_id || null,
       owner_user_id: matatu?.created_by || null,
@@ -56,6 +60,7 @@ router.get('/debug/matatu-access', async (req, res) => {
       effective_access,
       grants: grants.rows || [],
       assignments: assignments.rows || [],
+      assignment_query_params: { user_id: req.user?.id || null, matatu_id: matatuId, sacco_id: matatu?.sacco_id || null },
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message || 'Failed to debug matatu access' });
