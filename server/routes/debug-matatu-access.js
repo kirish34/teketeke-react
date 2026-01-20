@@ -10,7 +10,8 @@ router.get('/debug/matatu-access', async (req, res) => {
   const matatuId = (req.query.matatu_id || '').toString().trim();
   if (!matatuId) return res.status(400).json({ ok: false, error: 'matatu_id required' });
   try {
-    const matatuRes = await pool.query(`SELECT id, sacco_id, owner_user_id FROM matatus WHERE id = $1 LIMIT 1`, [
+    // created_by is the owner user id for matatus
+    const matatuRes = await pool.query(`SELECT id, sacco_id, created_by FROM matatus WHERE id = $1 LIMIT 1`, [
       matatuId,
     ]);
     const matatu = matatuRes.rows[0] || null;
@@ -35,12 +36,24 @@ router.get('/debug/matatu-access', async (req, res) => {
       [req.user?.id, matatuId],
     );
 
+    const staff_assignment_exists = (assignments.rows || []).length > 0;
+    const is_owner = matatu?.created_by && req.user?.id && String(matatu.created_by) === String(req.user.id);
+    const is_sacco_admin = ctx.role === 'SACCO_ADMIN' || ctx.role === 'SYSTEM_ADMIN';
+    const sacco_match = matatu?.sacco_id && ctx.saccoId && String(matatu.sacco_id) === String(ctx.saccoId);
+    const effective_access = Boolean(is_owner || (is_sacco_admin && sacco_match) || staff_assignment_exists);
+
     return res.json({
       ok: true,
       user_id: req.user?.id || null,
       role: ctx.role || null,
       active_sacco_id: ctx.saccoId || null,
-      matatu,
+      matatu_id: matatu?.id || null,
+      sacco_id: matatu?.sacco_id || null,
+      owner_user_id: matatu?.created_by || null,
+      is_owner,
+      is_sacco_admin,
+      staff_assignment_exists,
+      effective_access,
       grants: grants.rows || [],
       assignments: assignments.rows || [],
     });

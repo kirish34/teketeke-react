@@ -439,12 +439,13 @@ router.get('/wallets/owner-ledger', async (req, res) => {
       );
     }
 
-    const matatuRes = await pool.query(
-      `SELECT id, sacco_id FROM matatus WHERE id = $1 LIMIT 1`,
-      [matatuId],
-    );
-    const matatu = matatuRes.rows[0] || null;
-    if (!matatu) return res.status(404).json({ ok: false, error: 'matatu not found' });
+      const matatuRes = await pool.query(
+        // created_by stores the owner user id
+        `SELECT id, sacco_id, created_by FROM matatus WHERE id = $1 LIMIT 1`,
+        [matatuId],
+      );
+      const matatu = matatuRes.rows[0] || null;
+      if (!matatu) return res.status(404).json({ ok: false, error: 'matatu not found' });
 
       const membershipCtx = await resolveSaccoAuthContext({ userId: req.user?.id });
       const allowedSaccos = membershipCtx.allowed_sacco_ids || [];
@@ -457,18 +458,15 @@ router.get('/wallets/owner-ledger', async (req, res) => {
         [ROLES.OWNER, ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx.role) &&
         userCtx.matatuId &&
         String(userCtx.matatuId) === String(matatu.id);
+      const ownerOfMatatu = matatu.created_by && req.user?.id && String(matatu.created_by) === String(req.user.id);
       let ownerGrantScoped = false;
-      if (userCtx.role === ROLES.OWNER && !matatuScoped) {
-        if (userCtx.saccoId && matatu.sacco_id && String(userCtx.saccoId) === String(matatu.sacco_id)) {
-          ownerGrantScoped = true;
-        } else {
-          ownerGrantScoped = await hasOwnerAccessGrant(req.user?.id, matatu.id);
-        }
+      if (userCtx.role === ROLES.OWNER && !ownerOfMatatu) {
+        ownerGrantScoped = await hasOwnerAccessGrant(req.user?.id, matatu.id);
       }
       const staffGrantScoped =
         [ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx.role) &&
         (await resolveMatatuStaffAccess(req.user?.id, matatu.id));
-      const roleAllowsMatatu = superUser || saccoScoped || matatuScoped || ownerGrantScoped || staffGrantScoped;
+      const roleAllowsMatatu = superUser || saccoScoped || matatuScoped || ownerOfMatatu || ownerGrantScoped || staffGrantScoped;
 
       if (!roleAllowsMatatu) {
         logWalletAuthDebug({
@@ -496,9 +494,12 @@ router.get('/wallets/owner-ledger', async (req, res) => {
             matatu_sacco_id: matatu.sacco_id || null,
             staff_grant: staffGrantScoped,
             owner_grant: ownerGrantScoped,
+            owner_of_matatu: ownerOfMatatu,
             allowed_sacco_ids: allowedSaccos,
             reason: staffGrantScoped
               ? 'staff_grant_ok'
+              : ownerOfMatatu
+              ? 'owner_of_matatu'
               : ownerGrantScoped
               ? 'owner_grant_ok'
               : 'no matching staff/owner grant for this matatu',
