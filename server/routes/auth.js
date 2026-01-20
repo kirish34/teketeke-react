@@ -69,6 +69,7 @@ async function handleMe(req, res) {
     const baseUser = {
       id: userId,
       email: req.user?.email || ctx?.email || null,
+      role: null,
     };
     if (!ctx) {
       const repaired = await ensureAppUserContextFromUserRoles(userId, baseUser.email);
@@ -95,14 +96,18 @@ async function handleMe(req, res) {
       sacco_id: ctx.sacco_id,
       matatu_id: ctx.matatu_id,
     });
+    const mappedCtx = {
+      effective_role: normalizeEffectiveRole(ctx.effective_role),
+      sacco_id: ctx.sacco_id,
+      matatu_id: ctx.matatu_id,
+    };
+    baseUser.role = mappedCtx.effective_role ? String(mappedCtx.effective_role).toLowerCase() : req.user?.role || null;
+    req.context = mappedCtx;
+    req.user.role = baseUser.role;
     return res.json({
       ok: true,
       user: baseUser,
-      context: {
-        effective_role: normalizeEffectiveRole(ctx.effective_role),
-        sacco_id: ctx.sacco_id,
-        matatu_id: ctx.matatu_id,
-      },
+      context: mappedCtx,
       context_missing: false,
       needs_setup: false,
     });

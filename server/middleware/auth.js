@@ -45,6 +45,13 @@ async function requireUser(req, res, next) {
       return res.status(401).json({ error: 'invalid token' });
     }
     req.user = data.user;
+    const metaRole =
+      (data.user?.user_metadata && data.user.user_metadata.role) ||
+      (data.user?.app_metadata && data.user.app_metadata.role) ||
+      null;
+    if (metaRole) {
+      req.user.role = String(metaRole).toLowerCase();
+    }
     req.supa = supaForToken(token);
     debugAuth({ token_length: token.length, user_id: data.user.id });
     return next();
