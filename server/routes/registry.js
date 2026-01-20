@@ -22,7 +22,7 @@ async function requireSystemAdmin(req, res, next) {
   });
 }
 
-router.use(requireSystemAdmin);
+router.use('/registry', requireSystemAdmin);
 
 const ROOT = process.cwd();
 const REG_DIR = path.join(ROOT, 'data', 'registry');
