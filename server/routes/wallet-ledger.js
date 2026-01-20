@@ -173,6 +173,21 @@ async function hasMatatuStaffGrant(userId, matatuId) {
   return res.rows.length > 0;
 }
 
+async function hasMatatuStaffProfileAssignment(userId, matatuId) {
+  if (!userId || !matatuId) return false;
+  const res = await pool.query(
+    `
+      SELECT 1
+      FROM staff_profiles
+      WHERE user_id = $1
+        AND matatu_id = $2
+        LIMIT 1
+    `,
+    [userId, matatuId],
+  );
+  return res.rows.length > 0;
+}
+
 async function fetchLedgerForWallet(walletId, { from = null, to = null, limit = 100, offset = 0 } = {}) {
   const params = [walletId];
   const where = ['wallet_id = $1'];
@@ -435,7 +450,9 @@ router.get('/wallets/owner-ledger', async (req, res) => {
         }
       }
       const staffGrantScoped =
-        [ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx.role) && (await hasMatatuStaffGrant(req.user?.id, matatu.id));
+        [ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx.role) &&
+        ((await hasMatatuStaffGrant(req.user?.id, matatu.id)) ||
+          (await hasMatatuStaffProfileAssignment(req.user?.id, matatu.id)));
       const roleAllowsMatatu = superUser || saccoScoped || matatuScoped || ownerGrantScoped || staffGrantScoped;
 
       if (!roleAllowsMatatu) {
@@ -465,6 +482,7 @@ router.get('/wallets/owner-ledger', async (req, res) => {
             staff_grant: staffGrantScoped,
             owner_grant: ownerGrantScoped,
             allowed_sacco_ids: allowedSaccos,
+            reason: 'No matching staff/owner grant for this matatu',
           },
           403,
           req.requestId || null,
