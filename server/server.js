@@ -14,6 +14,7 @@ const telemetryRouter = require('./routes/telemetry');
 const darajaB2CRouter = require('./routes/daraja-b2c');
 const payoutReadinessRouter = require('./routes/payout-readiness');
 const walletLedgerRouter = require('./routes/wallet-ledger');
+const walletV2Router = require('./routes/wallet-v2');
 const authRouter = require('./routes/auth');
 const mpesaRouter = require('./routes/mpesa');
 
@@ -160,6 +161,7 @@ app.use('/api', skipMpesa(telemetryRouter));
 app.use('/api', skipMpesa(darajaB2CRouter));
 app.use('/api', skipMpesa(payoutReadinessRouter));
 app.use('/api/sacco', require('./routes/sacco-payouts'));
+app.use('/api/v2', walletV2Router);
 app.use('/api', skipMpesa(walletLedgerRouter));
 app.use('/test', require('./routes/wallet'));
 app.use('/', require('./routes/wallet-withdraw'));
