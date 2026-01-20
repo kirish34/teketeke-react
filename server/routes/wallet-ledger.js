@@ -419,7 +419,7 @@ router.get(
 router.get('/wallets/owner-ledger', async (req, res) => {
   try {
       const appCtx = await loadAppContext(req.user?.id);
-      const normalizedRole = normalizeRoleName(appCtx?.effective_role || req.user?.role);
+      const normalizedRole = normalizeRoleName(appCtx?.effective_role);
       req.context = {
         effective_role: appCtx?.effective_role || null,
         sacco_id: appCtx?.sacco_id || null,

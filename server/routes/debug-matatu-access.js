@@ -17,7 +17,7 @@ router.get('/debug/matatu-access', async (req, res) => {
     const matatu = matatuRes.rows[0] || null;
 
     const ctx = await resolveSaccoAuthContext({ userId: req.user?.id });
-    const roleResolved = ctx.role || (req.user?.role || '').toUpperCase() || null;
+    const roleResolved = ctx.role || null;
     const activeSaccoId = ctx.saccoId || null;
     const grants = await pool.query(
       `
