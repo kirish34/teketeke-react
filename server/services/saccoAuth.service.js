@@ -136,16 +136,17 @@ function requireSaccoMembership({ allowRoles = [], allowStaff = true } = {}) {
         });
       }
 
-      const role = normalizeRole(ctx.effective_role);
-      const isSystem = role === 'SYSTEM_ADMIN';
-      const roleAllowed = isSystem || (role && allowed.has(role)) || (allowStaff && role === 'SACCO_STAFF');
+      const normalizedRole = normalizeRole(req.context?.effective_role || ctx.effective_role || req.user?.role);
+      const isSystem = normalizedRole === 'SYSTEM_ADMIN';
+      const roleAllowed =
+        isSystem || (normalizedRole && allowed.has(normalizedRole)) || (allowStaff && normalizedRole === 'SACCO_STAFF');
       const saccoAllowed = isSystem || ctx.allowed_sacco_ids.includes(String(requested));
 
       if (roleAllowed && saccoAllowed) {
         req.saccoId = String(requested);
         req.saccoAuth = ctx;
         req.user = req.user || {};
-        req.user.role = req.user.role || role;
+        req.user.role = req.user.role || normalizedRole;
         return next();
       }
 
@@ -153,7 +154,10 @@ function requireSaccoMembership({ allowRoles = [], allowStaff = true } = {}) {
         console.log('[sacco-auth] deny', {
           request_id: req.requestId || null,
           user_id: userId,
-          role,
+          userRole: req.user?.role,
+          effectiveRole: req.context?.effective_role || ctx.effective_role || null,
+          normalizedRole,
+          allowedRoles: Array.from(allowed),
           requested_sacco_id: requested,
           allowed_sacco_ids: ctx.allowed_sacco_ids,
           source: ctx.source,
