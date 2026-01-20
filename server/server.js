@@ -139,6 +139,34 @@ app.use('/api/auth', (req, _res, next) => {
   next();
 }, authRouter);
 
+// Public/version endpoints MUST be mounted before any /api routers that enforce auth
+app.get('/api/version', (_req, res) => {
+  res.set('x-teketeke-build', buildInfo.commit);
+  res.set('x-deployed-at', buildInfo.deployed_at);
+  res.json({
+    ok: true,
+    service: buildInfo.service,
+    build: buildInfo.commit,
+    commit: buildInfo.commit,
+    deployed_at: buildInfo.deployed_at,
+    node_env: process.env.NODE_ENV || 'development',
+  });
+});
+
+// health (works on Vercel via rewrite /healthz -> /api/index.js)
+app.get(['/healthz', '/api/healthz'], (req, res) => {
+  const accept = (req.headers.accept || '').toLowerCase();
+  if (accept.includes('application/json')) {
+    return res
+      .status(200)
+      .json({ ok: true, service: buildInfo.service, commit: buildInfo.commit, deployed_at: buildInfo.deployed_at });
+  }
+  return res.status(200).type('text/plain').send('ok');
+});
+
+// v2 routes should be reachable before other /api routers
+app.use('/api/v2', walletV2Router);
+
 // routes
 app.use('/u', require('./routes/user'));
 app.use('/api/admin', require('./routes/admin'));
@@ -161,7 +189,6 @@ app.use('/api', skipMpesa(telemetryRouter));
 app.use('/api', skipMpesa(darajaB2CRouter));
 app.use('/api', skipMpesa(payoutReadinessRouter));
 app.use('/api/sacco', require('./routes/sacco-payouts'));
-app.use('/api/v2', walletV2Router);
 app.use('/api', skipMpesa(walletLedgerRouter));
 app.use('/test', require('./routes/wallet'));
 app.use('/', require('./routes/wallet-withdraw'));
@@ -171,20 +198,6 @@ app.use('/api/admin', require('./routes/admin-vehicle-payout'));
 app.use('/api/admin', require('./routes/admin-sms'));
 app.use('/', require('./routes/sacco'));
 
-// simple version endpoint
-app.get('/api/version', (_req, res) => {
-  res.set('x-teketeke-build', buildInfo.commit);
-  res.set('x-deployed-at', buildInfo.deployed_at);
-  res.json({
-    ok: true,
-    service: buildInfo.service,
-    build: buildInfo.commit,
-    commit: buildInfo.commit,
-    deployed_at: buildInfo.deployed_at,
-    node_env: process.env.NODE_ENV || 'development',
-  });
-});
-
 console.log('[mount] /api/sacco -> sacco-payouts router loaded');
 // Daraja C2B aliases (Safaricom blocks "mpesa" substring in RegisterURL)
 if (mpesaRouter.handleC2BValidation) {
@@ -193,17 +206,6 @@ if (mpesaRouter.handleC2BValidation) {
 if (mpesaRouter.handleC2BConfirmation) {
   app.post('/confirmation', mpesaRouter.handleC2BConfirmation);
 }
-
-// health (works on Vercel via rewrite /healthz -> /api/index.js)
-app.get(['/healthz', '/api/healthz'], (req, res) => {
-  const accept = (req.headers.accept || '').toLowerCase();
-  if (accept.includes('application/json')) {
-    return res
-      .status(200)
-      .json({ ok: true, service: buildInfo.service, commit: buildInfo.commit, deployed_at: buildInfo.deployed_at });
-  }
-  return res.status(200).type('text/plain').send('ok');
-});
 
 const PORT = Number(process.env.PORT || 8080);
 if (require.main === module) {
