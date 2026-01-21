@@ -1,132 +1,24 @@
 const express = require('express');
 const pool = require('../db/pool');
 const { requireUser } = require('../middleware/auth');
-const { resolveSaccoAuthContext } = require('../services/saccoAuth.service');
+const { resolveMatatuAccess } = require('../services/matatuAccess.service');
 
 const router = express.Router();
 
 router.use(requireUser);
 
-const ROLES = {
-  SYSTEM_ADMIN: 'SYSTEM_ADMIN',
-  SACCO_ADMIN: 'SACCO_ADMIN',
-  SACCO_STAFF: 'SACCO_STAFF',
-  OWNER: 'OWNER',
-  MATATU_STAFF: 'MATATU_STAFF',
-  DRIVER: 'DRIVER',
-};
-
-function normalizeRoleName(role) {
-  const raw = String(role || '').trim().toUpperCase();
-  if (!raw) return null;
-  if (raw === 'MATATU_OWNER' || raw === 'OWNER') return ROLES.OWNER;
-  if (raw === 'SACCO' || raw === 'SACCO_ADMIN') return ROLES.SACCO_ADMIN;
-  if (raw === 'SACCO_STAFF') return ROLES.SACCO_STAFF;
-  if (raw === 'MATATU_STAFF') return ROLES.MATATU_STAFF;
-  if (raw === 'DRIVER') return ROLES.DRIVER;
-  if (raw === 'SYSTEM_ADMIN') return ROLES.SYSTEM_ADMIN;
-  return raw;
-}
-
 function logLivePaymentsDebug(payload) {
-  if (String(process.env.DEBUG_LIVE_PAYMENTS || '').toLowerCase() !== '1') return;
+  const enabled =
+    String(process.env.DEBUG_MATATU_LIVE_PAYMENTS || '').toLowerCase() === 'true' ||
+    String(process.env.DEBUG_MATATU_LIVE_PAYMENTS || '') === '1' ||
+    String(process.env.DEBUG_LIVE_PAYMENTS || '').toLowerCase() === 'true' ||
+    String(process.env.DEBUG_LIVE_PAYMENTS || '') === '1';
+  if (!enabled) return;
   try {
     console.log('[matatu-live-payments]', payload);
   } catch {
     /* ignore */
   }
-}
-
-async function resolveUserContext(userId) {
-  if (!userId) return null;
-  const res = await pool.query(
-    `
-      SELECT effective_role, sacco_id, matatu_id
-      FROM public.app_user_context
-      WHERE user_id = $1
-      LIMIT 1
-    `,
-    [userId],
-  );
-  const row = res.rows[0] || null;
-  if (!row) return null;
-  const role = normalizeRoleName(row.effective_role);
-  if (!role) return null;
-  return {
-    role,
-    saccoId: row.sacco_id || null,
-    matatuId: row.matatu_id || null,
-  };
-}
-
-async function hasOwnerAccessGrant(userId, matatuId) {
-  if (!userId || !matatuId) return false;
-  const res = await pool.query(
-    `
-      SELECT 1
-      FROM access_grants
-      WHERE user_id = $1
-        AND scope_id = $2
-        AND is_active = true
-        AND scope_type IN ('OWNER','MATATU')
-      LIMIT 1
-    `,
-    [userId, matatuId],
-  );
-  return res.rows.length > 0;
-}
-
-async function hasMatatuStaffGrant(userId, matatuId) {
-  if (!userId || !matatuId) return false;
-  const res = await pool.query(
-    `
-      SELECT 1
-      FROM access_grants
-      WHERE user_id = $1
-        AND scope_id = $2
-        AND is_active = true
-        AND scope_type IN ('MATATU','OWNER')
-      LIMIT 1
-    `,
-    [userId, matatuId],
-  );
-  return res.rows.length > 0;
-}
-
-async function hasMatatuStaffProfileAssignment(userId, matatuId) {
-  if (!userId || !matatuId) return false;
-  const res = await pool.query(
-    `
-      SELECT 1
-      FROM staff_profiles
-      WHERE user_id = $1
-        AND matatu_id = $2
-      LIMIT 1
-    `,
-    [userId, matatuId],
-  );
-  return res.rows.length > 0;
-}
-
-async function resolveMatatuStaffAccess(userId, matatuId, saccoId) {
-  if (!userId || !matatuId) return { allowed: false, params: {}, rowCount: 0 };
-  const grantExists = await hasMatatuStaffGrant(userId, matatuId);
-  const assignRes = await pool.query(
-    `
-      SELECT 1 FROM matatu_staff_assignments
-      WHERE staff_user_id = $1 AND matatu_id = $2 AND ($3::uuid IS NULL OR sacco_id = $3)
-      LIMIT 1
-    `,
-    [userId, matatuId, saccoId || null],
-  );
-  const assignmentExists = assignRes.rows.length > 0;
-  const profileAssign = await hasMatatuStaffProfileAssignment(userId, matatuId);
-  const staffGrant = grantExists || assignmentExists || profileAssign;
-  return {
-    allowed: staffGrant,
-    rowCount: assignmentExists ? assignRes.rows.length : 0,
-    params: { grantExists, assignmentExists, profileAssign, staffGrant },
-  };
 }
 
 function normalizeFrom(value) {
@@ -157,51 +49,20 @@ router.get('/live-payments', async (req, res) => {
   }
 
   try {
-    const matatuRes = await pool.query(`SELECT id, sacco_id, created_by FROM matatus WHERE id = $1 LIMIT 1`, [matatuId]);
-    const matatu = matatuRes.rows[0] || null;
-    if (!matatu) {
-      return res.status(404).json({ ok: false, error: 'matatu not found', request_id: req.requestId || null });
-    }
+    const access = await resolveMatatuAccess({
+      userId: req.user?.id,
+      matatuId,
+      pool,
+      requestId: req.requestId || null,
+    });
 
-    const userCtx = await resolveUserContext(req.user?.id);
-    const membershipCtx = await resolveSaccoAuthContext({ userId: req.user?.id });
-    const superUser = userCtx?.role === ROLES.SYSTEM_ADMIN;
-    const saccoScoped =
-      [ROLES.SACCO_ADMIN].includes(userCtx?.role) &&
-      userCtx?.saccoId &&
-      matatu.sacco_id &&
-      String(userCtx.saccoId) === String(matatu.sacco_id);
-    const matatuScoped =
-      [ROLES.OWNER, ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx?.role) &&
-      userCtx?.matatuId &&
-      String(userCtx.matatuId) === String(matatu.id);
-    const ownerOfMatatu = matatu.created_by && req.user?.id && String(matatu.created_by) === String(req.user.id);
-    let ownerGrantScoped = false;
-    if (userCtx?.role === ROLES.OWNER && !ownerOfMatatu) {
-      ownerGrantScoped = await hasOwnerAccessGrant(req.user?.id, matatu.id);
-    }
-    const staffAccess = await resolveMatatuStaffAccess(req.user?.id, matatu.id, matatu.sacco_id);
-    const staffGrant = [ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx?.role) && staffAccess.allowed;
-    const ownerGrant = ownerOfMatatu || ownerGrantScoped;
-    const allowed =
-      superUser ||
-      saccoScoped ||
-      matatuScoped ||
-      staffGrant ||
-      ownerGrant;
-
-    if (!allowed) {
+    if (!access.ok) {
       logLivePaymentsDebug({
         request_id: req.requestId || null,
         user_id: req.user?.id || null,
-        role: userCtx?.role || null,
+        role: access.details?.role || null,
         matatu_id: matatuId,
-        sacco_id: matatu.sacco_id || null,
-        staffGrant,
-        ownerGrant,
-        saccoScoped,
-        matatuScoped,
-        allowed_sacco_ids: membershipCtx.allowed_sacco_ids || [],
+        ...access.details,
         reason: 'access_denied',
       });
       return res.status(403).json({
@@ -211,8 +72,11 @@ router.get('/live-payments', async (req, res) => {
         request_id: req.requestId || null,
         details: {
           user_id: req.user?.id || null,
-          role: userCtx?.role || null,
+          role: access.details?.role || null,
           requested_matatu_id: matatuId,
+          grantExists: access.details?.grantExists,
+          assignmentExists: access.details?.assignmentExists,
+          profileAssign: access.details?.profileAssign,
         },
       });
     }

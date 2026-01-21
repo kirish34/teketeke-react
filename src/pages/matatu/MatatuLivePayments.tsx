@@ -41,7 +41,7 @@ function formatAmount(amount?: number | null) {
 }
 
 export default function MatatuLivePayments() {
-  const { token, user } = useAuth();
+  const { token, user, logout } = useAuth();
   const [matatuId, setMatatuId] = useState<string>(user?.matatu_id || "");
   const [payments, setPayments] = useState<Payment[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +54,7 @@ export default function MatatuLivePayments() {
   const inflightRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const logoutRef = useRef(false);
 
   const nav = (
     <>
@@ -108,6 +109,21 @@ export default function MatatuLivePayments() {
       const reqId = res.headers.get("x-request-id");
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (res.status === 401) {
+          setPaused(true);
+          if (!logoutRef.current) {
+            logoutRef.current = true;
+            void logout();
+          }
+          return;
+        }
+        if (res.status === 403 && (data?.code === "MATATU_ACCESS_DENIED" || data?.error === "forbidden")) {
+          setPaused(true);
+          const msg = "No matatu assignment found for this account. Contact SACCO admin.";
+          const idPart = reqId || data?.request_id;
+          setError(idPart ? `${msg} (request ${idPart})` : msg);
+          return;
+        }
         const msg = (data && (data.error || data.message)) || res.statusText || "Failed to load live payments";
         const idPart = reqId || data?.request_id;
         setError(idPart ? `${msg} (request ${idPart})` : msg);
