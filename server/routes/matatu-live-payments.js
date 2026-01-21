@@ -2,7 +2,6 @@ const express = require('express');
 const pool = require('../db/pool');
 const { requireUser } = require('../middleware/auth');
 const { resolveSaccoAuthContext } = require('../services/saccoAuth.service');
-const { checkMatatuAccess } = require('../auth/matatuAccess');
 
 const router = express.Router();
 
@@ -163,16 +162,35 @@ router.get('/live-payments', async (req, res) => {
   }
 
   try {
-    const access = await checkMatatuAccess(pool, { user_id: req.user?.id, matatu_id: matatuId });
-    if (!access.allowed) {
-      logLivePaymentsDebug({
-        request_id: req.requestId || null,
-        user_id: req.user?.id || null,
-        role: access.details?.role || null,
-        matatu_id: matatuId,
-        ...access.details,
-        reason: 'access_denied',
-      });
+    const matatuRes = await pool.query(`SELECT id, sacco_id, created_by FROM matatus WHERE id = $1 LIMIT 1`, [matatuId]);
+    const matatu = matatuRes.rows[0] || null;
+    if (!matatu) {
+      return res.status(404).json({ ok: false, error: 'matatu not found', request_id: req.requestId || null });
+    }
+
+    const userCtx = await resolveUserContext(req.user?.id);
+    const normalizedRole = normalizeRoleName(userCtx?.role || req.user?.role);
+    const staffAccess = await resolveMatatuStaffAccess(req.user?.id, matatu.id, matatu.sacco_id);
+    const grantExists = staffAccess.params?.grantExists;
+    const assignmentExists = staffAccess.params?.assignmentExists;
+    const profileAssign = staffAccess.params?.profileAssign;
+    const staffAllowed = Boolean(grantExists || assignmentExists || profileAssign);
+    const isOwner = matatu.created_by && req.user?.id && String(matatu.created_by) === String(req.user.id);
+    const superUser = normalizedRole === ROLES.SYSTEM_ADMIN;
+    const allowed = Boolean(isOwner || staffAllowed || superUser);
+
+    logLivePaymentsDebug({
+      request_id: req.requestId || null,
+      user_id: req.user?.id || null,
+      matatu_id: matatuId,
+      is_owner: isOwner,
+      grantExists,
+      assignmentExists,
+      profileAssign,
+      allowed,
+    });
+
+    if (!allowed) {
       return res.status(403).json({
         ok: false,
         error: 'forbidden',
@@ -180,11 +198,11 @@ router.get('/live-payments', async (req, res) => {
         request_id: req.requestId || null,
         details: {
           user_id: req.user?.id || null,
-          role: access.details?.role || null,
+          role: normalizedRole || null,
           requested_matatu_id: matatuId,
-          grantExists: access.details?.grantExists,
-          assignmentExists: access.details?.assignmentExists,
-          profileAssign: access.details?.profileAssign,
+          grantExists,
+          assignmentExists,
+          profileAssign,
         },
       });
     }
