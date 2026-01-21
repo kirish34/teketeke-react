@@ -3,6 +3,7 @@ import { NavLink } from "react-router-dom";
 import DashboardShell from "../../components/DashboardShell";
 import { resolveApiUrl } from "../../services/api";
 import { useAuth } from "../../state/auth";
+import { authFetch } from "../../lib/auth";
 
 type Payment = {
   id?: string;
@@ -68,18 +69,16 @@ export default function MatatuLivePayments() {
   const ensureMatatu = useCallback(async () => {
     if (matatuId) return;
     try {
-      const res = await fetch(resolveApiUrl("/api/staff/my-matatu"), {
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+      const res = await authFetch("/api/matatu/my-assignment", {
+        headers: { Accept: "application/json" },
       });
+      if (!res.ok) return;
       const data = await res.json().catch(() => ({}));
       if (data?.matatu_id) setMatatuId(data.matatu_id);
     } catch {
       /* ignore */
     }
-  }, [matatuId, token]);
+  }, [matatuId]);
 
   const fetchPayments = useCallback(async () => {
     if (!token || !matatuId || paused) return;

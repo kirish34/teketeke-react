@@ -152,6 +152,7 @@ router.get('/live-payments', async (req, res) => {
       ok: false,
       error: 'matatu_id required',
       request_id: req.requestId || null,
+      code: 'MATATU_ID_REQUIRED',
     });
   }
 
@@ -208,6 +209,11 @@ router.get('/live-payments', async (req, res) => {
         error: 'forbidden',
         code: 'MATATU_ACCESS_DENIED',
         request_id: req.requestId || null,
+        details: {
+          user_id: req.user?.id || null,
+          role: userCtx?.role || null,
+          requested_matatu_id: matatuId,
+        },
       });
     }
 
@@ -260,6 +266,74 @@ router.get('/live-payments', async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: err.message || 'Failed to load live payments',
+      request_id: req.requestId || null,
+    });
+  }
+});
+
+router.get('/my-assignment', async (req, res) => {
+  try {
+    const userId = req.user?.id || null;
+    if (!userId) {
+      return res.status(401).json({ ok: false, error: 'unauthorized', request_id: req.requestId || null });
+    }
+
+    const staffAssign = await pool.query(
+      `
+        SELECT matatu_id, sacco_id
+        FROM matatu_staff_assignments
+        WHERE staff_user_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1
+      `,
+      [userId],
+    );
+    const assignRow = staffAssign.rows[0] || null;
+
+    let matatuId = assignRow?.matatu_id || null;
+    let saccoId = assignRow?.sacco_id || null;
+
+    if (!matatuId) {
+      const prof = await pool.query(
+        `SELECT matatu_id, sacco_id FROM staff_profiles WHERE user_id = $1 LIMIT 1`,
+        [userId],
+      );
+      if (prof.rows.length) {
+        matatuId = prof.rows[0].matatu_id || matatuId;
+        saccoId = saccoId || prof.rows[0].sacco_id || null;
+      }
+    }
+
+    if (!matatuId) {
+      const grant = await pool.query(
+        `
+          SELECT scope_id AS matatu_id
+          FROM access_grants
+          WHERE user_id = $1
+            AND scope_type IN ('OWNER','MATATU')
+            AND is_active = true
+          ORDER BY created_at DESC
+          LIMIT 1
+        `,
+        [userId],
+      );
+      if (grant.rows.length) {
+        matatuId = grant.rows[0].matatu_id || matatuId;
+      }
+    }
+
+    return res.json({
+      ok: true,
+      user_id: userId,
+      role: req.user?.role || null,
+      matatu_id: matatuId || null,
+      sacco_id: saccoId || null,
+      request_id: req.requestId || null,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err.message || 'Failed to resolve assignment',
       request_id: req.requestId || null,
     });
   }
