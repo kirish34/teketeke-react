@@ -29,7 +29,12 @@ function normalizeRoleName(role) {
 }
 
 function logLivePaymentsDebug(payload) {
-  if (String(process.env.DEBUG_LIVE_PAYMENTS || '').toLowerCase() !== '1') return;
+  const enabled =
+    String(process.env.DEBUG_MATATU_LIVE_PAYMENTS || '').toLowerCase() === 'true' ||
+    String(process.env.DEBUG_MATATU_LIVE_PAYMENTS || '') === '1' ||
+    String(process.env.DEBUG_LIVE_PAYMENTS || '').toLowerCase() === 'true' ||
+    String(process.env.DEBUG_LIVE_PAYMENTS || '') === '1';
+  if (!enabled) return;
   try {
     console.log('[matatu-live-payments]', payload);
   } catch {
@@ -163,7 +168,9 @@ router.get('/live-payments', async (req, res) => {
       return res.status(404).json({ ok: false, error: 'matatu not found', request_id: req.requestId || null });
     }
 
-    const userCtx = await resolveUserContext(req.user?.id);
+    const ctxFromDb = await resolveUserContext(req.user?.id);
+    const normalizedRole = normalizeRoleName(ctxFromDb?.role || req.user?.role);
+    const userCtx = ctxFromDb || { role: normalizedRole, saccoId: null, matatuId: null };
     const membershipCtx = await resolveSaccoAuthContext({ userId: req.user?.id });
     const superUser = userCtx?.role === ROLES.SYSTEM_ADMIN;
     const saccoScoped =
@@ -198,6 +205,9 @@ router.get('/live-payments', async (req, res) => {
         matatu_id: matatuId,
         sacco_id: matatu.sacco_id || null,
         staffGrant,
+        grantExists: staffAccess.params?.grantExists,
+        assignmentExists: staffAccess.params?.assignmentExists,
+        profileAssign: staffAccess.params?.profileAssign,
         ownerGrant,
         saccoScoped,
         matatuScoped,
@@ -213,6 +223,9 @@ router.get('/live-payments', async (req, res) => {
           user_id: req.user?.id || null,
           role: userCtx?.role || null,
           requested_matatu_id: matatuId,
+          grantExists: staffAccess.params?.grantExists,
+          assignmentExists: staffAccess.params?.assignmentExists,
+          profileAssign: staffAccess.params?.profileAssign,
         },
       });
     }
