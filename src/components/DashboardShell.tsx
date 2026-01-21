@@ -25,6 +25,7 @@ export const navLinks: Array<{ to: string; label: string; allow: string[] }> = [
   { to: '/sacco/live-payments', label: 'Live Payments', allow: ['super_admin', 'system_admin', 'sacco_admin', 'sacco_staff'] },
   { to: '/matatu/owner', label: 'Matatu Owner', allow: ['super_admin', 'matatu_owner'] },
   { to: '/matatu/staff', label: 'Matatu Staff', allow: ['super_admin', 'matatu_staff'] },
+  { to: '/matatu/live-payments', label: 'Live Payments', allow: ['super_admin', 'matatu_staff', 'matatu_owner'] },
   { to: '/taxi', label: 'Taxi', allow: ['super_admin', 'taxi'] },
   { to: '/boda', label: 'BodaBoda', allow: ['super_admin', 'boda'] },
 ]

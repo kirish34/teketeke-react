@@ -19,6 +19,7 @@ import SaccoApprovals from "../pages/SaccoApprovals";
 import WithdrawalPhonesRoute from "../pages/WithdrawalPhonesRoute";
 import PendingAccess from "../pages/PendingAccess";
 import LivePaymentsPage from "../pages/sacco/LivePayments";
+import MatatuLivePayments from "../pages/matatu/MatatuLivePayments";
 
 export const routes: RouteObject[] = [
   { path: "/", element: <Navigate to="/role" replace /> },
@@ -107,6 +108,14 @@ export const routes: RouteObject[] = [
     element: (
       <RequireRole allow={["matatu_staff", "super_admin"]}>
         <MatatuStaffDashboard />
+      </RequireRole>
+    ),
+  },
+  {
+    path: "/matatu/live-payments",
+    element: (
+      <RequireRole allow={["matatu_staff", "matatu_owner", "super_admin"]}>
+        <MatatuLivePayments />
       </RequireRole>
     ),
   },

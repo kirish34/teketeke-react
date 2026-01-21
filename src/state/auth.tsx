@@ -101,6 +101,9 @@ export function isPathAllowedForRole(role: Role | null | undefined, rawPath: str
   if (normalized.startsWith("/matatu/staff")) {
     return r === "matatu_staff" || r === "super_admin";
   }
+  if (normalized.startsWith("/matatu/live-payments")) {
+    return r === "matatu_staff" || r === "matatu_owner" || r === "super_admin";
+  }
   if (normalized.startsWith("/taxi")) return r === "taxi" || r === "super_admin";
   if (normalized.startsWith("/boda")) return r === "boda" || r === "super_admin";
   if (normalized.startsWith("/dash")) return true;

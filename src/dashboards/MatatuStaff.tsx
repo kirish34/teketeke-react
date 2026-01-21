@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { NavLink } from "react-router-dom"
 import DashboardShell from "../components/DashboardShell"
 import { authFetch } from "../lib/auth"
 import { api } from "../services/api"
@@ -297,7 +298,6 @@ const MatatuStaffDashboard = () => {
     }
   }, [filteredTx, manualEntries])
 
-  const liveTxs = useMemo(() => filteredTx.slice(0, 12), [filteredTx])
   const ownerScopeId = user?.matatu_id || ""
   const vehicleCareGrant = useMemo(
     () =>
@@ -354,9 +354,19 @@ const MatatuStaffDashboard = () => {
 
   const staffLabel = staffName || user?.name || (user?.email ? user.email.split("@")[0] : "") || "Staff"
   const heroRight = user?.role ? `Role: ${user.role}` : "Matatu Staff"
+  const nav = (
+    <>
+      <NavLink className={({ isActive }) => `tab${isActive ? " active" : ""}`} to="/matatu/staff">
+        Dashboard
+      </NavLink>
+      <NavLink className={({ isActive }) => `tab${isActive ? " active" : ""}`} to="/matatu/live-payments">
+        Live Payments
+      </NavLink>
+    </>
+  )
 
   return (
-    <DashboardShell title="Matatu Staff" subtitle="Staff Dashboard" hideShellChrome>
+    <DashboardShell title="Matatu Staff" subtitle="Staff Dashboard" nav={nav} navLabel="Matatu navigation">
       <div className="hero-bar" style={{ marginBottom: 16 }}>
         <div className="hero-left">
           <div className="hero-chip">MATATU STAFF</div>
@@ -514,36 +524,14 @@ const MatatuStaffDashboard = () => {
           </section>
 
           <section className="card">
-            <div className="topline">
-              <h3 style={{ margin: 0 }}>Live payments</h3>
-              <span className="muted small">Auto-refresh every 5 seconds</span>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
-              {liveTxs.length === 0 ? (
-                <div className="muted small">No payments yet.</div>
-              ) : (
-                liveTxs.map((tx) => {
-                  const name =
-                    (tx.notes || "").trim() ||
-                    (tx.created_by_name || "").trim() ||
-                    (tx.created_by_email || "").trim() ||
-                    "Payer"
-                  const phone = tx.passenger_msisdn || tx.msisdn || "-"
-                  return (
-                    <div key={tx.id || tx.created_at} className="card" style={{ boxShadow: "none", border: "1px solid #e5e7eb" }}>
-                      <div className="row" style={{ alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                        <div>
-                          <div style={{ fontWeight: 600 }}>{name}</div>
-                          <div className="muted small">
-                            {phone} {tx.created_at ? `- ${new Date(tx.created_at).toLocaleTimeString()}` : ""}
-                          </div>
-                        </div>
-                        <div style={{ fontWeight: 700, color: "#0f172a" }}>{fmtKES(tx.fare_amount_kes)}</div>
-                      </div>
-                    </div>
-                  )
-                })
-              )}
+            <div className="topline" style={{ alignItems: "center" }}>
+              <div>
+                <h3 style={{ margin: 0 }}>Live payments</h3>
+                <div className="muted small">View real-time C2B payments for this matatu.</div>
+              </div>
+              <NavLink className="btn" to="/matatu/live-payments">
+                Open live feed
+              </NavLink>
             </div>
           </section>
         </>
