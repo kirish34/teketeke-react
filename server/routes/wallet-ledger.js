@@ -498,15 +498,14 @@ router.get('/wallets/owner-ledger', async (req, res) => {
         ownerGrantScoped = await hasOwnerAccessGrant(req.user?.id, matatu.id);
       }
       const staffAccess = await resolveMatatuStaffAccess(req.user?.id, matatu.id, matatu.sacco_id);
-      const staffGrantScoped =
-        [ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx.role) && staffAccess.allowed;
+      const staffGrant = [ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx.role) && staffAccess.allowed;
+      const ownerGrant = ownerOfMatatu || ownerGrantScoped;
+      const allowed = staffGrant || ownerGrant;
       const roleAllowsMatatu =
         superUser ||
         saccoScoped ||
-        ownerOfMatatu ||
-        ownerGrantScoped ||
-        staffGrantScoped ||
-        matatuScoped;
+        matatuScoped ||
+        allowed;
 
       if (!roleAllowsMatatu) {
         logWalletAuthDebug({
@@ -519,7 +518,9 @@ router.get('/wallets/owner-ledger', async (req, res) => {
           saccoScoped,
           matatuScoped,
           ownerGrantScoped,
-          staffGrantScoped,
+          ownerGrant,
+          staffGrant,
+          allowed,
           allowed_sacco_ids: allowedSaccos,
           role_normalized: normalizedRole,
           role_header: req.user?.role || null,
@@ -538,24 +539,21 @@ router.get('/wallets/owner-ledger', async (req, res) => {
             requested_matatu_id: matatuId,
             active_sacco_id: userCtx.saccoId || null,
             matatu_sacco_id: matatu.sacco_id || null,
-            staff_grant: staffGrantScoped,
-            owner_grant: ownerGrantScoped,
-          owner_of_matatu: ownerOfMatatu,
-          allowed_sacco_ids: allowedSaccos,
-          assignment_query_params: staffAccess.params || {},
-          assignment_rowcount: staffAccess.rowCount || 0,
-          staff_grant: staffGrantScoped,
-          grantExists: staffAccess.params?.grantExists,
-          assignmentExists: staffAccess.params?.assignmentExists,
-          profileAssign: staffAccess.params?.profileAssign,
-          staffGrant: staffAccess.params?.staffGrant,
-          reason: staffGrantScoped
-            ? 'staff_grant_ok'
-            : ownerOfMatatu
-            ? 'owner_of_matatu'
-            : ownerGrantScoped
-              ? 'owner_grant_ok'
-              : 'no matching staff/owner grant for this matatu',
+            staff_grant: staffGrant,
+            owner_grant: ownerGrant,
+            owner_of_matatu: ownerOfMatatu,
+            allowed_sacco_ids: allowedSaccos,
+            assignment_query_params: staffAccess.params || {},
+            assignment_rowcount: staffAccess.rowCount || 0,
+            grantExists: staffAccess.params?.grantExists,
+            assignmentExists: staffAccess.params?.assignmentExists,
+            profileAssign: staffAccess.params?.profileAssign,
+            staffGrant: staffAccess.params?.staffGrant,
+            reason: staffGrant
+              ? 'staff_grant_ok'
+              : ownerGrant
+                ? 'owner_grant_ok'
+                : 'no matching staff/owner grant for this matatu',
             role_normalized: normalizedRole,
             role_header: req.user?.role || null,
             role_context: req.context?.effective_role || null,
