@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { NavLink } from 'react-router-dom'
 import DashboardShell from '../components/DashboardShell'
 import { api } from '../services/api'
 import { useAuth } from '../state/auth'
@@ -315,8 +316,19 @@ const SaccoStaffDashboard = () => {
   }, [saccos, saccoId])
   const staffLabel = staffName || user?.name || (user?.email ? user.email.split('@')[0] : '') || 'Staff'
 
+  const nav = (
+    <>
+      <NavLink className={({ isActive }) => `tab${isActive ? ' active' : ''}`} to="/sacco/staff">
+        Cash Desk
+      </NavLink>
+      <NavLink className={({ isActive }) => `tab${isActive ? ' active' : ''}`} to="/sacco/live-payments">
+        Live Payments
+      </NavLink>
+    </>
+  )
+
   return (
-    <DashboardShell title="SACCO Staff" subtitle="Cash Desk" hideShellChrome>
+    <DashboardShell title="SACCO Staff" subtitle="Cash Desk" nav={nav} navLabel="SACCO staff navigation">
       <div className="hero-bar" style={{ marginBottom: 16 }}>
         <div className="hero-left">
           <div className="hero-chip">SACCO STAFF</div>

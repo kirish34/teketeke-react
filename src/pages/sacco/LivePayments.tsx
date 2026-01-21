@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { NavLink } from "react-router-dom";
 import DashboardShell from "../../components/DashboardShell";
 import { resolveApiUrl } from "../../services/api";
 import { useAuth } from "../../state/auth";
@@ -52,6 +53,16 @@ export default function LivePaymentsPage() {
   const abortRef = useRef<AbortController | null>(null);
 
   const saccoLabel = useMemo(() => activeSaccoName || activeSaccoId || "—", [activeSaccoId, activeSaccoName]);
+  const nav = (
+    <>
+      <NavLink className={({ isActive }) => `tab${isActive ? ' active' : ''}`} to="/sacco/staff">
+        Cash Desk
+      </NavLink>
+      <NavLink className={({ isActive }) => `tab${isActive ? ' active' : ''}`} to="/sacco/live-payments">
+        Live Payments
+      </NavLink>
+    </>
+  );
 
   const fetchPayments = useCallback(async () => {
     if (!token || !activeSaccoId || paused) return;
@@ -148,7 +159,7 @@ export default function LivePaymentsPage() {
   const emptyState = !loading && payments.length === 0;
 
   return (
-    <DashboardShell title="Live Payments" subtitle={saccoLabel}>
+    <DashboardShell title="Live Payments" subtitle={saccoLabel} nav={nav} navLabel="SACCO staff navigation">
       <div className="card" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
           <div>

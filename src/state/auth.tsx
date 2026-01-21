@@ -81,6 +81,14 @@ export function isPathAllowedForRole(role: Role | null | undefined, rawPath: str
   if (normalized.startsWith("/system") || normalized.startsWith("/ops")) {
     return r === "system_admin" || r === "super_admin";
   }
+  if (normalized.startsWith("/sacco/live-payments")) {
+    return (
+      r === "sacco_staff" ||
+      r === "sacco_admin" ||
+      r === "system_admin" ||
+      r === "super_admin"
+    );
+  }
   if (normalized.startsWith("/sacco/staff")) {
     return r === "sacco_staff" || r === "sacco_admin" || r === "super_admin" || r === "system_admin";
   }
