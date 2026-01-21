@@ -1806,6 +1806,18 @@ router.post('/sacco/:id/loans', async (req,res)=>{
 });
 
 // ---------- Matatu staff management (owner-scoped) ----------
+async function upsertMatatuStaffAssignment({ staffUserId, matatuId, saccoId }) {
+  if (!staffUserId || !matatuId) return;
+  await pool.query(
+    `
+      INSERT INTO matatu_staff_assignments (sacco_id, staff_user_id, matatu_id)
+      VALUES ($1,$2,$3)
+      ON CONFLICT (staff_user_id, matatu_id) DO UPDATE SET sacco_id = EXCLUDED.sacco_id
+    `,
+    [saccoId || null, staffUserId, matatuId],
+  );
+}
+
 async function ensureMatatuWithAccess(req, res){
   const matatuId = req.params.id;
   if (!matatuId) { res.status(400).json({ error:"matatu_id required" }); return null; }
@@ -1813,6 +1825,29 @@ async function ensureMatatuWithAccess(req, res){
   if (!allowed || !matatu) { res.status(403).json({ error:"Forbidden" }); return null; }
   return matatu;
 }
+
+router.get('/staff/my-matatu', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `
+        SELECT matatu_id, sacco_id, created_at
+        FROM matatu_staff_assignments
+        WHERE staff_user_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1
+      `,
+      [req.user?.id],
+    );
+    const row = rows[0] || null;
+    return res.json({
+      ok: true,
+      matatu_id: row?.matatu_id || null,
+      sacco_id: row?.sacco_id || null,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message || 'Failed to load staff assignment' });
+  }
+});
 
 router.get("/matatu/:id/staff", async (req,res)=>{
   try{
@@ -1891,6 +1926,8 @@ router.post("/matatu/:id/staff", async (req,res)=>{
       if (updated.error) throw updated.error;
     }
 
+    const assignmentUserId = userId || existing?.user_id || null;
+
     if (userId) {
       const normalizedRole = (role === 'DRIVER' || role === 'MATATU_STAFF') ? 'STAFF' : role;
       const { error: urErr } = await supabaseAdmin
@@ -1930,6 +1967,7 @@ router.post("/matatu/:id/staff", async (req,res)=>{
         .select()
         .single();
       if (error) throw error;
+      await upsertMatatuStaffAssignment({ staffUserId: assignmentUserId, matatuId: matatu.id, saccoId: matatu.sacco_id });
       res.json(data);
       return;
     }
@@ -1948,6 +1986,7 @@ router.post("/matatu/:id/staff", async (req,res)=>{
       .select()
       .single();
     if (error) throw error;
+    await upsertMatatuStaffAssignment({ staffUserId: assignmentUserId, matatuId: matatu.id, saccoId: matatu.sacco_id });
     res.json(data);
   }catch(e){ res.status(500).json({ error: e.message || 'Failed to add staff' }); }
 });

@@ -269,6 +269,25 @@ function normalizeLimitOffset(limitRaw, offsetRaw) {
   return { limit, offset };
 }
 
+router.get('/staff/my-matatu', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `
+        SELECT matatu_id, sacco_id, created_at
+        FROM matatu_staff_assignments
+        WHERE staff_user_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1
+      `,
+      [req.user?.id],
+    );
+    const row = rows[0] || null;
+    return res.json({ ok: true, matatu_id: row?.matatu_id || null, sacco_id: row?.sacco_id || null });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message || 'Failed to load staff assignment' });
+  }
+});
+
 router.get('/wallets/:id/ledger', async (req, res) => {
   const walletId = req.params.id;
   if (!walletId) return res.status(400).json({ ok: false, error: 'wallet id required' });
@@ -498,8 +517,8 @@ router.get('/wallets/owner-ledger', async (req, res) => {
         ownerGrantScoped = await hasOwnerAccessGrant(req.user?.id, matatu.id);
       }
       const staffAccess = await resolveMatatuStaffAccess(req.user?.id, matatu.id, matatu.sacco_id);
-      const staffGrant = [ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx.role) && staffAccess.allowed;
-      const ownerGrant = ownerOfMatatu || ownerGrantScoped;
+      const staffGrant = Boolean(staffAccess.params?.staffGrant ?? staffAccess.allowed);
+      const ownerGrant = Boolean(ownerOfMatatu || ownerGrantScoped);
       const allowed = staffGrant || ownerGrant;
       const roleAllowsMatatu =
         superUser ||
