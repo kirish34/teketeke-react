@@ -100,28 +100,45 @@ export default function OverviewPage() {
     () => assignments.filter((a) => a.active).length,
     [assignments],
   )
+  const deviceIds = useMemo(() => {
+    const set = new Set<string>()
+    devices.forEach((d) => {
+      if (d.id) set.add(String(d.id))
+    })
+    return set
+  }, [devices])
   const assignedDeviceIds = useMemo(() => {
     const set = new Set<string>()
     assignments.forEach((a) => {
-      if (a.device_id) set.add(a.device_id)
+      if (a.device_id) set.add(String(a.device_id))
     })
     return set
   }, [assignments])
-  const hasUnassignedDevices = devices.length > assignedDeviceIds.size
+  const unassignedCount = useMemo(() => {
+    let count = 0
+    deviceIds.forEach((id) => {
+      if (!assignedDeviceIds.has(id)) count += 1
+    })
+    return count
+  }, [assignedDeviceIds, deviceIds])
+  const hasUnassignedDevices = unassignedCount > 0
+  const devicesTotal = devices.length
+  const devicesOnline = devicesTotal - devicesOffline
 
   const alerts: Alert[] = useMemo(() => {
     const list: Alert[] = []
-    if (ussdAvailable < 50) {
-      list.push({ message: 'USSD pool low', to: '/system/operators' })
+    const ussdThreshold = Math.max(20, Math.floor((ussdTotal || 0) * 0.1))
+    if (ussdAvailable < ussdThreshold) {
+      list.push({ message: `USSD pool low (${ussdAvailable}/${ussdTotal || 0})`, to: '/system/operators' })
     }
     if (devicesOffline > 0) {
       list.push({ message: 'Some devices are offline', to: '/system/registry' })
     }
     if (hasUnassignedDevices) {
-      list.push({ message: 'Unassigned devices present', to: '/system/registry' })
+      list.push({ message: `Unassigned devices: ${unassignedCount}`, to: '/system/registry' })
     }
     return list
-  }, [devicesOffline, hasUnassignedDevices, ussdAvailable])
+  }, [devicesOffline, hasUnassignedDevices, unassignedCount, ussdAvailable, ussdTotal])
 
   const kpis = [
     { label: 'SACCOs', value: counts.saccos ?? '-' },
@@ -129,10 +146,13 @@ export default function OverviewPage() {
     { label: 'Cashiers', value: counts.cashiers ?? '-' },
     { label: 'Tx today', value: counts.tx_today ?? '-' },
     { label: 'USSD (avail / total)', value: `${ussdAvailable || 0} / ${ussdTotal || 0}` },
-    { label: 'Devices', value: devices.length },
+    { label: 'Devices', value: devicesTotal },
+    { label: 'Devices online', value: devicesOnline },
     { label: 'Devices offline', value: devicesOffline },
     { label: 'Active assignments', value: activeAssignments },
   ]
+
+  const statusLabel = loading ? 'Loading' : error ? 'Error' : 'Healthy'
 
   return (
     <div className="stack">
@@ -161,6 +181,14 @@ export default function OverviewPage() {
 
       <section className="card">
         <div className="topline">
+          <h3 style={{ margin: 0 }}>Status</h3>
+          <span className="muted small">Current state</span>
+        </div>
+        <div className="muted small">{statusLabel}</div>
+      </section>
+
+      <section className="card">
+        <div className="topline">
           <h3 style={{ margin: 0 }}>Key metrics</h3>
           <span className="muted small">Up to 8 KPIs</span>
         </div>
@@ -185,9 +213,8 @@ export default function OverviewPage() {
           <ul style={{ paddingLeft: 16, margin: '8px 0 0' }}>
             {alerts.map((alert) => (
               <li key={alert.message} style={{ marginBottom: 6 }}>
-                <span>{alert.message}</span>{' '}
-                <Link className="btn ghost" to={alert.to}>
-                  Go to section
+                <Link to={alert.to} className="muted">
+                  {alert.message}
                 </Link>
               </li>
             ))}
