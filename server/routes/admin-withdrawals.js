@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db/pool');
-const { requireAdminAccess } = require('../middleware/admin-access');
+const { requireSystemOrSuper } = require('../middleware/requireAdmin');
+const { logAdminAction } = require('../services/audit.service');
 
-router.use(requireAdminAccess);
+router.use(requireSystemOrSuper);
 
 // List withdrawals (default BANK; filter by status)
 router.get('/admin/withdrawals', async (req, res) => {
@@ -60,6 +61,13 @@ async function updateWithdrawalStatus(req, res) {
     if (!result.rows.length) {
       return res.status(404).json({ ok: false, error: 'Withdrawal not found' });
     }
+    await logAdminAction({
+      req,
+      action: 'withdrawal_update_status',
+      resource_type: 'withdrawal',
+      resource_id: id,
+      payload: { status, note: internalNote || null },
+    });
     return res.json({ ok: true, withdrawal: result.rows[0] });
   } catch (err) {
     console.error('Error in POST /admin/withdrawals/:id/status:', err.message);

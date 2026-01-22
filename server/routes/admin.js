@@ -24,24 +24,12 @@ const {
 } = require('../wallet/wallet.aliases');
 const { validatePaybillCode } = require('../wallet/paybillCode.util');
 const { requireUser } = require('../middleware/auth');
+const { requireSystemOrSuper } = require('../middleware/requireAdmin');
 const { normalizeMsisdn, maskMsisdn, extractMsisdnFromRaw, safeDisplayMsisdn } = require('../utils/msisdn');
+const { logAdminAction } = require('../services/audit.service');
 const router = express.Router();
 
-// Require a signed-in Supabase user with role SYSTEM_ADMIN
-async function requireSystemAdmin(req, res, next){
-  if (!supabaseAdmin) {
-    return res.status(500).json({ error: 'SERVICE_ROLE not configured on server (SUPABASE_SERVICE_ROLE_KEY)' });
-  }
-  return requireUser(req, res, async () => {
-    try{
-      const ctx = await getSaccoContext(req.user?.id);
-      if (ctx.role !== 'SYSTEM_ADMIN') return res.status(403).json({ error: 'forbidden' });
-      return next();
-    }catch(e){ return res.status(500).json({ error: e.message }); }
-  });
-}
-
-router.use(requireSystemAdmin);
+router.use(requireSystemOrSuper);
 
 function parseDateRange(query = {}) {
   const range = (query.range || '').toLowerCase();
@@ -204,6 +192,22 @@ router.get('/system-overview', async (_req, res) => {
   }
 });
 
+router.get('/audit', async (req, res) => {
+  const limit = Math.min(Number(req.query.limit || 50), 100);
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('admin_audit_logs')
+      .select('*')
+      .eq('domain', 'teketeke')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, items: data || [] });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // Manual wallet credit (admin adjustment)
 router.post('/wallets/credit', async (req, res) => {
   try {
@@ -220,6 +224,13 @@ router.post('/wallets/credit', async (req, res) => {
       source: source || 'ADMIN_ADJUST',
       sourceRef: sourceRef || null,
       description: description || null,
+    });
+    await logAdminAction({
+      req,
+      action: 'wallet_credit',
+      resource_type: 'wallet',
+      resource_id: virtualAccountCode || null,
+      payload: { amount, source: source || 'ADMIN_ADJUST', sourceRef: sourceRef || null },
     });
     res.json({ ok: true, message: 'Wallet credited', data: result });
   } catch (e) {
@@ -632,6 +643,13 @@ router.post('/c2b-payments/:id/reprocess', async (req, res) => {
         return res.status(409).json({ ok: false, error: 'payment status changed; retry' });
       }
       await client.query('COMMIT');
+      await logAdminAction({
+        req,
+        action: 'c2b_reprocess',
+        resource_type: 'c2b_payment',
+        resource_id: row.id,
+        payload: { amount, walletId, receipt: row.receipt || null },
+      });
       return res.json({ ok: true, message: 'Reprocessed', data: result });
     } catch (err) {
       await client.query('ROLLBACK');
@@ -652,6 +670,13 @@ router.post('/reconciliation/run', async (req, res) => {
   const date = normalizeDateOnly(req.query.date || req.body?.date || null);
   try {
     const result = await runDailyReconciliation({ date: date || undefined });
+    await logAdminAction({
+      req,
+      action: 'reconciliation_run',
+      resource_type: 'reconciliation',
+      resource_id: date || 'latest',
+      payload: {},
+    });
     res.json({ ok: true, result });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -1283,7 +1308,13 @@ router.post('/payout-batches/:id/approve', async (req, res) => {
       message: 'Batch approved',
       meta: {},
     });
-
+    await logAdminAction({
+      req,
+      action: 'payout_batch_approve',
+      resource_type: 'payout_batch',
+      resource_id: batchId,
+      payload: { sacco_id: batch.sacco_id, total_amount: batch.total_amount },
+    });
     return res.json({ ok: true, batch: updated.rows[0] });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
@@ -1442,6 +1473,14 @@ router.post('/payout-batches/:id/process', async (req, res) => {
     const updatedBatch = await updateBatchStatusFromItems({
       batchId,
       actorId: req.user?.id || null,
+    });
+
+    await logAdminAction({
+      req,
+      action: 'payout_batch_process',
+      resource_type: 'payout_batch',
+      resource_id: batchId,
+      payload: { sacco_id: batch.sacco_id, total_amount: batch.total_amount },
     });
 
     return res.json({ ok: true, results, batch_status: updatedBatch?.status || 'PROCESSING' });

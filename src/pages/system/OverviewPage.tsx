@@ -32,6 +32,17 @@ type RegistryAssignment = {
   active?: boolean
 }
 
+type AdminAuditLog = {
+  id?: string
+  created_at?: string
+  actor_user_id?: string
+  actor_role?: string
+  action?: string
+  resource_type?: string | null
+  resource_id?: string | null
+  payload?: unknown
+}
+
 type Alert = { message: string; to: string }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -53,26 +64,32 @@ export default function OverviewPage() {
   const [overview, setOverview] = useState<SystemOverview | null>(null)
   const [devices, setDevices] = useState<RegistryDevice[]>([])
   const [assignments, setAssignments] = useState<RegistryAssignment[]>([])
+  const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [auditError, setAuditError] = useState<string | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
 
   const loadAll = async () => {
     setLoading(true)
     setError(null)
     try {
-      const [overviewRes, deviceResRaw, assignmentResRaw] = await Promise.all([
+      const [overviewRes, deviceResRaw, assignmentResRaw, auditRes] = await Promise.all([
         fetchJson<SystemOverview>('/api/admin/system-overview'),
         fetchJson<unknown>('/api/registry/devices'),
         fetchJson<unknown>('/api/registry/assignments'),
+        fetchJson<{ items?: AdminAuditLog[] } | { ok?: boolean; items?: AdminAuditLog[] }>('/api/admin/audit?limit=20'),
       ])
       setOverview(overviewRes || null)
       setDevices(toList<RegistryDevice>(deviceResRaw))
       setAssignments(toList<RegistryAssignment>(assignmentResRaw))
+      const auditItems = Array.isArray((auditRes as any)?.items) ? ((auditRes as any).items as AdminAuditLog[]) : []
+      setAuditLogs(auditItems.slice(0, 20))
       setLastUpdated(new Date())
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load overview'
       setError(msg)
+      setAuditError(err instanceof Error ? err.message : 'Failed to load audit')
     } finally {
       setLoading(false)
     }
@@ -220,6 +237,47 @@ export default function OverviewPage() {
             ))}
           </ul>
         )}
+      </section>
+
+      <section className="card">
+        <div className="topline">
+          <h3 style={{ margin: 0 }}>Recent admin actions</h3>
+          <span className="muted small">Last 20</span>
+        </div>
+        {auditError ? <div className="err">Audit load error: {auditError}</div> : null}
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Action</th>
+                <th>Role</th>
+                <th>Resource</th>
+              </tr>
+            </thead>
+            <tbody>
+              {auditLogs.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="muted">
+                    No recent admin actions.
+                  </td>
+                </tr>
+              ) : (
+                auditLogs.map((log) => (
+                  <tr key={log.id || log.created_at}>
+                    <td className="mono">{log.created_at ? new Date(log.created_at).toLocaleString() : '-'}</td>
+                    <td>{log.action || '-'}</td>
+                    <td>{log.actor_role || '-'}</td>
+                    <td>
+                      {log.resource_type || '-'}
+                      {log.resource_id ? ` (${log.resource_id})` : ''}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="card">

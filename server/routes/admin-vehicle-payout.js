@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const { supabaseAdmin } = require('../supabase');
-const { requireAdminAccess } = require('../middleware/admin-access');
+const { requireSuperOnly } = require('../middleware/requireAdmin');
+const { logAdminAction } = require('../services/audit.service');
 
-router.use(requireAdminAccess);
+router.use(requireSuperOnly);
 
 async function updatePayout(table, id, body, res) {
   try {
@@ -25,6 +26,13 @@ async function updatePayout(table, id, body, res) {
       .single();
 
     if (error) return res.status(500).json({ error: error.message });
+    await logAdminAction({
+      req,
+      action: `${table}_payout_update`,
+      resource_type: table,
+      resource_id: id,
+      payload: { payout_method: update.payout_method, payout_phone: update.payout_phone },
+    });
     return res.json({ ok: true, payout: data });
   } catch (e) {
     return res.status(500).json({ error: e.message || 'Failed to update payout' });

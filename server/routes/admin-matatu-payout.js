@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const { supabaseAdmin } = require('../supabase');
-const { requireAdminAccess } = require('../middleware/admin-access');
+const { requireSuperOnly } = require('../middleware/requireAdmin');
+const { logAdminAction } = require('../services/audit.service');
 
-// fallback guard: admin token or Supabase auth
-router.use(requireAdminAccess);
+router.use(requireSuperOnly);
 
 router.post('/matatus/:id/payout', async (req, res) => {
   const id = req.params.id;
@@ -28,6 +28,13 @@ router.post('/matatus/:id/payout', async (req, res) => {
       .single();
 
     if (error) return res.status(500).json({ error: error.message });
+    await logAdminAction({
+      req,
+      action: 'matatu_payout_update',
+      resource_type: 'matatu',
+      resource_id: id,
+      payload: { payout_method: update.payout_method, payout_phone: update.payout_phone },
+    });
     res.json({ ok: true, matatu: data });
   } catch (e) {
     res.status(500).json({ error: e.message || 'Failed to update payout' });

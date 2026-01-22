@@ -1,35 +1,11 @@
 const express = require('express');
 const { supabaseAdmin } = require('../supabase');
-const { requireUser } = require('../middleware/auth');
-const { getSaccoContext } = require('../services/saccoContext.service');
+const { requireSystemOrSuper } = require('../middleware/requireAdmin');
+const { logAdminAction } = require('../services/audit.service');
 
 const router = express.Router();
 
-async function requireRegistryAdmin(req, res, next) {
-  if (!supabaseAdmin) {
-    return res.status(500).json({ error: 'SUPABASE_SERVICE_ROLE_KEY not configured' });
-  }
-  return requireUser(req, res, async () => {
-    try {
-      const ctx = await getSaccoContext(req.user?.id);
-      const role = String(ctx?.role || '').toLowerCase();
-      const allowed = new Set(['system_admin', 'super_admin']);
-      if (!allowed.has(role)) {
-        return res.status(403).json({
-          error: 'forbidden',
-          required: Array.from(allowed),
-          role,
-        });
-      }
-      req.adminCtx = { ...ctx, role };
-      return next();
-    } catch (e) {
-      return res.status(500).json({ error: e.message });
-    }
-  });
-}
-
-router.use(requireRegistryAdmin);
+router.use(requireSystemOrSuper);
 
 // GET /api/registry/devices
 router.get('/devices', async (_req, res) => {
@@ -74,6 +50,13 @@ router.post('/devices', async (req, res) => {
     .select()
     .maybeSingle();
   if (error) return res.status(500).json({ ok: false, error: error.message });
+  await logAdminAction({
+    req,
+    action: 'registry_device_create',
+    resource_type: 'registry_device',
+    resource_id: data?.id || null,
+    payload: { label, device_type },
+  });
   return res.json({ ok: true, device: data });
 });
 
@@ -91,6 +74,13 @@ router.patch('/devices/:id', async (req, res) => {
     .maybeSingle();
   if (error) return res.status(500).json({ ok: false, error: error.message });
   if (!data) return res.status(404).json({ ok: false, error: 'Device not found' });
+  await logAdminAction({
+    req,
+    action: 'registry_device_update',
+    resource_type: 'registry_device',
+    resource_id: id,
+    payload: { label: payload.label || null, device_type: payload.device_type || null },
+  });
   return res.json({ ok: true, device: data });
 });
 
@@ -129,6 +119,13 @@ router.post('/assign', async (req, res) => {
     .select()
     .maybeSingle();
   if (error) return res.status(500).json({ ok: false, error: error.message });
+  await logAdminAction({
+    req,
+    action: 'registry_assignment_create',
+    resource_type: 'registry_assignment',
+    resource_id: assignment?.id || null,
+    payload: { device_id, sacco_id, matatu_id, route_id },
+  });
   return res.json({ ok: true, assignment });
 });
 
