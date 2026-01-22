@@ -7,6 +7,7 @@ import { authFetch } from '../../lib/auth'
 import { defaultOperatorType, getOperatorConfig, normalizeOperatorType, type OperatorType } from '../../lib/operatorConfig'
 import PayoutHistory from '../PayoutHistory'
 import WorkerMonitor from '../WorkerMonitor'
+import { useAuth } from '../../state/auth'
 
 type OverviewCounts = {
   saccos?: number
@@ -1091,6 +1092,9 @@ const SystemDashboard = ({
   useShell = true,
   onTabChange,
 }: SystemDashboardProps) => {
+  const { user } = useAuth()
+  const userRole = (user?.role || '').toLowerCase()
+  const canFinanceAct = userRole === 'system_admin' || userRole === 'super_admin'
   const [overview, setOverview] = useState<Overview | null>(null)
   const [overviewError, setOverviewError] = useState<string | null>(null)
 
@@ -3626,6 +3630,15 @@ const SystemDashboard = ({
       setWalletCreditMsg('')
       return
     }
+    if (!canFinanceAct) {
+      setWalletCreditError('View-only: You do not have permission to perform financial actions')
+      setWalletCreditMsg('')
+      return
+    }
+    const amountLabel = amount.toLocaleString('en-KE')
+    if (!window.confirm(`Confirm manual credit of KES ${amountLabel} to wallet ${code}?`)) {
+      return
+    }
     setWalletCreditMsg('Crediting wallet...')
     setWalletCreditError(null)
     try {
@@ -3669,6 +3682,15 @@ const SystemDashboard = ({
     if (!phone) {
       setWalletB2CError('Phone number is required')
       setWalletB2CMsg('')
+      return
+    }
+    if (!canFinanceAct) {
+      setWalletB2CError('View-only: You do not have permission to perform financial actions')
+      setWalletB2CMsg('')
+      return
+    }
+    const amountLabel = amount.toLocaleString('en-KE')
+    if (!window.confirm(`Confirm B2C withdrawal of KES ${amountLabel} from wallet ${code} to ${phone}?`)) {
       return
     }
     setWalletB2CMsg('Submitting B2C withdrawal...')
@@ -3717,6 +3739,19 @@ const SystemDashboard = ({
     if (walletBankForm.fee_percent.trim() && feePercent === null) {
       setWalletBankError('Fee percent must be a number')
       setWalletBankMsg('')
+      return
+    }
+    if (!canFinanceAct) {
+      setWalletBankError('View-only: You do not have permission to perform financial actions')
+      setWalletBankMsg('')
+      return
+    }
+    const amountLabel = amount.toLocaleString('en-KE')
+    if (
+      !window.confirm(
+        `Confirm bank withdrawal of KES ${amountLabel} from wallet ${code} to ${bankAccountName} (${bankName} ${bankAccountNumber})?`,
+      )
+    ) {
       return
     }
     setWalletBankMsg('Submitting bank withdrawal...')
@@ -7572,8 +7607,9 @@ const SystemDashboard = ({
 
       {activeTab === 'finance' ? (
         <>
-      <div className="muted small" style={{ margin: '0 0 6px' }}>
-        Monitoring
+      <div className="topline" style={{ margin: '0 0 6px' }}>
+        <h3 style={{ margin: 0 }}>Monitoring &amp; inspection</h3>
+        <span className="muted small">Mode: {canFinanceAct ? 'Admin actions enabled' : 'Monitoring only'}</span>
       </div>
       <section className="card">
         <h3 style={{ marginTop: 0 }}>Finance overview</h3>
@@ -7717,7 +7753,7 @@ const SystemDashboard = ({
                           <select
                             value={statusValue}
                             onChange={(e) => rowId && updateWithdrawInline(rowId, { status: e.target.value, msg: '', error: '' })}
-                            disabled={!rowId || !!busy}
+                            disabled={!rowId || !!busy || !canFinanceAct}
                             style={{ padding: 6, minWidth: 120 }}
                           >
                             {WITHDRAW_STATUS_OPTIONS.map((opt) => (
@@ -7734,15 +7770,15 @@ const SystemDashboard = ({
                               value={noteValue}
                               onChange={(e) => rowId && updateWithdrawInline(rowId, { note: e.target.value, msg: '', error: '' })}
                               placeholder="Note (optional)"
-                              disabled={!rowId || !!busy}
+                              disabled={!rowId || !!busy || !canFinanceAct}
                             />
                             <button
                               className="btn ghost"
                               type="button"
                               onClick={() => submitWithdrawInline(row)}
-                              disabled={!rowId || !!busy}
+                              disabled={!rowId || !!busy || !canFinanceAct}
                             >
-                              {busy ? 'Saving...' : 'Save'}
+                              {busy ? 'Saving...' : canFinanceAct ? 'Save' : '🔒 Admin only'}
                             </button>
                           </div>
                           {inline?.msg ? <div className="muted small">{inline.msg}</div> : null}
@@ -7817,11 +7853,16 @@ const SystemDashboard = ({
         </div>
       </section>
       <section className="grid g2">
-        <div className="muted small" style={{ margin: '12px 0 6px', gridColumn: '1 / -1' }}>
-          Manual actions (Admin only)
-        </div>
         <div className="card" style={{ gridColumn: '1 / -1' }}>
-          <h3 style={{ marginTop: 0 }}>Manual actions (Admin only)</h3>
+          <div className="topline">
+            <h3 style={{ margin: 0 }}>Restricted actions (Admin only)</h3>
+            <span className="muted small">These actions affect live balances. Proceed carefully.</span>
+          </div>
+          {!canFinanceAct ? (
+            <div className="err" style={{ margin: '8px 0 12px' }}>
+              View-only: You don’t have permission to perform financial actions.
+            </div>
+          ) : null}
 
           <h4 style={{ margin: '8px 0' }}>Manual credit</h4>
           <div className="grid g2">
@@ -7832,6 +7873,7 @@ const SystemDashboard = ({
                 value={walletCreditForm.wallet_code}
                 onChange={(e) => setWalletCreditForm((f) => ({ ...f, wallet_code: e.target.value }))}
                 placeholder="MAT0021"
+                disabled={!canFinanceAct}
               />
             </label>
             <label className="muted small">
@@ -7842,6 +7884,7 @@ const SystemDashboard = ({
                 value={walletCreditForm.amount}
                 onChange={(e) => setWalletCreditForm((f) => ({ ...f, amount: e.target.value }))}
                 placeholder="500"
+                disabled={!canFinanceAct}
               />
             </label>
             <label className="muted small">
@@ -7851,6 +7894,7 @@ const SystemDashboard = ({
                 value={walletCreditForm.reference}
                 onChange={(e) => setWalletCreditForm((f) => ({ ...f, reference: e.target.value }))}
                 placeholder="ADJ-2025-01"
+                disabled={!canFinanceAct}
               />
             </label>
             <label className="muted small">
@@ -7860,12 +7904,13 @@ const SystemDashboard = ({
                 value={walletCreditForm.description}
                 onChange={(e) => setWalletCreditForm((f) => ({ ...f, description: e.target.value }))}
                 placeholder="Manual adjustment"
+                disabled={!canFinanceAct}
               />
             </label>
           </div>
           <div className="row" style={{ marginTop: 8 }}>
-            <button className="btn" type="button" onClick={submitWalletCredit}>
-              Credit wallet
+            <button className={`btn${!canFinanceAct ? ' disabled' : ''}`} type="button" onClick={submitWalletCredit} disabled={!canFinanceAct}>
+              {canFinanceAct ? 'Credit wallet' : '🔒 System admin only'}
             </button>
             <span className="muted small">{walletCreditMsg}</span>
           </div>
@@ -7880,6 +7925,7 @@ const SystemDashboard = ({
                 value={walletB2CForm.wallet_code}
                 onChange={(e) => setWalletB2CForm((f) => ({ ...f, wallet_code: e.target.value }))}
                 placeholder="MAT0021"
+                disabled={!canFinanceAct}
               />
             </label>
             <label className="muted small">
@@ -7890,6 +7936,7 @@ const SystemDashboard = ({
                 value={walletB2CForm.amount}
                 onChange={(e) => setWalletB2CForm((f) => ({ ...f, amount: e.target.value }))}
                 placeholder="1500"
+                disabled={!canFinanceAct}
               />
             </label>
             <label className="muted small">
@@ -7900,12 +7947,13 @@ const SystemDashboard = ({
                 value={walletB2CForm.phone_number}
                 onChange={(e) => setWalletB2CForm((f) => ({ ...f, phone_number: e.target.value }))}
                 placeholder="2547XXXXXXXX"
+                disabled={!canFinanceAct}
               />
             </label>
           </div>
           <div className="row" style={{ marginTop: 8 }}>
-            <button className="btn" type="button" onClick={submitWalletB2C}>
-              Send B2C
+            <button className={`btn${!canFinanceAct ? ' disabled' : ''}`} type="button" onClick={submitWalletB2C} disabled={!canFinanceAct}>
+              {canFinanceAct ? 'Send B2C' : '🔒 System admin only'}
             </button>
             <span className="muted small">{walletB2CMsg}</span>
           </div>
@@ -7920,6 +7968,7 @@ const SystemDashboard = ({
                 value={walletBankForm.wallet_code}
                 onChange={(e) => setWalletBankForm((f) => ({ ...f, wallet_code: e.target.value }))}
                 placeholder="MAT0021"
+                disabled={!canFinanceAct}
               />
             </label>
             <label className="muted small">
@@ -7930,6 +7979,7 @@ const SystemDashboard = ({
                 value={walletBankForm.amount}
                 onChange={(e) => setWalletBankForm((f) => ({ ...f, amount: e.target.value }))}
                 placeholder="5000"
+                disabled={!canFinanceAct}
               />
             </label>
             <label className="muted small">
@@ -7939,6 +7989,7 @@ const SystemDashboard = ({
                 value={walletBankForm.bank_name}
                 onChange={(e) => setWalletBankForm((f) => ({ ...f, bank_name: e.target.value }))}
                 placeholder="KCB"
+                disabled={!canFinanceAct}
               />
             </label>
             <label className="muted small">
@@ -7948,6 +7999,7 @@ const SystemDashboard = ({
                 value={walletBankForm.bank_branch}
                 onChange={(e) => setWalletBankForm((f) => ({ ...f, bank_branch: e.target.value }))}
                 placeholder="Nairobi"
+                disabled={!canFinanceAct}
               />
             </label>
             <label className="muted small">
@@ -7958,6 +8010,7 @@ const SystemDashboard = ({
                 value={walletBankForm.bank_account_number}
                 onChange={(e) => setWalletBankForm((f) => ({ ...f, bank_account_number: e.target.value }))}
                 placeholder="0012345678"
+                disabled={!canFinanceAct}
               />
             </label>
             <label className="muted small">
@@ -7967,6 +8020,7 @@ const SystemDashboard = ({
                 value={walletBankForm.bank_account_name}
                 onChange={(e) => setWalletBankForm((f) => ({ ...f, bank_account_name: e.target.value }))}
                 placeholder="SACCO Main"
+                disabled={!canFinanceAct}
               />
             </label>
             <label className="muted small">
@@ -7977,6 +8031,7 @@ const SystemDashboard = ({
                 value={walletBankForm.fee_percent}
                 onChange={(e) => setWalletBankForm((f) => ({ ...f, fee_percent: e.target.value }))}
                 placeholder="1"
+                disabled={!canFinanceAct}
               />
             </label>
           </div>
@@ -7984,8 +8039,8 @@ const SystemDashboard = ({
             Fee percent accepts 1 for 1%.
           </div>
           <div className="row" style={{ marginTop: 8 }}>
-            <button className="btn" type="button" onClick={submitWalletBank}>
-              Create bank withdrawal
+            <button className={`btn${!canFinanceAct ? ' disabled' : ''}`} type="button" onClick={submitWalletBank} disabled={!canFinanceAct}>
+              {canFinanceAct ? 'Create bank withdrawal' : '🔒 System admin only'}
             </button>
             <span className="muted small">{walletBankMsg}</span>
           </div>
