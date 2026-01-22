@@ -1,20 +1,17 @@
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { NavLink, Outlet } from 'react-router-dom'
 import DashboardShell from '../../components/DashboardShell'
 
 const systemLinks = [
-  { to: '.', label: 'Overview', end: true },
-  { to: 'analytics', label: 'Analytics' },
-  { to: 'operators', label: 'Operators' },
-  { to: 'payments', label: 'Payments' },
-  { to: 'finance', label: 'Finance' },
-  { to: 'comms', label: 'Comms' },
-  { to: 'registry', label: 'Registry' },
+  { to: '/system', label: 'Overview', end: true },
+  { to: '/system/analytics', label: 'Analytics' },
+  { to: '/system/operators', label: 'Operators' },
+  { to: '/system/payments', label: 'Payments' },
+  { to: '/system/finance', label: 'Finance' },
+  { to: '/system/comms', label: 'Comms' },
+  { to: '/system/registry', label: 'Registry' },
 ]
 
 export default function SystemShell() {
-  const location = useLocation()
-  const basePath = location.pathname
-
   return (
     <DashboardShell title="System Admin" subtitle="System navigation" hideNav>
       <nav className="sys-nav" aria-label="System admin sections">
@@ -24,12 +21,12 @@ export default function SystemShell() {
             to={link.to}
             end={link.end}
             className={({ isActive }) => `sys-tab${isActive ? ' active' : ''}`}
-          >
-            {link.label}
-          </NavLink>
-        ))}
+            >
+              {link.label}
+            </NavLink>
+          ))}
       </nav>
-      <Outlet key={basePath} />
+      <Outlet />
     </DashboardShell>
   )
 }
