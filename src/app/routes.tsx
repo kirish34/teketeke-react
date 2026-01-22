@@ -11,8 +11,14 @@ import MatatuStaffDashboard from "../dashboards/MatatuStaff";
 import SaccoStaffDashboard from "../dashboards/SaccoStaff";
 import TaxiDashboard from "../dashboards/Taxi";
 import BodaDashboard from "../dashboards/Boda";
-import SystemDashboard from "../dashboards/System";
-import SystemRegistry from "../dashboards/SystemRegistry";
+import SystemShell from "../pages/system/SystemShell";
+import OverviewPage from "../pages/system/OverviewPage";
+import AnalyticsPage from "../pages/system/AnalyticsPage";
+import OperatorsPage from "../pages/system/OperatorsPage";
+import PaymentsPage from "../pages/system/PaymentsPage";
+import FinancePage from "../pages/system/FinancePage";
+import CommsPage from "../pages/system/CommsPage";
+import RegistryPage from "../pages/system/RegistryPage";
 import OpsDashboard from "../dashboards/Ops";
 import DashHome from "../dashboards/DashHome";
 import SaccoApprovals from "../pages/SaccoApprovals";
@@ -139,39 +145,26 @@ export const routes: RouteObject[] = [
     path: "/system",
     element: (
       <RequireRole allow={["super_admin", "system_admin"]}>
-        <SystemDashboard />
+        <SystemShell />
       </RequireRole>
     ),
-  },
-  {
-    path: "/system/registry",
-    element: (
-      <RequireRole allow={["super_admin", "system_admin"]}>
-        <SystemRegistry />
-      </RequireRole>
-    ),
-  },
-  {
-    path: "/system/payouts",
-    element: (
-      <RequireRole allow={["super_admin", "system_admin"]}>
-        <SystemDashboard />
-      </RequireRole>
-    ),
+    children: [
+      { index: true, element: <OverviewPage /> },
+      { path: "analytics", element: <AnalyticsPage /> },
+      { path: "operators", element: <OperatorsPage /> },
+      { path: "payments", element: <PaymentsPage /> },
+      { path: "finance", element: <FinancePage /> },
+      { path: "payouts", element: <FinancePage initialTab="payouts" /> },
+      { path: "worker-monitor", element: <FinancePage initialTab="worker_monitor" /> },
+      { path: "comms", element: <CommsPage /> },
+      { path: "registry", element: <RegistryPage /> },
+    ],
   },
   {
     path: "/sacco/approvals",
     element: (
       <RequireRole allow={["super_admin", "system_admin", "sacco_admin"]}>
         <SaccoApprovals />
-      </RequireRole>
-    ),
-  },
-  {
-    path: "/system/worker-monitor",
-    element: (
-      <RequireRole allow={["super_admin", "system_admin"]}>
-        <SystemDashboard />
       </RequireRole>
     ),
   },

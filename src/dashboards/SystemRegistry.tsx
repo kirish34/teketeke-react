@@ -1,21 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import DashboardShell from '../components/DashboardShell'
 import { authFetch } from '../lib/auth'
-
-type SystemTabId =
-  | 'overview'
-  | 'finance'
-  | 'saccos'
-  | 'matatu'
-  | 'taxis'
-  | 'bodabodas'
-  | 'ussd'
-  | 'paybill'
-  | 'sms'
-  | 'logins'
-  | 'routes'
-  | 'registry'
 
 type RegistryDevice = {
   id?: string
@@ -136,22 +120,11 @@ function downloadJson(filename: string, payload: unknown) {
   downloadFile(filename, JSON.stringify(payload, null, 2), 'application/json')
 }
 
-export default function SystemRegistry() {
-  const navigate = useNavigate()
-  const tabs: Array<{ id: SystemTabId; label: string }> = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'registry', label: 'System Registry' },
-    { id: 'finance', label: 'Finance' },
-    { id: 'saccos', label: 'Operators' },
-    { id: 'matatu', label: 'Matatu' },
-    { id: 'taxis', label: 'Taxis' },
-    { id: 'bodabodas', label: 'BodaBodas' },
-    { id: 'ussd', label: 'USSD' },
-    { id: 'paybill', label: 'Paybill' },
-    { id: 'sms', label: 'SMS' },
-    { id: 'logins', label: 'Logins' },
-    { id: 'routes', label: 'Routes Overview' },
-  ]
+type SystemRegistryProps = {
+  onBack?: () => void
+}
+
+export default function SystemRegistry({ onBack }: SystemRegistryProps) {
 
   const [devices, setDevices] = useState<RegistryDevice[]>([])
   const [assignments, setAssignments] = useState<RegistryAssignment[]>([])
@@ -571,22 +544,15 @@ export default function SystemRegistry() {
   const activeAssignments = assignments.filter((a) => a.active).length
 
   return (
-    <DashboardShell title="System Registry" hideNav>
-      <nav className="sys-nav" aria-label="System admin sections">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            className={`sys-tab${t.id === 'registry' ? ' active' : ''}`}
-            onClick={() => {
-              if (t.id === 'registry') return
-              navigate('/system', { state: { tab: t.id } })
-            }}
-          >
-            {t.label}
+    <>
+      {onBack ? (
+        <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 12 }}>
+          <button type="button" className="btn ghost" onClick={onBack}>
+            ← Back to System
           </button>
-        ))}
-      </nav>
+          <span className="muted small">Registry tools</span>
+        </div>
+      ) : null}
 
       <section className="card">
         <div className="topline">
@@ -1090,6 +1056,6 @@ Body:
           </div>
         </div>
       </section>
-    </DashboardShell>
+    </>
   )
 }
