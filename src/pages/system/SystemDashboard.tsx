@@ -1240,6 +1240,7 @@ const SystemDashboard = ({
   })
   const [saccoEditMsg, setSaccoEditMsg] = useState('')
   const [saccoEditError, setSaccoEditError] = useState<string | null>(null)
+  const [operatorFormOpen, setOperatorFormOpen] = useState(false)
 
   const [shuttles, setShuttles] = useState<ShuttleRow[]>([])
   const [shuttlesError, setShuttlesError] = useState<string | null>(null)
@@ -4474,6 +4475,19 @@ const SystemDashboard = ({
 
   const counts = overview?.counts || {}
   const pool = overview?.ussd_pool || {}
+  const smsSentToday = useMemo(() => {
+    const start = new Date()
+    start.setHours(0, 0, 0, 0)
+    const end = new Date(start)
+    end.setDate(start.getDate() + 1)
+    return smsRows.filter((row) => {
+      const tsStr = (row as any).created_at || row.updated_at || ''
+      if (!tsStr) return false
+      const ts = new Date(tsStr)
+      if (Number.isNaN(ts.getTime())) return false
+      return ts >= start && ts < end
+    }).length
+  }, [smsRows])
 
   const renderAnalyticsTab = () => {
     const totalShuttles = analyticsShuttles.length
@@ -4562,6 +4576,11 @@ const SystemDashboard = ({
             </div>
           </div>
         </section>
+
+        <div className="topline" style={{ margin: '8px 0 4px' }}>
+          <h4 style={{ margin: 0 }}>Risk &amp; performance</h4>
+          <span className="muted small">High-risk vehicles, capacity, make/model</span>
+        </div>
 
         <section className="grid g2">
           <div className="card">
@@ -4776,6 +4795,11 @@ const SystemDashboard = ({
             </div>
           </div>
         </section>
+
+        <div className="topline" style={{ margin: '12px 0 4px' }}>
+          <h4 style={{ margin: 0 }}>Maintenance intelligence</h4>
+          <span className="muted small">Cost drivers, downtime, repeat issues</span>
+        </div>
 
         <section className="card">
           <div className="topline">
@@ -7011,60 +7035,67 @@ const SystemDashboard = ({
       {activeTab === 'saccos' ? (
         <>
           <section className="card">
-            <h3 style={{ marginTop: 0 }}>Register Operator</h3>
+            <div className="topline">
+              <h3 style={{ marginTop: 0 }}>Register Operator</h3>
+              <button className="btn ghost" type="button" onClick={() => setOperatorFormOpen((v) => !v)}>
+                {operatorFormOpen ? 'Hide form' : 'Open form'}
+              </button>
+            </div>
 
-            <h4 style={{ margin: '10px 0 6px' }}>Operator basic details</h4>
-            <div className="grid g2">
-              <label className="muted small">
-                Operator display name
-                <input
-                  className="input"
-                  value={saccoForm.display_name}
-                  onChange={(e) => setSaccoForm((f) => ({ ...f, display_name: e.target.value }))}
-                  placeholder="e.g., Metro Fleet"
-                />
-              </label>
-              <label className="muted small">
-                Operator type
-                <select
-                  value={saccoForm.operator_type}
-                  onChange={(e) => {
-                    const nextType = e.target.value as OperatorType
-                    const defaults = buildOperatorDefaults(nextType)
-                    setSaccoForm((f) => ({
-                      ...f,
-                      operator_type: defaults.operator_type,
-                      fee_label: defaults.fee_label,
-                      routes_enabled: defaults.routes_enabled,
-                    }))
-                  }}
-                >
-                  {operatorTypeOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="muted small">
-                Legal name (optional)
-                <input
-                  className="input"
-                  value={saccoForm.legal_name}
-                  onChange={(e) => setSaccoForm((f) => ({ ...f, legal_name: e.target.value }))}
-                  placeholder="Registered legal name"
-                />
-              </label>
-              <label className="muted small">
-                Registration number (optional)
-                <input
-                  className="input"
-                  value={saccoForm.registration_no}
-                  onChange={(e) => setSaccoForm((f) => ({ ...f, registration_no: e.target.value }))}
-                  placeholder="Company/SACCO reg no"
-                />
-              </label>
-              <label className="muted small">
+            {operatorFormOpen ? (
+              <>
+                <h4 style={{ margin: '10px 0 6px' }}>Operator basic details</h4>
+                <div className="grid g2">
+                  <label className="muted small">
+                    Operator display name
+                    <input
+                      className="input"
+                      value={saccoForm.display_name}
+                      onChange={(e) => setSaccoForm((f) => ({ ...f, display_name: e.target.value }))}
+                      placeholder="e.g., Metro Fleet"
+                    />
+                  </label>
+                  <label className="muted small">
+                    Operator type
+                    <select
+                      value={saccoForm.operator_type}
+                      onChange={(e) => {
+                        const nextType = e.target.value as OperatorType
+                        const defaults = buildOperatorDefaults(nextType)
+                        setSaccoForm((f) => ({
+                          ...f,
+                          operator_type: defaults.operator_type,
+                          fee_label: defaults.fee_label,
+                          routes_enabled: defaults.routes_enabled,
+                        }))
+                      }}
+                    >
+                      {operatorTypeOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="muted small">
+                    Legal name (optional)
+                    <input
+                      className="input"
+                      value={saccoForm.legal_name}
+                      onChange={(e) => setSaccoForm((f) => ({ ...f, legal_name: e.target.value }))}
+                      placeholder="Registered legal name"
+                    />
+                  </label>
+                  <label className="muted small">
+                    Registration number (optional)
+                    <input
+                      className="input"
+                      value={saccoForm.registration_no}
+                      onChange={(e) => setSaccoForm((f) => ({ ...f, registration_no: e.target.value }))}
+                      placeholder="Company/SACCO reg no"
+                    />
+                  </label>
+                  <label className="muted small">
                 Status
                 <select
                   value={saccoForm.status}
@@ -7330,6 +7361,10 @@ const SystemDashboard = ({
               </button>
               <span className="muted small">{saccoMsg}</span>
             </div>
+          </>
+            ) : (
+              <div className="muted small">Operator registration form collapsed.</div>
+            )}
           </section>
 
           <section className="card">
@@ -7501,6 +7536,9 @@ const SystemDashboard = ({
 
       {activeTab === 'finance' ? (
         <>
+      <div className="muted small" style={{ margin: '0 0 6px' }}>
+        Monitoring
+      </div>
       <section className="card">
         <h3 style={{ marginTop: 0 }}>Finance overview</h3>
         {financeError ? <div className="err">Finance error: {financeError}</div> : null}
@@ -7743,8 +7781,11 @@ const SystemDashboard = ({
         </div>
       </section>
       <section className="grid g2">
+        <div className="muted small" style={{ margin: '12px 0 6px', gridColumn: '1 / -1' }}>
+          Manual actions (Admin only)
+        </div>
         <div className="card" style={{ gridColumn: '1 / -1' }}>
-          <h3 style={{ marginTop: 0 }}>Wallet actions</h3>
+          <h3 style={{ marginTop: 0 }}>Manual actions (Admin only)</h3>
 
           <h4 style={{ margin: '8px 0' }}>Manual credit</h4>
           <div className="grid g2">
@@ -8077,9 +8118,12 @@ const SystemDashboard = ({
                               {open ? 'Hide raw' : 'View raw'}
                             </button>
                             <button
-                              className="btn ghost"
+                              className="btn bad ghost"
                               type="button"
-                              onClick={() => reprocessC2b(row)}
+                              onClick={() => {
+                                if (!confirm('Reprocess this payment?')) return
+                                reprocessC2b(row)
+                              }}
                               disabled={!id || processed || !!action?.busy}
                             >
                               {action?.busy ? 'Reprocessing...' : 'Reprocess'}
@@ -9513,7 +9557,8 @@ const SystemDashboard = ({
       <section className="card" style={{ background: '#f8fafc' }}>
         <div className="topline">
           <h3 style={{ margin: 0 }}>SMS settings</h3>
-          <div className="row" style={{ gap: 8 }}>
+          <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span className="muted small">Messages sent today: {smsSentToday}</span>
             <button className="btn ghost" type="button" onClick={() => void loadSmsSettings()}>
               Refresh
             </button>

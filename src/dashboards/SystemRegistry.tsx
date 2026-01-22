@@ -171,6 +171,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
     notes: '',
   })
   const [editMsg, setEditMsg] = useState('')
+  const [showTelemetryDocs, setShowTelemetryDocs] = useState(false)
 
   const deviceMap = useMemo(() => {
     const map = new Map<string, RegistryDevice>()
@@ -981,35 +982,45 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
       </section>
 
       <section className="card">
-        <h3 style={{ marginTop: 0 }}>Telemetry ingestion</h3>
-        <p className="muted">
-          Devices post heartbeat and telemetry to the backend using the shared <code>TELEMETRY_TOKEN</code> header. JSONL
-          files are written to <code>data/heartbeats</code> and <code>data/telemetry</code> when storage is enabled.
+        <div className="topline">
+          <h3 style={{ marginTop: 0, marginBottom: 0 }}>Telemetry ingestion</h3>
+          <button className="btn ghost" type="button" onClick={() => setShowTelemetryDocs((v) => !v)}>
+            {showTelemetryDocs ? 'Hide docs' : 'Show docs'}
+          </button>
+        </div>
+        <p className="muted small" style={{ marginTop: 4, marginBottom: 8 }}>
+          Device heartbeat and telemetry endpoints. Docs are available below.
         </p>
-        <ul className="muted small" style={{ marginTop: 8, marginBottom: 0 }}>
-          <li>Route speed + delay zones</li>
-          <li>Trip time distribution</li>
-          <li>Load factor from passenger_count</li>
-          <li>Peak stops</li>
-          <li>Performance vs fuel and engine signals</li>
-        </ul>
-        <p className="muted small" style={{ marginTop: 8 }}>
-          Set <code>TELEMETRY_ENABLE_STORAGE=true</code> to persist JSONL. Device status updates to online when heartbeat or
-          telemetry is received.
-        </p>
-        <div className="grid g2">
-          <div>
-            <div className="muted small">Heartbeat endpoint</div>
-            <pre
-              className="mono"
-              style={{
-                background: '#f8fafc',
-                borderRadius: 8,
-                padding: 12,
-                border: '1px solid rgba(15, 23, 42, 0.08)',
-                overflowX: 'auto',
-              }}
-            >
+        {showTelemetryDocs ? (
+          <>
+            <p className="muted">
+              Devices post heartbeat and telemetry to the backend using the shared <code>TELEMETRY_TOKEN</code> header. JSONL
+              files are written to <code>data/heartbeats</code> and <code>data/telemetry</code> when storage is enabled.
+            </p>
+            <ul className="muted small" style={{ marginTop: 8, marginBottom: 0 }}>
+              <li>Route speed + delay zones</li>
+              <li>Trip time distribution</li>
+              <li>Load factor from passenger_count</li>
+              <li>Peak stops</li>
+              <li>Performance vs fuel and engine signals</li>
+            </ul>
+            <p className="muted small" style={{ marginTop: 8 }}>
+              Set <code>TELEMETRY_ENABLE_STORAGE=true</code> to persist JSONL. Device status updates to online when heartbeat or
+              telemetry is received.
+            </p>
+            <div className="grid g2">
+              <div>
+                <div className="muted small">Heartbeat endpoint</div>
+                <pre
+                  className="mono"
+                  style={{
+                    background: '#f8fafc',
+                    borderRadius: 8,
+                    padding: 12,
+                    border: '1px solid rgba(15, 23, 42, 0.08)',
+                    overflowX: 'auto',
+                  }}
+                >
 {`POST /api/device/heartbeat
 Headers: x-telemetry-key: TELEMETRY_TOKEN
 Body:
@@ -1022,20 +1033,20 @@ Body:
   "voltage": 12.4,
   "temp": 39
 }`}
-            </pre>
-          </div>
-          <div>
-            <div className="muted small">Telemetry endpoint</div>
-            <pre
-              className="mono"
-              style={{
-                background: '#f8fafc',
-                borderRadius: 8,
-                padding: 12,
-                border: '1px solid rgba(15, 23, 42, 0.08)',
-                overflowX: 'auto',
-              }}
-            >
+                </pre>
+              </div>
+              <div>
+                <div className="muted small">Telemetry endpoint</div>
+                <pre
+                  className="mono"
+                  style={{
+                    background: '#f8fafc',
+                    borderRadius: 8,
+                    padding: 12,
+                    border: '1px solid rgba(15, 23, 42, 0.08)',
+                    overflowX: 'auto',
+                  }}
+                >
 {`POST /api/device/telemetry
 Headers: x-telemetry-key: TELEMETRY_TOKEN
 Body:
@@ -1052,9 +1063,13 @@ Body:
   "engine_temp": 82,
   "fuel_est": 0.62
 }`}
-            </pre>
-          </div>
-        </div>
+                </pre>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="muted small">Docs collapsed. Expand to view request examples.</div>
+        )}
       </section>
     </>
   )
