@@ -43,6 +43,12 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await res.json()) as T
 }
 
+function toList<T>(value: unknown): T[] {
+  if (Array.isArray(value)) return value as T[]
+  if (Array.isArray((value as { items?: unknown })?.items)) return ((value as { items: unknown[] }).items || []) as T[]
+  return []
+}
+
 export default function OverviewPage() {
   const [overview, setOverview] = useState<SystemOverview | null>(null)
   const [devices, setDevices] = useState<RegistryDevice[]>([])
@@ -55,14 +61,14 @@ export default function OverviewPage() {
     setLoading(true)
     setError(null)
     try {
-      const [overviewRes, deviceRes, assignmentRes] = await Promise.all([
+      const [overviewRes, deviceResRaw, assignmentResRaw] = await Promise.all([
         fetchJson<SystemOverview>('/api/admin/system-overview'),
-        fetchJson<RegistryDevice[]>('/api/registry/devices'),
-        fetchJson<RegistryAssignment[]>('/api/registry/assignments'),
+        fetchJson<unknown>('/api/registry/devices'),
+        fetchJson<unknown>('/api/registry/assignments'),
       ])
       setOverview(overviewRes || null)
-      setDevices(deviceRes || [])
-      setAssignments(assignmentRes || [])
+      setDevices(toList<RegistryDevice>(deviceResRaw))
+      setAssignments(toList<RegistryAssignment>(assignmentResRaw))
       setLastUpdated(new Date())
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load overview'
@@ -118,10 +124,10 @@ export default function OverviewPage() {
   }, [devicesOffline, hasUnassignedDevices, ussdAvailable])
 
   const kpis = [
-    { label: 'SACCOs', value: counts.saccos },
-    { label: 'Vehicles', value: vehiclesTotal },
-    { label: 'Cashiers', value: counts.cashiers },
-    { label: 'Tx today', value: counts.tx_today },
+    { label: 'SACCOs', value: counts.saccos ?? '-' },
+    { label: 'Vehicles', value: vehiclesTotal ?? '-' },
+    { label: 'Cashiers', value: counts.cashiers ?? '-' },
+    { label: 'Tx today', value: counts.tx_today ?? '-' },
     { label: 'USSD (avail / total)', value: `${ussdAvailable || 0} / ${ussdTotal || 0}` },
     { label: 'Devices', value: devices.length },
     { label: 'Devices offline', value: devicesOffline },
