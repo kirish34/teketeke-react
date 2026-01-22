@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import DashboardShell from '../../components/DashboardShell'
+import { useAuth } from '../../state/auth'
 
 const systemLinks = [
   { to: '/system', label: 'Overview', end: true },
@@ -12,8 +13,15 @@ const systemLinks = [
 ]
 
 export default function SystemShell() {
+  const { user } = useAuth()
+  const role = (user?.role || '').toLowerCase()
+  const roleLabel = role === 'super_admin' ? 'Super Admin' : role === 'system_admin' ? 'System Admin' : role || 'User'
+
   return (
     <DashboardShell title="System Admin" subtitle="System navigation" hideNav>
+      <div className="muted small" style={{ marginBottom: 8 }}>
+        Role: {roleLabel}
+      </div>
       <nav className="sys-nav" aria-label="System admin sections">
         {systemLinks.map((link) => (
           <NavLink
@@ -21,10 +29,10 @@ export default function SystemShell() {
             to={link.to}
             end={link.end}
             className={({ isActive }) => `sys-tab${isActive ? ' active' : ''}`}
-            >
-              {link.label}
-            </NavLink>
-          ))}
+          >
+            {link.label}
+          </NavLink>
+        ))}
       </nav>
       <Outlet />
     </DashboardShell>
