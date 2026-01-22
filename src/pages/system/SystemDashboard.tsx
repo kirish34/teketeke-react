@@ -371,6 +371,7 @@ type SystemDashboardProps = {
   hideNav?: boolean
   useShell?: boolean
   onTabChange?: (tab: SystemTabId) => void
+  canFinanceAct?: boolean
 }
 
 type VehicleKind = 'MATATU' | 'TAXI' | 'BODABODA'
@@ -1091,10 +1092,11 @@ const SystemDashboard = ({
   hideNav = false,
   useShell = true,
   onTabChange,
+  canFinanceAct: canFinanceActProp,
 }: SystemDashboardProps) => {
   const { user } = useAuth()
   const userRole = (user?.role || '').toLowerCase()
-  const canFinanceAct = userRole === 'system_admin' || userRole === 'super_admin'
+  const canFinanceAct = canFinanceActProp ?? (userRole === 'system_admin' || userRole === 'super_admin')
   const [overview, setOverview] = useState<Overview | null>(null)
   const [overviewError, setOverviewError] = useState<string | null>(null)
 
@@ -3172,6 +3174,10 @@ const SystemDashboard = ({
   async function reprocessC2b(row: C2bPaymentRow) {
     const id = row.id || ''
     if (!id) return
+    if (!canFinanceAct) {
+      updateC2bAction(id, { busy: false, error: 'View-only: You do not have permission to reprocess payments.', msg: '' })
+      return
+    }
     updateC2bAction(id, { busy: true, error: '', msg: '' })
     try {
       const res = await sendJson<{ message?: string }>(
@@ -3484,6 +3490,10 @@ const SystemDashboard = ({
 
   async function approvePayoutBatch(batchId: string) {
     if (!batchId) return
+    if (!canFinanceAct) {
+      setPayoutApprovalMsg('View-only: You do not have permission to approve payouts.')
+      return
+    }
     setPayoutApprovalMsg('Approving batch...')
     try {
       await sendJson(`/api/admin/payout-batches/${encodeURIComponent(batchId)}/approve`, 'POST', {})
@@ -3497,6 +3507,10 @@ const SystemDashboard = ({
 
   async function processPayoutBatch(batchId: string) {
     if (!batchId) return
+    if (!canFinanceAct) {
+      setPayoutApprovalMsg('View-only: You do not have permission to process payouts.')
+      return
+    }
     setPayoutApprovalMsg('Processing batch...')
     try {
       await sendJson(`/api/admin/payout-batches/${encodeURIComponent(batchId)}/process`, 'POST', {})
@@ -7860,7 +7874,7 @@ const SystemDashboard = ({
           </div>
           {!canFinanceAct ? (
             <div className="err" style={{ margin: '8px 0 12px' }}>
-              View-only: You don’t have permission to perform financial actions.
+              🔒 View-only: You don’t have permission to perform financial actions.
             </div>
           ) : null}
 
@@ -8215,9 +8229,9 @@ const SystemDashboard = ({
                                 if (!confirm('Reprocess this payment?')) return
                                 reprocessC2b(row)
                               }}
-                              disabled={!id || processed || !!action?.busy}
+                              disabled={!id || processed || !!action?.busy || !canFinanceAct}
                             >
-                              {action?.busy ? 'Reprocessing...' : 'Reprocess'}
+                              {action?.busy ? 'Reprocessing...' : canFinanceAct ? 'Reprocess' : '🔒 Admin only'}
                             </button>
                             {action?.msg ? <span className="muted small">{action.msg}</span> : null}
                             {action?.error ? <span className="err">Reprocess error: {action.error}</span> : null}
@@ -8250,7 +8264,7 @@ const SystemDashboard = ({
         </>
       ) : null}
 
-      {activeTab === 'payouts' ? <PayoutHistory /> : null}
+      {activeTab === 'payouts' ? <PayoutHistory canAct={canFinanceAct} /> : null}
 
       {activeTab === 'payout_approvals' ? (
         <>
@@ -8354,28 +8368,34 @@ const SystemDashboard = ({
                             <button
                               type="button"
                               onClick={() => approvePayoutBatch(row.id || '')}
-                              disabled={!!row.id && payoutReadinessMap[row.id]?.checks?.can_approve?.pass === false}
+                              disabled={
+                                !canFinanceAct ||
+                                (!!row.id && payoutReadinessMap[row.id]?.checks?.can_approve?.pass === false)
+                              }
                               title={
                                 row.id && payoutReadinessMap[row.id]?.checks?.can_approve?.pass === false
                                   ? payoutReadinessMap[row.id]?.checks?.can_approve?.reason || 'Cannot approve'
                                   : ''
                               }
                             >
-                              Approve
+                              {canFinanceAct ? 'Approve' : '🔒 Admin only'}
                             </button>
                           ) : null}
                           {row.status === 'APPROVED' || row.status === 'PROCESSING' ? (
                             <button
                               type="button"
                               onClick={() => processPayoutBatch(row.id || '')}
-                              disabled={!!row.id && payoutReadinessMap[row.id]?.checks?.can_process?.pass === false}
+                              disabled={
+                                !canFinanceAct ||
+                                (!!row.id && payoutReadinessMap[row.id]?.checks?.can_process?.pass === false)
+                              }
                               title={
                                 row.id && payoutReadinessMap[row.id]?.checks?.can_process?.pass === false
                                   ? payoutReadinessMap[row.id]?.checks?.can_process?.reason || 'Cannot process'
                                   : ''
                               }
                             >
-                              Process
+                              {canFinanceAct ? 'Process' : '🔒 Admin only'}
                             </button>
                           ) : null}
                         </td>

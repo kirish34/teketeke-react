@@ -70,7 +70,11 @@ function getStatusStyle(status: Status) {
   return STATUS_STYLES[status] || STATUS_STYLES.pending;
 }
 
-export default function PayoutHistory() {
+type PayoutHistoryProps = {
+  canAct?: boolean;
+};
+
+export default function PayoutHistory({ canAct = true }: PayoutHistoryProps) {
   const supabase = useMemo(() => ensureSupabaseClient(), []);
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
@@ -262,6 +266,10 @@ export default function PayoutHistory() {
   }, [status, fromDate, toDate, q, supabase]);
 
   async function retryNow(payoutId: string) {
+    if (!canAct) {
+      setErr("View-only: You do not have permission to retry payouts.");
+      return;
+    }
     if (!supabase) {
       setErr("Supabase not configured");
       return;
@@ -285,6 +293,10 @@ export default function PayoutHistory() {
   }
 
   async function requeueStuck() {
+    if (!canAct) {
+      setErr("View-only: You do not have permission to requeue payouts.");
+      return;
+    }
     if (!supabase) {
       setErr("Supabase not configured");
       return;
@@ -319,10 +331,10 @@ export default function PayoutHistory() {
             className="btn ghost"
             type="button"
             onClick={requeueStuck}
-            disabled={loading}
+            disabled={loading || !canAct}
             title="Requeue payouts stuck in processing too long"
           >
-            Requeue stuck
+            {canAct ? "Requeue stuck" : "🔒 Admin only"}
           </button>
           <button className="btn" type="button" onClick={load} disabled={loading}>
             Refresh
@@ -476,10 +488,10 @@ export default function PayoutHistory() {
                           className="btn"
                           type="button"
                           onClick={() => retryNow(r.id)}
-                          disabled={loading || !canRetry}
+                          disabled={loading || !canRetry || !canAct}
                           title="Schedules retry in ~1 minute"
                         >
-                          Retry
+                          {canAct ? "Retry" : "🔒 Admin only"}
                         </button>
                         <Link
                           to={`/matatu/withdrawal-phones/${encodeURIComponent(r.wallet_id)}`}

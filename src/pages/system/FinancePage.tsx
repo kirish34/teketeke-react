@@ -60,6 +60,7 @@ export default function FinancePage({ initialTab }: FinancePageProps) {
         onTabChange={setActiveTab}
         hideNav
         useShell={false}
+        canFinanceAct={canFinanceAct}
       />
     </div>
   )
