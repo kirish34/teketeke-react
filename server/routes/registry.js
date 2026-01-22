@@ -1,20 +1,27 @@
 const express = require('express');
-const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
 const { supabaseAdmin } = require('../supabase');
 const { requireUser } = require('../middleware/auth');
 const { getSaccoContext } = require('../services/saccoContext.service');
 
 const router = express.Router();
 
-// Require SYSTEM_ADMIN before accessing registry routes
-async function requireSystemAdmin(req, res, next) {
-  if (!supabaseAdmin) return res.status(500).json({ error: 'SUPABASE_SERVICE_ROLE_KEY not configured' });
+async function requireRegistryAdmin(req, res, next) {
+  if (!supabaseAdmin) {
+    return res.status(500).json({ error: 'SUPABASE_SERVICE_ROLE_KEY not configured' });
+  }
   return requireUser(req, res, async () => {
     try {
       const ctx = await getSaccoContext(req.user?.id);
-      if (ctx.role !== 'SYSTEM_ADMIN') return res.status(403).json({ error: 'forbidden' });
+      const role = String(ctx?.role || '').toLowerCase();
+      const allowed = new Set(['system_admin', 'super_admin']);
+      if (!allowed.has(role)) {
+        return res.status(403).json({
+          error: 'forbidden',
+          required: Array.from(allowed),
+          role,
+        });
+      }
+      req.adminCtx = { ...ctx, role };
       return next();
     } catch (e) {
       return res.status(500).json({ error: e.message });
@@ -22,42 +29,10 @@ async function requireSystemAdmin(req, res, next) {
   });
 }
 
-router.use('/registry', requireSystemAdmin);
-
-const ROOT = process.cwd();
-const REG_DIR = path.join(ROOT, 'data', 'registry');
-const DEVICES_FILE = path.join(REG_DIR, 'devices.json');
-const ASSIGN_FILE = path.join(REG_DIR, 'matatu_devices.json');
-
-function ensureDir(p) {
-  if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
-}
-
-function readJson(file, fallback) {
-  try {
-    if (!fs.existsSync(file)) return fallback;
-    const raw = fs.readFileSync(file, 'utf-8');
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJson(file, data) {
-  ensureDir(path.dirname(file));
-  fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf-8');
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function makeId(prefix = 'dev') {
-  return `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
-}
+router.use(requireRegistryAdmin);
 
 // GET /api/registry/devices
-router.get('/registry/devices', async (_req, res) => {
+router.get('/devices', async (_req, res) => {
   const { data, error } = await supabaseAdmin
     .from('registry_devices')
     .select('*')
@@ -68,7 +43,7 @@ router.get('/registry/devices', async (_req, res) => {
 });
 
 // POST /api/registry/devices
-router.post('/registry/devices', async (req, res) => {
+router.post('/devices', async (req, res) => {
   const { label, device_type, vendor, model, serial, imei, sim_msisdn, sim_iccid, notes } = req.body || {};
   if (!label || !device_type) return res.status(400).json({ ok: false, error: 'label and device_type are required' });
 
@@ -103,7 +78,7 @@ router.post('/registry/devices', async (req, res) => {
 });
 
 // PATCH /api/registry/devices/:id
-router.patch('/registry/devices/:id', async (req, res) => {
+router.patch('/devices/:id', async (req, res) => {
   const { id } = req.params;
   const payload = { ...req.body };
   delete payload.domain;
@@ -120,7 +95,7 @@ router.patch('/registry/devices/:id', async (req, res) => {
 });
 
 // POST /api/registry/assign
-router.post('/registry/assign', async (req, res) => {
+router.post('/assign', async (req, res) => {
   const { device_id, sacco_id, matatu_id, route_id } = req.body || {};
   if (!device_id || !sacco_id || !matatu_id) {
     return res.status(400).json({ ok: false, error: 'device_id, sacco_id, matatu_id required' });
@@ -158,7 +133,7 @@ router.post('/registry/assign', async (req, res) => {
 });
 
 // GET /api/registry/assignments?sacco_id=
-router.get('/registry/assignments', async (req, res) => {
+router.get('/assignments', async (req, res) => {
   const { sacco_id } = req.query || {};
   let query = supabaseAdmin.from('registry_assignments').select('*').eq('domain', 'teketeke').order('assigned_at', { ascending: false });
   if (sacco_id) query = query.eq('sacco_id', sacco_id);

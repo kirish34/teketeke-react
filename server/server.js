@@ -190,7 +190,7 @@ const skipMpesa = (router) => (req, res, next) => {
   return router(req, res, next);
 };
 
-app.use('/api', skipMpesa(registryRouter));
+app.use('/api/registry', skipMpesa(registryRouter));
 app.use('/api', skipMpesa(telemetryRouter));
 app.use('/api', skipMpesa(darajaB2CRouter));
 app.use('/api', skipMpesa(payoutReadinessRouter));
