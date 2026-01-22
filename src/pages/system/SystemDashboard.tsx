@@ -3494,6 +3494,10 @@ const SystemDashboard = ({
       setPayoutApprovalMsg('View-only: You do not have permission to approve payouts.')
       return
     }
+    if (!window.confirm(`Approve payout batch ${batchId}?`)) {
+      setPayoutApprovalMsg('Approval cancelled')
+      return
+    }
     setPayoutApprovalMsg('Approving batch...')
     try {
       await sendJson(`/api/admin/payout-batches/${encodeURIComponent(batchId)}/approve`, 'POST', {})
@@ -3509,6 +3513,10 @@ const SystemDashboard = ({
     if (!batchId) return
     if (!canFinanceAct) {
       setPayoutApprovalMsg('View-only: You do not have permission to process payouts.')
+      return
+    }
+    if (!window.confirm(`Process payout batch ${batchId}?`)) {
+      setPayoutApprovalMsg('Process cancelled')
       return
     }
     setPayoutApprovalMsg('Processing batch...')

@@ -6,9 +6,15 @@ import { useAuth } from '../../state/auth'
 
 export default function RegistryPage() {
   const { user } = useAuth()
-  const canRegistryAct = useMemo(() => {
+  const { isSuper, isSystem, canRegistryAct } = useMemo(() => {
     const role = (user?.role || '').toLowerCase()
-    return role === 'system_admin' || role === 'super_admin'
+    const superAdmin = role === 'super_admin'
+    const systemAdmin = role === 'system_admin' || superAdmin
+    return {
+      isSuper: superAdmin,
+      isSystem: systemAdmin,
+      canRegistryAct: systemAdmin,
+    }
   }, [user?.role])
   const [refreshKey, setRefreshKey] = useState(0)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
@@ -31,9 +37,14 @@ export default function RegistryPage() {
         lastUpdated={lastUpdated}
         onRefresh={handleRefresh}
         actions={
-          <button className="btn ghost" type="button" onClick={() => navigate('/system')}>
-            Back to System
-          </button>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn ghost" type="button" onClick={() => navigate('/system')}>
+              Back to System
+            </button>
+            <span className="muted small">
+              Mode: {isSuper ? 'Super admin actions enabled' : isSystem ? 'Admin actions enabled' : 'View-only'}
+            </span>
+          </div>
         }
       />
       <SystemRegistry onBack={() => navigate('/system')} canRegistryAct={canRegistryAct} />

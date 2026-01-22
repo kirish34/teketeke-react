@@ -16,9 +16,15 @@ type FinancePageProps = {
 
 export default function FinancePage({ initialTab }: FinancePageProps) {
   const { user } = useAuth()
-  const canFinanceAct = useMemo(() => {
+  const { isSuper, isSystem, canFinanceAct } = useMemo(() => {
     const role = (user?.role || '').toLowerCase()
-    return role === 'system_admin' || role === 'super_admin'
+    const superAdmin = role === 'super_admin'
+    const systemAdmin = role === 'system_admin' || superAdmin
+    return {
+      isSuper: superAdmin,
+      isSystem: systemAdmin,
+      canFinanceAct: systemAdmin,
+    }
   }, [user?.role])
   const [activeTab, setActiveTab] = useState<SystemTabId>(initialTab ?? 'finance')
   const [refreshKey, setRefreshKey] = useState(0)
@@ -40,7 +46,11 @@ export default function FinancePage({ initialTab }: FinancePageProps) {
         subtitle="Wallets, payouts, and worker monitoring"
         lastUpdated={lastUpdated}
         onRefresh={handleRefresh}
-        actions={<span className="muted small">Mode: {canFinanceAct ? 'Admin actions enabled' : 'Monitoring only'}</span>}
+        actions={
+          <span className="muted small">
+            Mode: {isSuper ? 'Super admin actions enabled' : isSystem ? 'Admin actions enabled' : 'Monitoring only'}
+          </span>
+        }
       />
       <nav className="sys-nav" aria-label="Finance sections">
         {financeTabs.map((tab) => (

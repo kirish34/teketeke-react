@@ -270,6 +270,10 @@ export default function PayoutHistory({ canAct = true }: PayoutHistoryProps) {
       setErr("View-only: You do not have permission to retry payouts.");
       return;
     }
+    if (!window.confirm(`Retry payout ${payoutId}?`)) {
+      setErr(null);
+      return;
+    }
     if (!supabase) {
       setErr("Supabase not configured");
       return;
@@ -295,6 +299,10 @@ export default function PayoutHistory({ canAct = true }: PayoutHistoryProps) {
   async function requeueStuck() {
     if (!canAct) {
       setErr("View-only: You do not have permission to requeue payouts.");
+      return;
+    }
+    if (!window.confirm("Requeue payouts stuck in processing?")) {
+      setErr(null);
       return;
     }
     if (!supabase) {
