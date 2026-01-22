@@ -1241,6 +1241,9 @@ const SystemDashboard = ({
   const [saccoEditMsg, setSaccoEditMsg] = useState('')
   const [saccoEditError, setSaccoEditError] = useState<string | null>(null)
   const [operatorFormOpen, setOperatorFormOpen] = useState(false)
+  const [shuttleFormOpen, setShuttleFormOpen] = useState(false)
+  const [taxiFormOpen, setTaxiFormOpen] = useState(false)
+  const [bodaFormOpen, setBodaFormOpen] = useState(false)
 
   const [shuttles, setShuttles] = useState<ShuttleRow[]>([])
   const [shuttlesError, setShuttlesError] = useState<string | null>(null)
@@ -5082,7 +5085,14 @@ const SystemDashboard = ({
     return (
       <>
         <section className="card">
-          <h3 style={{ marginTop: 0 }}>Register Shuttle</h3>
+          <div className="topline">
+            <h3 style={{ marginTop: 0 }}>Register Shuttle</h3>
+            <button className="btn ghost" type="button" onClick={() => setShuttleFormOpen((v) => !v)}>
+              {shuttleFormOpen ? 'Hide form' : 'Open form'}
+            </button>
+          </div>
+          {shuttleFormOpen ? (
+            <>
           <div className="grid g2">
             <div className="card" style={{ margin: 0, boxShadow: 'none' }}>
               <h4 style={{ margin: '0 0 8px' }}>Owner Information</h4>
@@ -5308,6 +5318,10 @@ const SystemDashboard = ({
             </button>
             <span className="muted small">{shuttleMsg}</span>
           </div>
+            </>
+          ) : (
+            <div className="muted small">Shuttle registration form collapsed.</div>
+          )}
         </section>
 
         <section className="card">
@@ -5827,7 +5841,14 @@ const SystemDashboard = ({
     return (
       <>
         <section className="card">
-          <h3 style={{ marginTop: 0 }}>Register Taxi</h3>
+          <div className="topline">
+            <h3 style={{ marginTop: 0 }}>Register Taxi</h3>
+            <button className="btn ghost" type="button" onClick={() => setTaxiFormOpen((v) => !v)}>
+              {taxiFormOpen ? 'Hide form' : 'Open form'}
+            </button>
+          </div>
+          {taxiFormOpen ? (
+            <>
           <div className="grid g2">
             <div className="card" style={{ margin: 0, boxShadow: 'none' }}>
               <h4 style={{ margin: '0 0 8px' }}>Driver / Owner Information</h4>
@@ -6014,6 +6035,10 @@ const SystemDashboard = ({
             </button>
             <span className="muted small">{taxiMsg}</span>
           </div>
+            </>
+          ) : (
+            <div className="muted small">Taxi registration form collapsed.</div>
+          )}
         </section>
 
         <section className="card">
@@ -6377,7 +6402,14 @@ const SystemDashboard = ({
     return (
       <>
         <section className="card">
-          <h3 style={{ marginTop: 0 }}>Register Boda</h3>
+          <div className="topline">
+            <h3 style={{ marginTop: 0 }}>Register Boda</h3>
+            <button className="btn ghost" type="button" onClick={() => setBodaFormOpen((v) => !v)}>
+              {bodaFormOpen ? 'Hide form' : 'Open form'}
+            </button>
+          </div>
+          {bodaFormOpen ? (
+            <>
           <div className="grid g2">
             <div className="card" style={{ margin: 0, boxShadow: 'none' }}>
               <h4 style={{ margin: '0 0 8px' }}>Rider Information</h4>
@@ -6554,6 +6586,10 @@ const SystemDashboard = ({
             </button>
             <span className="muted small">{bodaMsg}</span>
           </div>
+            </>
+          ) : (
+            <div className="muted small">Boda registration form collapsed.</div>
+          )}
         </section>
 
         <section className="card">
