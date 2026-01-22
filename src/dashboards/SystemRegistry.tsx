@@ -122,9 +122,10 @@ function downloadJson(filename: string, payload: unknown) {
 
 type SystemRegistryProps = {
   onBack?: () => void
+  canRegistryAct?: boolean
 }
 
-export default function SystemRegistry({ onBack }: SystemRegistryProps) {
+export default function SystemRegistry({ onBack, canRegistryAct = false }: SystemRegistryProps) {
 
   const [devices, setDevices] = useState<RegistryDevice[]>([])
   const [assignments, setAssignments] = useState<RegistryAssignment[]>([])
@@ -305,6 +306,10 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
   }, [])
 
   async function createDevice() {
+    if (!canRegistryAct) {
+      setDeviceMsg('View-only: Registry changes are restricted to system admins.')
+      return
+    }
     setDeviceMsg('Saving...')
     try {
       const payload = {
@@ -320,6 +325,10 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
       }
       if (!payload.label || !payload.device_type) {
         setDeviceMsg('Label and device type are required')
+        return
+      }
+      if (!window.confirm(`Register device "${payload.label}" (${payload.device_type || 'device'})?`)) {
+        setDeviceMsg('Cancelled')
         return
       }
       const res = await fetchJson<{ ok: boolean; device?: RegistryDevice; error?: string }>('/api/registry/devices', {
@@ -347,6 +356,10 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
   }
 
   async function assignDevice() {
+    if (!canRegistryAct) {
+      setAssignMsg('View-only: Registry changes are restricted to system admins.')
+      return
+    }
     setAssignMsg('Assigning...')
     try {
       const payload = {
@@ -357,6 +370,11 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
       }
       if (!payload.device_id || !payload.sacco_id || !payload.matatu_id) {
         setAssignMsg('Select device, operator, and matatu')
+        return
+      }
+      const deviceLabel = payload.device_id ? deviceMap.get(payload.device_id)?.label || payload.device_id : ''
+      if (!window.confirm(`Assign device ${deviceLabel || ''} to operator ${payload.sacco_id} and matatu ${payload.matatu_id}?`)) {
+        setAssignMsg('Cancelled')
         return
       }
       const res = await fetchJson<{ ok: boolean; assignment?: RegistryAssignment; error?: string }>(
@@ -377,6 +395,10 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
   }
 
   function startEdit(device: RegistryDevice) {
+    if (!canRegistryAct) {
+      setEditMsg('View-only: Registry changes are restricted to system admins.')
+      return
+    }
     if (!device.id) return
     setEditId(device.id)
     setEditMsg('')
@@ -395,6 +417,10 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
 
   async function saveEdit() {
     if (!editId) return
+    if (!canRegistryAct) {
+      setEditMsg('View-only: Registry changes are restricted to system admins.')
+      return
+    }
     setEditMsg('Saving...')
     try {
       const payload = {
@@ -410,6 +436,10 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
       }
       if (!payload.label || !payload.device_type) {
         setEditMsg('Label and device type are required')
+        return
+      }
+      if (!window.confirm(`Save changes to device ${editId}?`)) {
+        setEditMsg('Cancelled')
         return
       }
       const res = await fetchJson<{ ok: boolean; device?: RegistryDevice; error?: string }>(
@@ -586,6 +616,12 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
         </div>
       </section>
 
+      {!canRegistryAct ? (
+        <div className="err" style={{ margin: '0 0 12px' }}>
+          🔒 View-only: Registry changes are restricted to system admins.
+        </div>
+      ) : null}
+
       <section className="card">
         <h3 style={{ marginTop: 0 }}>Register device</h3>
         <div className="grid g2">
@@ -596,6 +632,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
               value={deviceForm.label}
               onChange={(e) => setDeviceForm((f) => ({ ...f, label: e.target.value }))}
               placeholder="Tracker A1"
+              disabled={!canRegistryAct}
             />
           </label>
           <label className="muted small">
@@ -606,6 +643,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
               value={deviceForm.device_type}
               onChange={(e) => setDeviceForm((f) => ({ ...f, device_type: e.target.value }))}
               placeholder="GPS, OBD, Router"
+              disabled={!canRegistryAct}
             />
           </label>
           <label className="muted small">
@@ -614,6 +652,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
               className="input"
               value={deviceForm.vendor}
               onChange={(e) => setDeviceForm((f) => ({ ...f, vendor: e.target.value }))}
+              disabled={!canRegistryAct}
             />
           </label>
           <label className="muted small">
@@ -622,6 +661,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
               className="input"
               value={deviceForm.model}
               onChange={(e) => setDeviceForm((f) => ({ ...f, model: e.target.value }))}
+              disabled={!canRegistryAct}
             />
           </label>
           <label className="muted small">
@@ -630,6 +670,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
               className="input"
               value={deviceForm.serial}
               onChange={(e) => setDeviceForm((f) => ({ ...f, serial: e.target.value }))}
+              disabled={!canRegistryAct}
             />
           </label>
           <label className="muted small">
@@ -638,6 +679,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
               className="input"
               value={deviceForm.imei}
               onChange={(e) => setDeviceForm((f) => ({ ...f, imei: e.target.value }))}
+              disabled={!canRegistryAct}
             />
           </label>
           <label className="muted small">
@@ -646,6 +688,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
               className="input"
               value={deviceForm.sim_msisdn}
               onChange={(e) => setDeviceForm((f) => ({ ...f, sim_msisdn: e.target.value }))}
+              disabled={!canRegistryAct}
             />
           </label>
           <label className="muted small">
@@ -654,6 +697,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
               className="input"
               value={deviceForm.sim_iccid}
               onChange={(e) => setDeviceForm((f) => ({ ...f, sim_iccid: e.target.value }))}
+              disabled={!canRegistryAct}
             />
           </label>
           <label className="muted small">
@@ -662,6 +706,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
               className="input"
               value={deviceForm.notes}
               onChange={(e) => setDeviceForm((f) => ({ ...f, notes: e.target.value }))}
+              disabled={!canRegistryAct}
             />
           </label>
         </div>
@@ -673,8 +718,8 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
           <option value="CAMERA" />
         </datalist>
         <div className="row" style={{ marginTop: 8 }}>
-          <button className="btn" type="button" onClick={createDevice}>
-            Create device
+          <button className="btn" type="button" onClick={createDevice} disabled={!canRegistryAct}>
+            {canRegistryAct ? 'Create device' : '🔒 System admin only'}
           </button>
           <span className="muted small">{deviceMsg}</span>
         </div>
@@ -688,6 +733,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
             value={assignForm.device_id}
             onChange={(e) => setAssignForm((f) => ({ ...f, device_id: e.target.value }))}
             style={{ padding: 10, minWidth: 220 }}
+            disabled={!canRegistryAct}
           >
             <option value="">Select device</option>
             {devices.map((d) => (
@@ -702,6 +748,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
               setAssignForm((f) => ({ ...f, sacco_id: e.target.value, matatu_id: '', route_id: '' }))
             }
             style={{ padding: 10, minWidth: 200 }}
+            disabled={!canRegistryAct}
           >
             <option value="">Select operator</option>
             {saccos.map((s) => (
@@ -714,6 +761,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
             value={assignForm.matatu_id}
             onChange={(e) => setAssignForm((f) => ({ ...f, matatu_id: e.target.value }))}
             style={{ padding: 10, minWidth: 220 }}
+            disabled={!canRegistryAct}
           >
             <option value="">Select matatu</option>
             {matatusForSacco.map((m) => (
@@ -726,6 +774,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
             value={assignForm.route_id}
             onChange={(e) => setAssignForm((f) => ({ ...f, route_id: e.target.value }))}
             style={{ padding: 10, minWidth: 200 }}
+            disabled={!canRegistryAct}
           >
             <option value="">Route (optional)</option>
             {routes.map((r) => (
@@ -734,8 +783,8 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
               </option>
             ))}
           </select>
-          <button className="btn" type="button" onClick={assignDevice}>
-            Assign device
+          <button className="btn" type="button" onClick={assignDevice} disabled={!canRegistryAct}>
+            {canRegistryAct ? 'Assign device' : '🔒 System admin only'}
           </button>
           <span className="muted small">{assignMsg}</span>
         </div>
@@ -814,8 +863,8 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
                       <td>{fmtDate(d.last_seen_at || d.created_at)}</td>
                       <td className="mono">{d.id || '-'}</td>
                       <td>
-                        <button className="btn ghost" type="button" onClick={() => startEdit(d)}>
-                          Edit
+                        <button className="btn ghost" type="button" onClick={() => startEdit(d)} disabled={!canRegistryAct}>
+                          {canRegistryAct ? 'Edit' : '🔒'}
                         </button>
                       </td>
                     </tr>
@@ -840,6 +889,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
                 className="input"
                 value={editForm.label}
                 onChange={(e) => setEditForm((f) => ({ ...f, label: e.target.value }))}
+                disabled={!canRegistryAct}
               />
             </label>
             <label className="muted small">
@@ -849,6 +899,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
                 list="device-type-options"
                 value={editForm.device_type}
                 onChange={(e) => setEditForm((f) => ({ ...f, device_type: e.target.value }))}
+                disabled={!canRegistryAct}
               />
             </label>
             <label className="muted small">
@@ -857,6 +908,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
                 className="input"
                 value={editForm.vendor}
                 onChange={(e) => setEditForm((f) => ({ ...f, vendor: e.target.value }))}
+                disabled={!canRegistryAct}
               />
             </label>
             <label className="muted small">
@@ -865,6 +917,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
                 className="input"
                 value={editForm.model}
                 onChange={(e) => setEditForm((f) => ({ ...f, model: e.target.value }))}
+                disabled={!canRegistryAct}
               />
             </label>
             <label className="muted small">
@@ -873,6 +926,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
                 className="input"
                 value={editForm.serial}
                 onChange={(e) => setEditForm((f) => ({ ...f, serial: e.target.value }))}
+                disabled={!canRegistryAct}
               />
             </label>
             <label className="muted small">
@@ -881,6 +935,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
                 className="input"
                 value={editForm.imei}
                 onChange={(e) => setEditForm((f) => ({ ...f, imei: e.target.value }))}
+                disabled={!canRegistryAct}
               />
             </label>
             <label className="muted small">
@@ -889,6 +944,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
                 className="input"
                 value={editForm.sim_msisdn}
                 onChange={(e) => setEditForm((f) => ({ ...f, sim_msisdn: e.target.value }))}
+                disabled={!canRegistryAct}
               />
             </label>
             <label className="muted small">
@@ -897,6 +953,7 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
                 className="input"
                 value={editForm.sim_iccid}
                 onChange={(e) => setEditForm((f) => ({ ...f, sim_iccid: e.target.value }))}
+                disabled={!canRegistryAct}
               />
             </label>
             <label className="muted small">
@@ -905,12 +962,13 @@ export default function SystemRegistry({ onBack }: SystemRegistryProps) {
                 className="input"
                 value={editForm.notes}
                 onChange={(e) => setEditForm((f) => ({ ...f, notes: e.target.value }))}
+                disabled={!canRegistryAct}
               />
             </label>
           </div>
           <div className="row" style={{ marginTop: 8 }}>
-            <button className="btn" type="button" onClick={saveEdit}>
-              Save changes
+            <button className="btn" type="button" onClick={saveEdit} disabled={!canRegistryAct}>
+              {canRegistryAct ? 'Save changes' : '🔒 System admin only'}
             </button>
             <button className="btn ghost" type="button" onClick={() => setEditId('')}>
               Cancel
