@@ -410,7 +410,7 @@ router.get('/callback-audit/summary', async (req, res) => {
     const { rows } = await pool.query(
       `
         WITH filtered AS (
-          SELECT created_at, COALESCE(meta->>'result', 'unknown') AS result
+          SELECT created_at, COALESCE(result, meta->>'result', 'unknown') AS result
           FROM public.admin_audit_logs
           WHERE ($1::timestamptz IS NULL OR created_at >= $1)
             AND ($2::timestamptz IS NULL OR created_at <= $2)
@@ -465,7 +465,7 @@ router.get('/callback-audit/events', async (req, res) => {
   const where = ['domain = $1', "action = 'mpesa_callback'"];
   if (resultFilter) {
     params.push(resultFilter);
-    where.push(`(meta->>'result') = $${params.length}`);
+    where.push(`COALESCE(result, meta->>'result') = $${params.length}`);
   }
   const whereClause = `WHERE ${where.join(' AND ')}`;
 
@@ -474,9 +474,10 @@ router.get('/callback-audit/events', async (req, res) => {
       `
         SELECT
           created_at,
-          entity_type AS kind,
-          entity_id AS resource_id,
-          meta AS payload
+          COALESCE(resource_type, entity_type) AS kind,
+          COALESCE(resource_id, entity_id) AS resource_id,
+          COALESCE(meta, details, '{}'::jsonb) AS payload,
+          COALESCE(result, meta->>'result') AS result
         FROM admin_audit_logs
         ${whereClause}
         ORDER BY created_at DESC

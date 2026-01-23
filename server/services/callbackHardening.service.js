@@ -1,5 +1,5 @@
 const pool = require('../db/pool');
-const { logAdminAction } = require('./audit.service');
+const { auditLog } = require('./auditLog.service');
 
 const memoryIdem = new Map();
 const allowInit =
@@ -101,22 +101,22 @@ function safeAck(res, body = { ok: true }, status = 200) {
 }
 
 async function logCallbackAudit({ req, key, kind, result, reason = null, payload = null }) {
-  try {
-    await logAdminAction({
-      req,
-      action: 'mpesa_callback',
-      resource_type: kind || 'callback',
-      resource_id: key || null,
-      payload: {
-        result: result || null,
-        reason: reason || null,
-        key: key || null,
-        ...(payload || {}),
-      },
-    });
-  } catch (err) {
-    console.warn('[callback-audit] log failed:', err.message);
-  }
+  await auditLog({
+    req,
+    domain: 'mpesa',
+    resource_type: kind || 'callback',
+    resource_id: key || null,
+    result: result || 'unknown',
+    message: reason || null,
+    provider_ref: key || null,
+    meta: {
+      result: result || null,
+      reason: reason || null,
+      key: key || null,
+      ...(payload || {}),
+    },
+    details: payload || {},
+  });
 }
 
 module.exports = {

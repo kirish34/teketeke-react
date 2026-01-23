@@ -15,7 +15,7 @@ async function getCallbackOverview({ from, to, db = pool }) {
   const { fromTs, toTs } = parseRange({ from, to });
   const res = await db.query(
     `
-      SELECT (meta->>'result')::text AS result, COUNT(*)::int AS count
+      SELECT COALESCE(result, meta->>'result')::text AS result, COUNT(*)::int AS count
       FROM admin_audit_logs
       WHERE domain = 'teketeke'
         AND action = 'mpesa_callback'
@@ -150,16 +150,19 @@ async function listCallbacks({ from, to, kind, result, limit = 50, db = pool }) 
   ];
   if (kind) {
     params.push(kind);
-    where.push(`entity_type = $${params.length}`);
+    where.push(`COALESCE(resource_type, entity_type) = $${params.length}`);
   }
   if (result) {
     params.push(result.toLowerCase());
-    where.push(`(meta->>'result') = $${params.length}`);
+    where.push(`COALESCE(result, meta->>'result') = $${params.length}`);
   }
   params.push(limit);
   const res = await db.query(
     `
-      SELECT created_at, entity_type AS kind, entity_id AS resource_id, meta AS payload
+      SELECT created_at,
+             COALESCE(resource_type, entity_type) AS kind,
+             COALESCE(resource_id, entity_id) AS resource_id,
+             COALESCE(meta, details, '{}'::jsonb) AS payload
       FROM admin_audit_logs
       WHERE ${where.join(' AND ')}
       ORDER BY created_at DESC

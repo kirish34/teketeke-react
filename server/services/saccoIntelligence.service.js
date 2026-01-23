@@ -33,8 +33,8 @@ async function saccoOverview({ saccoId, from, to, db = pool }) {
       `
         SELECT
           COUNT(*)::int AS total,
-          SUM(CASE WHEN (meta->>'result') = 'accepted' THEN 1 ELSE 0 END)::int AS accepted,
-          SUM(CASE WHEN entity_type = 'C2B' THEN 1 ELSE 0 END)::int AS c2b
+          SUM(CASE WHEN COALESCE(result, meta->>'result') = 'accepted' THEN 1 ELSE 0 END)::int AS accepted,
+          SUM(CASE WHEN COALESCE(resource_type, entity_type) = 'C2B' THEN 1 ELSE 0 END)::int AS c2b
         FROM admin_audit_logs
         WHERE sacco_id::text = $1::text AND action = 'mpesa_callback' AND created_at BETWEEN $2 AND $3
       `,
