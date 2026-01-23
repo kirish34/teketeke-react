@@ -1115,6 +1115,8 @@ async function handleC2BCallback(req, res) {
         referenceId: paymentId,
         referenceType: 'MPESA_C2B',
         description: `M-Pesa fare from ${phone_number || 'unknown'}`,
+        provider: 'mpesa',
+        providerRef: mpesa_receipt || body?.TransID || sourceRef || null,
         client,
       });
       const updated = await client.query(
