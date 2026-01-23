@@ -74,6 +74,10 @@ async function creditWallet({
     referenceType,
     referenceId,
     description,
+    provider: source ? 'mpesa' : null,
+    providerRef: sourceRef || null,
+    source,
+    sourceRef: sourceRef || null,
   });
 
   return {
@@ -117,6 +121,10 @@ async function debitWallet({
       referenceType: effectiveReferenceType,
       referenceId: effectiveReferenceId,
       description,
+      provider: source ? 'mpesa' : null,
+      providerRef: sourceRef || null,
+      source,
+      sourceRef: sourceRef || null,
       client,
     });
 
@@ -387,6 +395,10 @@ async function creditFareWithFeesByWalletId({
       referenceType: effectiveReferenceType,
       referenceId: effectiveReferenceId,
       description: description || `Fare credit (net) from ${source}`,
+      provider: source ? 'mpesa' : null,
+      providerRef: sourceRef || null,
+      source,
+      sourceRef: sourceRef || null,
       client: useClient,
     });
 
@@ -400,6 +412,10 @@ async function creditFareWithFeesByWalletId({
           referenceType: effectiveReferenceType,
           referenceId: effectiveReferenceId,
           description: `Fee: ${fee.name} from fare on ${virtualAccountCode || walletId}`,
+          provider: source ? 'mpesa' : null,
+          providerRef: sourceRef || null,
+          source,
+          sourceRef: sourceRef || null,
           client: useClient,
         });
       } catch (err) {

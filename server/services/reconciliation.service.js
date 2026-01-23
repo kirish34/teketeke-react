@@ -92,10 +92,15 @@ async function fetchC2bProviders(fromTs, toTs) {
 async function fetchC2bLedgers(fromTs, toTs) {
   const res = await pool.query(
     `
-      SELECT id, amount, reference_id, source_ref, created_at
+      SELECT id, amount, reference_id, source_ref, provider, provider_ref, created_at
       FROM wallet_ledger
       WHERE created_at BETWEEN $1 AND $2
-        AND (reference_type = 'MPESA_C2B' OR source = 'MPESA_C2B' OR source = 'MPESA')
+        AND (
+          reference_type = 'MPESA_C2B'
+          OR source = 'MPESA_C2B'
+          OR source = 'MPESA'
+          OR provider = 'mpesa'
+        )
     `,
     [fromTs, toTs],
   );
@@ -144,6 +149,7 @@ function computeMatches(kind, providers, internal) {
     if (kind === 'C2B' || kind === 'STK') {
       candidates = internal.filter(
         (w) =>
+          String(w.provider_ref || '') === String(ref) ||
           String(w.reference_id || '') === String(ref) ||
           String(w.source_ref || '') === String(ref) ||
           String(w.reference_id || '') === String(p.raw_id || ''),

@@ -50,6 +50,11 @@ async function creditWalletWithLedger({
   referenceType,
   referenceId,
   description = null,
+  provider = null,
+  providerRef = null,
+  source = null,
+  sourceRef = null,
+  meta = null,
   client = null,
 }) {
   if (!walletId) throw new Error('walletId is required');
@@ -81,29 +86,53 @@ async function creditWalletWithLedger({
     const balanceBefore = Number(walletRes.rows[0].balance || 0);
     const balanceAfter = balanceBefore + amountValue;
 
+    // Idempotency: if the ledger insert fails due to unique constraint, do not alter balance.
+    let ledgerId = null;
+    try {
+      const ledgerRes = await useClient.query(
+        `
+          INSERT INTO wallet_ledger
+            (wallet_id, direction, amount, balance_before, balance_after, entry_type, reference_type, reference_id, description, provider, provider_ref, source, source_ref, meta)
+          VALUES
+            ($1, 'CREDIT', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          RETURNING id
+        `,
+        [
+          walletId,
+          amountValue,
+          balanceBefore,
+          balanceAfter,
+          normalizedEntryType,
+          normalizedReferenceType,
+          normalizedReferenceId,
+          description,
+          provider || null,
+          providerRef || null,
+          source || null,
+          sourceRef || null,
+          meta || null,
+        ],
+      );
+      ledgerId = ledgerRes.rows[0]?.id || null;
+    } catch (err) {
+      if (err?.message && err.message.includes('wallet_ledger_idempotency_uq')) {
+        // Duplicate reference: do not apply balance change.
+        if (ownTx) await useClient.query('ROLLBACK');
+        return {
+          walletId,
+          balanceBefore,
+          balanceAfter: balanceBefore,
+          ledgerId: null,
+          referenceId: normalizedReferenceId,
+          deduped: true,
+        };
+      }
+      throw err;
+    }
+
     await useClient.query(
       `UPDATE wallets SET balance = $1 WHERE id = $2`,
       [balanceAfter, walletId],
-    );
-
-    const ledgerRes = await useClient.query(
-      `
-        INSERT INTO wallet_ledger
-          (wallet_id, direction, amount, balance_before, balance_after, entry_type, reference_type, reference_id, description)
-        VALUES
-          ($1, 'CREDIT', $2, $3, $4, $5, $6, $7, $8)
-        RETURNING id
-      `,
-      [
-        walletId,
-        amountValue,
-        balanceBefore,
-        balanceAfter,
-        normalizedEntryType,
-        normalizedReferenceType,
-        normalizedReferenceId,
-        description,
-      ],
     );
 
     if (ownTx) await useClient.query('COMMIT');
@@ -112,7 +141,7 @@ async function creditWalletWithLedger({
       walletId,
       balanceBefore,
       balanceAfter,
-      ledgerId: ledgerRes.rows[0]?.id || null,
+      ledgerId,
       referenceId: normalizedReferenceId,
     };
   } catch (err) {
@@ -130,6 +159,11 @@ async function debitWalletWithLedger({
   referenceType = 'PAYOUT_ITEM',
   referenceId,
   description = null,
+  provider = null,
+  providerRef = null,
+  source = null,
+  sourceRef = null,
+  meta = null,
   client = null,
 }) {
   if (!walletId) throw new Error('walletId is required');
@@ -164,29 +198,51 @@ async function debitWalletWithLedger({
     }
     const balanceAfter = balanceBefore - amountValue;
 
+    let ledgerId = null;
+    try {
+      const ledgerRes = await useClient.query(
+        `
+          INSERT INTO wallet_ledger
+            (wallet_id, direction, amount, balance_before, balance_after, entry_type, reference_type, reference_id, description, provider, provider_ref, source, source_ref, meta)
+          VALUES
+            ($1, 'DEBIT', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          RETURNING id
+        `,
+        [
+          walletId,
+          amountValue,
+          balanceBefore,
+          balanceAfter,
+          normalizedEntryType,
+          normalizedReferenceType,
+          normalizedReferenceId,
+          description,
+          provider || null,
+          providerRef || null,
+          source || null,
+          sourceRef || null,
+          meta || null,
+        ],
+      );
+      ledgerId = ledgerRes.rows[0]?.id || null;
+    } catch (err) {
+      if (err?.message && err.message.includes('wallet_ledger_idempotency_uq')) {
+        if (ownTx) await useClient.query('ROLLBACK');
+        return {
+          walletId,
+          balanceBefore,
+          balanceAfter: balanceBefore,
+          ledgerId: null,
+          referenceId: normalizedReferenceId,
+          deduped: true,
+        };
+      }
+      throw err;
+    }
+
     await useClient.query(
       `UPDATE wallets SET balance = $1 WHERE id = $2`,
       [balanceAfter, walletId],
-    );
-
-    const ledgerRes = await useClient.query(
-      `
-        INSERT INTO wallet_ledger
-          (wallet_id, direction, amount, balance_before, balance_after, entry_type, reference_type, reference_id, description)
-        VALUES
-          ($1, 'DEBIT', $2, $3, $4, $5, $6, $7, $8)
-        RETURNING id
-      `,
-      [
-        walletId,
-        amountValue,
-        balanceBefore,
-        balanceAfter,
-        normalizedEntryType,
-        normalizedReferenceType,
-        normalizedReferenceId,
-        description,
-      ],
     );
 
     if (ownTx) await useClient.query('COMMIT');
