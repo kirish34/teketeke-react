@@ -294,15 +294,36 @@ router.get('/reconciliation/runs', async (req, res) => {
   try {
     const { rows } = await pool.query(
       `
-        SELECT id, created_at, from_ts, to_ts, status, totals, actor_user_id, actor_role
-        FROM recon_runs
-        WHERE domain = $1
-        ORDER BY created_at DESC
-        LIMIT $2
+        WITH runs AS (
+          SELECT
+            id,
+            created_at,
+            from_ts,
+            to_ts,
+            status,
+            actor_user_id,
+            actor_role,
+            details
+          FROM public.recon_runs
+          WHERE domain = $1
+          ORDER BY created_at DESC
+          LIMIT $2
+        ),
+        totals_cte AS (
+          SELECT COUNT(*) AS total
+          FROM public.recon_runs
+          WHERE domain = $1
+        )
+        SELECT jsonb_build_object(
+          'ok', true,
+          'totals', (SELECT to_jsonb(totals_cte) FROM totals_cte),
+          'items', (SELECT COALESCE(jsonb_agg(to_jsonb(runs)), '[]'::jsonb) FROM runs)
+        ) AS payload;
       `,
       ['teketeke', limit],
     );
-    return res.json({ ok: true, items: rows || [] });
+    const payload = rows?.[0]?.payload || { ok: true, totals: { total: 0 }, items: [] };
+    return res.json(payload);
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
   }
