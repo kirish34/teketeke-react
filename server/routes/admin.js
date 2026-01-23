@@ -13,7 +13,7 @@ const {
 } = require('../wallet/wallet.service');
 const { sendB2CPayout } = require('../mpesa/mpesaB2C.service');
 const { insertPayoutEvent, updateBatchStatusFromItems } = require('../services/saccoPayouts.service');
-const { runDailyReconciliation, formatDateISO } = require('../services/reconciliation.service');
+const { runDailyReconciliation } = require('../services/reconciliation.service');
 const { createOpsAlert } = require('../services/opsAlerts.service');
 const {
   normalizeRef,
@@ -100,6 +100,16 @@ function normalizeDateOnly(value) {
   const trimmed = value.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
   return trimmed;
+}
+
+function formatDateISO(value) {
+  try {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return new Date().toISOString().slice(0, 10);
+    return d.toISOString().slice(0, 10);
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
 }
 
 function defaultDateOnlyRange(days = 7) {
