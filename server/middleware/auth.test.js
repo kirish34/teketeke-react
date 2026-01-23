@@ -54,10 +54,13 @@ describe('requireUser middleware', () => {
     });
     expect(nextCalled).toBe(false);
     expect(res.statusCode).toBe(401);
-    expect(res.body).toEqual({ error: 'missing token' });
+    expect(res.body).toEqual({
+      ok: false,
+      error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
+    });
   });
 
-  it('returns 403 when supabase rejects token', async () => {
+  it('returns 401 when supabase rejects token', async () => {
     const { requireUser } = await import('./auth.js');
     process.env.MOCK_SUPABASE_AUTH = 'fail';
     mockGetUser.mockResolvedValueOnce({ data: null, error: new Error('bad') });
@@ -79,7 +82,10 @@ describe('requireUser middleware', () => {
       nextCalled = true;
     });
     expect(nextCalled).toBe(false);
-    expect(res.statusCode).toBe(403);
-    expect(res.body).toEqual({ error: 'invalid token' });
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual({
+      ok: false,
+      error: { code: 'INVALID_TOKEN', message: 'Invalid or expired token' },
+    });
   });
 });

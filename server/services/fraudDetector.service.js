@@ -72,15 +72,15 @@ async function detectDuplicateAttempts({ from, to, db = pool }) {
   const { fromTs, toTs } = parseRange({ from, to });
   const res = await db.query(
     `
-      SELECT resource_type AS kind,
-             resource_id AS provider_ref,
+      SELECT entity_type AS kind,
+             entity_id AS provider_ref,
              COUNT(*)::int AS count,
              MIN(created_at) AS first_at,
              MAX(created_at) AS last_at
       FROM admin_audit_logs
       WHERE domain = $1
         AND action = 'mpesa_callback'
-        AND (payload->>'result') = 'duplicate'
+        AND (meta->>'result') = 'duplicate'
         AND created_at BETWEEN $2 AND $3
       GROUP BY kind, provider_ref
       HAVING COUNT(*) >= 2

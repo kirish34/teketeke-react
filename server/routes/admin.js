@@ -396,7 +396,7 @@ router.get('/callback-audit/summary', async (req, res) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('admin_audit_logs')
-      .select('action, resource_type, payload, created_at')
+      .select('action, entity_type, meta, created_at')
       .eq('domain', 'teketeke')
       .limit(1);
     if (error) {
@@ -409,13 +409,13 @@ router.get('/callback-audit/summary', async (req, res) => {
     const { rows } = await pool.query(
       `
         SELECT
-          resource_type AS kind,
-          (payload->>'result')::text AS result,
+          entity_type AS kind,
+          (meta->>'result')::text AS result,
           COUNT(*)::int AS count
         FROM admin_audit_logs
         ${where}
-        GROUP BY resource_type, result
-        ORDER BY resource_type, result
+        GROUP BY entity_type, result
+        ORDER BY entity_type, result
       `,
       params,
     );
@@ -435,7 +435,7 @@ router.get('/callback-audit/events', async (req, res) => {
   const where = ['domain = $1', "action = 'mpesa_callback'"];
   if (resultFilter) {
     params.push(resultFilter);
-    where.push(`(payload->>'result') = $${params.length}`);
+    where.push(`(meta->>'result') = $${params.length}`);
   }
   const whereClause = `WHERE ${where.join(' AND ')}`;
 
@@ -444,9 +444,9 @@ router.get('/callback-audit/events', async (req, res) => {
       `
         SELECT
           created_at,
-          resource_type AS kind,
-          resource_id,
-          payload
+          entity_type AS kind,
+          entity_id AS resource_id,
+          meta AS payload
         FROM admin_audit_logs
         ${whereClause}
         ORDER BY created_at DESC

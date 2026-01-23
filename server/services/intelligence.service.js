@@ -62,12 +62,12 @@ async function systemOverview({ from, to, db = pool }) {
     db.query(
       `
         SELECT
-          SUM(CASE WHEN (payload->>'result') = 'accepted' THEN 1 ELSE 0 END)::int AS accepted,
-          SUM(CASE WHEN (payload->>'result') = 'duplicate' THEN 1 ELSE 0 END)::int AS duplicate,
-          SUM(CASE WHEN (payload->>'result') IN ('failed','rejected','error') THEN 1 ELSE 0 END)::int AS failed,
+          SUM(CASE WHEN (meta->>'result') = 'accepted' THEN 1 ELSE 0 END)::int AS accepted,
+          SUM(CASE WHEN (meta->>'result') = 'duplicate' THEN 1 ELSE 0 END)::int AS duplicate,
+          SUM(CASE WHEN (meta->>'result') IN ('failed','rejected','error') THEN 1 ELSE 0 END)::int AS failed,
           COUNT(*)::int AS total,
-          SUM(CASE WHEN resource_type = 'C2B' THEN 1 ELSE 0 END)::int AS c2b,
-          SUM(CASE WHEN resource_type = 'STK' THEN 1 ELSE 0 END)::int AS stk
+          SUM(CASE WHEN entity_type = 'C2B' THEN 1 ELSE 0 END)::int AS c2b,
+          SUM(CASE WHEN entity_type = 'STK' THEN 1 ELSE 0 END)::int AS stk
         FROM admin_audit_logs
         WHERE action = 'mpesa_callback'
           AND created_at BETWEEN $1 AND $2
@@ -194,7 +194,7 @@ async function systemTrends({ from, to, metric, db = pool }) {
       sql = `
         SELECT date_trunc('day', created_at) AS d, COUNT(*)::int AS v
         FROM admin_audit_logs
-        WHERE action = 'mpesa_callback' AND resource_type = 'C2B' AND created_at BETWEEN $1 AND $2
+        WHERE action = 'mpesa_callback' AND entity_type = 'C2B' AND created_at BETWEEN $1 AND $2
         GROUP BY d ORDER BY d
       `;
       break;
@@ -202,7 +202,7 @@ async function systemTrends({ from, to, metric, db = pool }) {
       sql = `
         SELECT date_trunc('day', created_at) AS d, COUNT(*)::int AS v
         FROM admin_audit_logs
-        WHERE action = 'mpesa_callback' AND resource_type = 'STK' AND created_at BETWEEN $1 AND $2
+        WHERE action = 'mpesa_callback' AND entity_type = 'STK' AND created_at BETWEEN $1 AND $2
         GROUP BY d ORDER BY d
       `;
       break;
