@@ -379,49 +379,58 @@ router.post('/reconciliation/override', requireSuperOnly, async (req, res) => {
 
 // Callback audit summary (callback health)
 router.get('/callback-audit/summary', async (req, res) => {
-  const from = req.query.from ? new Date(req.query.from) : null;
-  const to = req.query.to ? new Date(req.query.to) : null;
-  const filters = [];
-  const params = ['teketeke'];
-  filters.push(`domain = $1`);
-  if (from && !Number.isNaN(from.getTime())) {
-    params.push(from.toISOString());
-    filters.push(`created_at >= $${params.length}`);
-  }
-  if (to && !Number.isNaN(to.getTime())) {
-    params.push(to.toISOString());
-    filters.push(`created_at <= $${params.length}`);
-  }
-  const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('admin_audit_logs')
-      .select('action, entity_type, meta, created_at')
-      .eq('domain', 'teketeke')
-      .limit(1);
-    if (error) {
-      console.warn('callback-audit summary warning (table maybe missing):', error.message);
-    }
-  } catch (_) {
-    // ignore probe errors
-  }
+  const fromDate = req.query.from ? new Date(req.query.from) : null;
+  const toDate = req.query.to ? new Date(req.query.to) : null;
+  const fromTs = fromDate && !Number.isNaN(fromDate.getTime()) ? fromDate.toISOString() : null;
+  const toTs = toDate && !Number.isNaN(toDate.getTime()) ? toDate.toISOString() : null;
+  const params = [fromTs, toTs];
+
   try {
     const { rows } = await pool.query(
       `
-        SELECT
-          entity_type AS kind,
-          (meta->>'result')::text AS result,
-          COUNT(*)::int AS count
-        FROM admin_audit_logs
-        ${where}
-        GROUP BY entity_type, result
-        ORDER BY entity_type, result
+        WITH filtered AS (
+          SELECT created_at, COALESCE(meta->>'result', 'unknown') AS result
+          FROM public.admin_audit_logs
+          WHERE ($1::timestamptz IS NULL OR created_at >= $1)
+            AND ($2::timestamptz IS NULL OR created_at <= $2)
+            AND domain = 'teketeke'
+            AND action = 'mpesa_callback'
+        ),
+        totals_cte AS (
+          SELECT
+            COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE result = 'success') AS success,
+            COUNT(*) FILTER (WHERE result = 'failure') AS failure
+          FROM filtered
+        ),
+        by_result AS (
+          SELECT result, COUNT(*) AS count
+          FROM filtered
+          GROUP BY result
+          ORDER BY count DESC
+        )
+        SELECT jsonb_build_object(
+          'ok', true,
+          'from', $1,
+          'to', $2,
+          'totals', (SELECT to_jsonb(totals_cte) FROM totals_cte),
+          'by_result', (SELECT COALESCE(jsonb_agg(to_jsonb(by_result)), '[]'::jsonb) FROM by_result)
+        ) AS summary
       `,
       params,
     );
-    return res.json({ ok: true, from: from?.toISOString() || null, to: to?.toISOString() || null, rows: rows || [] });
+    const summary = rows?.[0]?.summary || { ok: true, totals: {}, by_result: [] };
+    return res.json(summary);
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    // If the table is missing or search_path is wrong, surface a clear error
+    if (err?.message && err.message.includes('does not exist')) {
+      return res.status(503).json({
+        ok: false,
+        error: 'RECON_SCHEMA_MISSING',
+        message: 'callback audit table not deployed in this environment',
+      });
+    }
+    return res.status(500).json({ ok: false, error: err.message || 'callback audit summary failed' });
   }
 });
 
