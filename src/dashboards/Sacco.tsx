@@ -4,6 +4,7 @@ import PaybillCodeCard from '../components/PaybillCodeCard'
 import PaybillHeader from '../components/PaybillHeader'
 import StickerPrintModal from '../components/StickerPrintModal'
 import { authFetch } from '../lib/auth'
+import { saccoFetch } from '../services/saccoApi'
 import { mapPaybillCodes, type PaybillAliasRow } from '../lib/paybill'
 import { getOperatorConfig, normalizeOperatorType } from '../lib/operatorConfig'
 import VehicleCarePage from '../modules/vehicleCare/VehicleCarePage'
@@ -2119,7 +2120,10 @@ export default function SaccoDashboard() {
       if (kind) params.set('wallet_kind', kind)
       if (useOwner && matatuIdForOwner) params.set('matatu_id', matatuIdForOwner)
       debugAuth('ledger_fetch', { endpoint, params: Object.fromEntries(params.entries()) })
-      const res = await authFetch(`${endpoint}?${params.toString()}`)
+      const headers = { Accept: 'application/json' }
+      const res = useSacco
+        ? await saccoFetch(`${endpoint}?${params.toString()}`, currentSacco, { headers })
+        : await authFetch(`${endpoint}?${params.toString()}`, { headers })
       if (!res.ok) {
         let msg = 'Failed to load wallet ledger'
         try {

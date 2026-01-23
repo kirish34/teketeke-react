@@ -27,7 +27,7 @@ function fmt(value?: string | null) {
   return value
 }
 
-function fmtDate(value?: string | null) {
+function fmtDate(value: string | null | undefined) {
   if (!value) return '-'
   return new Date(value).toLocaleString()
 }

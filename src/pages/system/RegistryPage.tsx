@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import SystemRegistry from '../../dashboards/SystemRegistry'
 import { SystemPageHeader } from './SystemPageHeader'
 import { useAuth } from '../../state/auth'
 
@@ -47,7 +46,19 @@ export default function RegistryPage() {
           </div>
         }
       />
-      <SystemRegistry onBack={() => navigate('/system')} canRegistryAct={canRegistryAct} />
+      <section className="card">
+        <h3 style={{ marginTop: 0 }}>Registry</h3>
+        <p className="muted">
+          The registry dashboard is temporarily unavailable in this build. Please return to the System overview or contact
+          an administrator if you expected device assignment tools here.
+        </p>
+        <div className="row" style={{ gap: 8 }}>
+          <button className="btn" type="button" onClick={() => navigate('/system')}>
+            Back to System
+          </button>
+          {!canRegistryAct ? <span className="muted small">View-only</span> : null}
+        </div>
+      </section>
     </div>
   )
 }

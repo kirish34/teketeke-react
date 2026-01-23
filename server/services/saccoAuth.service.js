@@ -144,6 +144,7 @@ function requireSaccoMembership({ allowRoles = [], allowStaff = true } = {}) {
 
       if (roleAllowed && saccoAllowed) {
         req.saccoId = String(requested);
+        req.sacco_id = req.saccoId;
         req.saccoAuth = ctx;
         req.user = req.user || {};
         req.user.role = req.user.role || normalizedRole;
@@ -168,6 +169,7 @@ function requireSaccoMembership({ allowRoles = [], allowStaff = true } = {}) {
         ok: false,
         error: 'forbidden',
         code: 'SACCO_ACCESS_DENIED',
+        message: 'SACCO access denied',
         request_id: req.requestId || null,
         details: {
           user_id: userId,

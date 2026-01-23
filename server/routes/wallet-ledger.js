@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = process.env.NODE_ENV === 'test' && global.__testPool ? global.__testPool : require('../db/pool');
 const { requireUser } = require('../middleware/auth');
+const requireSaccoContext = require('../middleware/requireSaccoContext');
 const { ensureAppUserContextFromUserRoles, normalizeEffectiveRole } = require('../services/appUserContext.service');
 const { requireSaccoMembership, resolveSaccoAuthContext } = require('../services/saccoAuth.service');
 const { supabaseAdmin } = require('../supabase');
@@ -9,11 +10,12 @@ const router = express.Router();
 
 router.use(requireUser);
 
-function deny(res, code, details, status = 403, requestId = null) {
+function deny(res, code, details, status = 403, requestId = null, message = null) {
   return res.status(status).json({
     ok: false,
     error: 'forbidden',
     code,
+    message: message || 'Access denied',
     request_id: requestId,
     details: details || {},
   });
@@ -427,7 +429,13 @@ router.get('/wallets/:id/ledger', async (req, res) => {
         wallet_id: wallet.id,
         reason: 'wallet_scope_mismatch',
       });
-      return res.status(403).json({ ok: false, error: 'forbidden' });
+      return res.status(403).json({
+        ok: false,
+        error: 'forbidden',
+        code: 'ACCESS_DENIED',
+        message: 'You do not have access to this wallet',
+        request_id: req.requestId || null,
+      });
     }
 
     const result = await fetchLedgerForWallet(walletId, { from, to, limit, offset });
@@ -447,7 +455,13 @@ router.get('/admin/wallet-ledger', async (req, res) => {
   try {
     const userCtx = await resolveUserContext(req.user?.id);
     if (!userCtx || userCtx.role !== ROLES.SYSTEM_ADMIN) {
-      return res.status(403).json({ ok: false, error: 'forbidden' });
+      return res.status(403).json({
+        ok: false,
+        error: 'forbidden',
+        code: 'ACCESS_DENIED',
+        message: 'System admin access required',
+        request_id: req.requestId || null,
+      });
     }
 
     const walletRes = await pool.query(
@@ -540,65 +554,69 @@ router.get('/sacco/wallet-ledger', async (req, res) => {
       return res.status(500).json({ ok: false, error: err.message || 'Failed to load sacco wallet ledger' });
     }
   }
-  return requireSaccoMembership({
-    allowRoles: ['SACCO_ADMIN', 'SACCO_STAFF', 'SYSTEM_ADMIN'],
-    allowStaff: true,
-  })(req, res, async () => {
-    try {
-      const requestedSaccoId = req.saccoId || String(req.query.sacco_id || '').trim();
-      if (!requestedSaccoId) {
-        return res.status(400).json({
-          ok: false,
-          error: 'bad_request',
-          code: 'SACCO_ID_REQUIRED',
-          request_id: req.requestId || null,
+  const enforceContext = requireSaccoContext();
+  return enforceContext(req, res, () =>
+    requireSaccoMembership({
+      allowRoles: ['SACCO_ADMIN', 'SACCO_STAFF', 'SYSTEM_ADMIN'],
+      allowStaff: true,
+    })(req, res, async () => {
+      try {
+        const requestedSaccoId =
+          req.sacco_id || req.saccoId || String(req.query.sacco_id || '').trim();
+        if (!requestedSaccoId) {
+          return res.status(400).json({
+            ok: false,
+            error: 'bad_request',
+            code: 'SACCO_ID_REQUIRED',
+            request_id: req.requestId || null,
+          });
+        }
+
+        const kindRaw = String(req.query.wallet_kind || '').trim().toUpperCase();
+        const walletKind = kindRaw && isSaccoWalletKind(kindRaw) ? kindRaw : null;
+        const { from, to, error } = normalizeDateBounds(req.query.from, req.query.to);
+        if (error) return res.status(400).json({ ok: false, error });
+        const { limit, offset } = normalizeLimitOffset(Number(req.query.limit), Number(req.query.offset));
+
+        const walletsRes = await pool.query(
+          `
+            SELECT id, wallet_kind, virtual_account_code, balance
+            FROM wallets
+            WHERE sacco_id = $1
+              AND wallet_kind IN ('SACCO_FEE','SACCO_LOAN','SACCO_SAVINGS')
+              AND ($2::text IS NULL OR wallet_kind = $2)
+            ORDER BY wallet_kind
+          `,
+          [requestedSaccoId, walletKind],
+        );
+        const wallets = walletsRes.rows || [];
+        const results = [];
+        for (const wallet of wallets) {
+          const ledger = await fetchLedgerForWallet(wallet.id, { from, to, limit, offset });
+          results.push({
+            wallet_id: wallet.id,
+            wallet_kind: wallet.wallet_kind,
+            virtual_account_code: wallet.virtual_account_code,
+            balance: Number(wallet.balance || 0),
+            total: ledger.total,
+            items: ledger.items,
+          });
+        }
+
+        return res.json({
+          ok: true,
+          sacco_id: requestedSaccoId,
+          wallet_kind: walletKind,
+          wallets: results,
         });
+      } catch (err) {
+        if (String(process.env.DEBUG_WALLET_AUTH || '').toLowerCase() === 'true') {
+          console.log('[wallet-ledger][sacco-ledger][error]', err?.message, err?.stack);
+        }
+        return res.status(500).json({ ok: false, error: err.message || 'Failed to load sacco wallet ledger' });
       }
-
-      const kindRaw = String(req.query.wallet_kind || '').trim().toUpperCase();
-      const walletKind = kindRaw && isSaccoWalletKind(kindRaw) ? kindRaw : null;
-      const { from, to, error } = normalizeDateBounds(req.query.from, req.query.to);
-      if (error) return res.status(400).json({ ok: false, error });
-      const { limit, offset } = normalizeLimitOffset(Number(req.query.limit), Number(req.query.offset));
-
-      const walletsRes = await pool.query(
-        `
-          SELECT id, wallet_kind, virtual_account_code, balance
-          FROM wallets
-          WHERE sacco_id = $1
-            AND wallet_kind IN ('SACCO_FEE','SACCO_LOAN','SACCO_SAVINGS')
-            AND ($2::text IS NULL OR wallet_kind = $2)
-          ORDER BY wallet_kind
-        `,
-        [requestedSaccoId, walletKind],
-      );
-      const wallets = walletsRes.rows || [];
-      const results = [];
-      for (const wallet of wallets) {
-        const ledger = await fetchLedgerForWallet(wallet.id, { from, to, limit, offset });
-        results.push({
-          wallet_id: wallet.id,
-          wallet_kind: wallet.wallet_kind,
-          virtual_account_code: wallet.virtual_account_code,
-          balance: Number(wallet.balance || 0),
-          total: ledger.total,
-          items: ledger.items,
-        });
-      }
-
-      return res.json({
-        ok: true,
-        sacco_id: requestedSaccoId,
-        wallet_kind: walletKind,
-        wallets: results,
-      });
-  } catch (err) {
-    if (String(process.env.DEBUG_WALLET_AUTH || '').toLowerCase() === 'true') {
-      console.log('[wallet-ledger][sacco-ledger][error]', err?.message, err?.stack);
-    }
-    return res.status(500).json({ ok: false, error: err.message || 'Failed to load sacco wallet ledger' });
-  }
-});
+    }),
+  );
 });
 
 router.get('/wallets/owner-ledger', async (req, res) => {
@@ -778,7 +796,13 @@ router.get('/wallets/owner-ledger', async (req, res) => {
         wallet_count: wallets.length,
         allowed_wallet_count: 0,
       });
-      return res.status(403).json({ ok: false, error: 'forbidden' });
+      return res.status(403).json({
+        ok: false,
+        error: 'forbidden',
+        code: 'ACCESS_DENIED',
+        message: 'You do not have access to these wallets',
+        request_id: req.requestId || null,
+      });
     }
 
     const results = [];

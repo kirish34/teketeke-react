@@ -1,4 +1,5 @@
-const pool = require('../db/pool');
+const pool =
+  process.env.NODE_ENV === 'test' && global.__testPool ? global.__testPool : require('../db/pool');
 const { supabaseAdmin } = require('../supabase');
 const {
   normalizeEffectiveRole,
@@ -130,6 +131,7 @@ function requireSaccoAccess({ allowSystemWithoutSacco = false, allowStaff = true
           ok: false,
           error: 'forbidden',
           code: 'SACCO_ACCESS_DENIED',
+          message: 'SACCO access denied',
           details: {
             role: ctx?.role || null,
             user_sacco_id: ctx?.saccoId || null,
@@ -154,6 +156,7 @@ function requireSaccoAccess({ allowSystemWithoutSacco = false, allowStaff = true
           ok: false,
           error: 'forbidden',
           code: 'SACCO_ACCESS_DENIED',
+          message: 'SACCO access denied',
           details: {
             role: ctx?.role || null,
             user_sacco_id: ctx?.saccoId || null,
@@ -164,6 +167,7 @@ function requireSaccoAccess({ allowSystemWithoutSacco = false, allowStaff = true
         });
       }
       req.saccoId = ctx.saccoId || null;
+      req.sacco_id = req.saccoId;
       req.saccoRole = ctx.role;
       return next();
     } catch (err) {

@@ -127,5 +127,9 @@ export async function authFetch(input: RequestInfo | URL, init?: RequestInit) {
     }
   }
 
-  return fetch(target, { ...(init || {}), headers })
+  const response = await fetch(target, { ...(init || {}), headers })
+  if (response.status === 401) {
+    await signOutEverywhere()
+  }
+  return response
 }
