@@ -142,7 +142,7 @@ export const routes: RouteObject[] = [
     ),
   },
   {
-    path: "/system/*",
+    path: "/system",
     element: (
       <RequireRole allow={["super_admin", "system_admin"]}>
         <SystemShell />
