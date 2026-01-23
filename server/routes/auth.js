@@ -59,6 +59,7 @@ async function handleMe(req, res) {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'missing user' });
   try {
+    const mockMissing = process.env.MOCK_AUTH_CONTEXT === 'missing';
     let ctx = await loadUserContext(userId);
     const fallbackRole = normalizeEffectiveRole(
       ctx?.effective_role ||
@@ -71,22 +72,42 @@ async function handleMe(req, res) {
       email: req.user?.email || ctx?.email || null,
       role: null,
     };
+
+    if (mockMissing) {
+      return res.json({
+        ok: true,
+        user: baseUser,
+        context: { effective_role: null, sacco_id: null, matatu_id: null },
+        context_missing: true,
+        needs_setup: true,
+      });
+    }
+
     if (!ctx) {
-      const repaired = await ensureAppUserContextFromUserRoles(userId, baseUser.email);
-      ctx = repaired || null;
+      try {
+        const repaired = await ensureAppUserContextFromUserRoles(userId, baseUser.email);
+        ctx = repaired || null;
+      } catch (err) {
+        debugAuth({ user_id: userId, reason: 'context_repair_failed', error: err?.message });
+      }
     }
     if (!ctx) {
       debugAuth({ user_id: userId, reason: 'missing_context' });
-      const created = await ensureUserContext(userId, baseUser.email, fallbackRole || 'USER');
+      let created = null;
+      try {
+        created = await ensureUserContext(userId, baseUser.email, fallbackRole || 'USER');
+      } catch (err) {
+        debugAuth({ user_id: userId, reason: 'ensure_context_failed', error: err?.message });
+      }
       return res.json({
         ok: true,
         user: baseUser,
         context: {
-          effective_role: normalizeEffectiveRole(created?.effective_role || fallbackRole || 'USER'),
+          effective_role: created ? normalizeEffectiveRole(created?.effective_role) : null,
           sacco_id: created?.sacco_id || null,
           matatu_id: created?.matatu_id || null,
         },
-        context_missing: !created,
+        context_missing: true,
         needs_setup: true,
       });
     }

@@ -30,7 +30,7 @@ async function requireUser(req, res, next) {
     return res.status(401).json({ error: 'missing token' });
   }
   if (process.env.MOCK_SUPABASE_AUTH === 'fail') {
-    return res.status(401).json({ error: 'invalid token' });
+    return res.status(403).json({ error: 'invalid token' });
   }
   if (process.env.MOCK_SUPABASE_AUTH === '1') {
     req.user = { id: 'mock-user', email: null };
@@ -42,7 +42,7 @@ async function requireUser(req, res, next) {
     const { data, error } = await supabaseAdmin.auth.getUser(token);
     if (error || !data?.user) {
       debugAuth({ token_length: token.length, reason: 'invalid_token', error: error?.message });
-      return res.status(401).json({ error: 'invalid token' });
+      return res.status(403).json({ error: 'invalid token' });
     }
     req.user = data.user;
     const metaRole =
@@ -57,8 +57,7 @@ async function requireUser(req, res, next) {
     return next();
   } catch (err) {
     debugAuth({ token_length: token.length, reason: 'auth_exception', error: err?.message });
-    // Treat unexpected Supabase errors as 401 to avoid frontend logout loops on 403.
-    return res.status(401).json({ error: 'invalid token' });
+    return res.status(403).json({ error: 'invalid token' });
   }
 }
 

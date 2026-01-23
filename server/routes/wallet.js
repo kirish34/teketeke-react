@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const { requireAdminAccess } = require('../middleware/admin-access');
+const { requireSystemOrSuper } = require('../middleware/requireAdmin');
+const { logAdminAction } = require('../services/audit.service');
 const { creditWallet } = require('../wallet/wallet.service');
 
-router.use(requireAdminAccess);
+router.use(requireSystemOrSuper);
 
 // TEMP test endpoint to manually credit a wallet (remove or protect in production)
 router.post('/credit-wallet', async (req, res) => {
@@ -22,6 +23,13 @@ router.post('/credit-wallet', async (req, res) => {
       ok: true,
       message: 'Wallet credited successfully',
       data: result,
+    });
+    await logAdminAction({
+      req,
+      action: 'wallet_credit_manual',
+      resource_type: 'wallet',
+      resource_id: virtualAccountCode || null,
+      payload: { amount, source: source || 'TEST_MANUAL' },
     });
   } catch (err) {
     console.error(err);

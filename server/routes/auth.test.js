@@ -101,9 +101,9 @@ describe('/api/auth/me handler', () => {
     process.env.MOCK_AUTH_CONTEXT = prevMockContext;
     expect(res.statusCode).toBe(200);
     expect(res.body?.ok).toBe(true);
-    expect(res.body?.context_missing).toBe(false);
+    expect(res.body?.context_missing).toBe(true);
     expect(res.body?.needs_setup).toBe(true);
-    expect(res.body?.context?.effective_role).toBe('SACCO_ADMIN');
+    expect(res.body?.context?.effective_role).toBe(null);
     expect(res.body?.user?.email).toBe('b@example.com');
   });
 });

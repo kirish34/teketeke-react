@@ -206,7 +206,12 @@ app.use('/api/admin', require('./routes/admin-withdrawals'));
 app.use('/api/admin', require('./routes/admin-matatu-payout'));
 app.use('/api/admin', require('./routes/admin-vehicle-payout'));
 app.use('/api/admin', require('./routes/admin-sms'));
+app.use('/api/admin', require('./routes/admin-monitoring'));
+app.use('/api/admin', require('./routes/admin-fraud'));
+app.use('/api/admin', require('./routes/admin-intelligence'));
+app.use('/api/admin', require('./routes/admin-quarantine'));
 app.use('/', require('./routes/sacco'));
+app.use('/api/sacco', require('./routes/sacco-intelligence'));
 
 console.log('[mount] /api/sacco -> sacco-payouts router loaded');
 // Daraja C2B aliases (Safaricom blocks "mpesa" substring in RegisterURL)

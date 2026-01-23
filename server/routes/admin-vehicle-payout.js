@@ -6,7 +6,7 @@ const { logAdminAction } = require('../services/audit.service');
 
 router.use(requireSuperOnly);
 
-async function updatePayout(table, id, body, res) {
+async function updatePayout(req, table, id, body, res) {
   try {
     const update = {
       payout_phone: body?.payout_phone || null,
@@ -42,13 +42,13 @@ async function updatePayout(table, id, body, res) {
 router.post('/taxis/:id/payout', async (req, res) => {
   const id = req.params.id;
   if (!id) return res.status(400).json({ error: 'taxi id required' });
-  return updatePayout('taxis', id, req.body, res);
+  return updatePayout(req, 'taxis', id, req.body, res);
 });
 
 router.post('/bodabodas/:id/payout', async (req, res) => {
   const id = req.params.id;
   if (!id) return res.status(400).json({ error: 'boda id required' });
-  return updatePayout('bodabodas', id, req.body, res);
+  return updatePayout(req, 'bodabodas', id, req.body, res);
 });
 
 module.exports = router;

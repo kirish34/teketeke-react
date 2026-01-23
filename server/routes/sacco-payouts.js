@@ -8,6 +8,7 @@ const { requireUser } = require('../middleware/auth');
 const { requireSaccoMembership } = require('../services/saccoAuth.service');
 const { insertPayoutEvent, normalizePayoutWalletKind } = require('../services/saccoPayouts.service');
 const { checkB2CEnvPresence } = require('../services/payoutReadiness.service');
+const { logAdminAction } = require('../services/audit.service');
 
 const router = express.Router();
 
@@ -118,6 +119,13 @@ router.post('/payout-destinations', async (req, res) => {
         `,
         [typeRaw, normalizedRef, name, resetVerify, id, req.saccoId],
       );
+      await logAdminAction({
+        req,
+        action: 'sacco_payout_destination_update',
+        resource_type: 'payout_destination',
+        resource_id: id,
+        payload: { sacco_id: req.saccoId, destination_type: typeRaw, reset_verify: resetVerify },
+      });
       return res.json({ ok: true, destination: updateRes.rows[0] });
     }
 
@@ -131,6 +139,13 @@ router.post('/payout-destinations', async (req, res) => {
       `,
       [req.saccoId, typeRaw, normalizedRef, name],
     );
+    await logAdminAction({
+      req,
+      action: 'sacco_payout_destination_create',
+      resource_type: 'payout_destination',
+      resource_id: insertRes.rows[0]?.id || null,
+      payload: { sacco_id: req.saccoId, destination_type: typeRaw },
+    });
     return res.json({ ok: true, destination: insertRes.rows[0] });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
@@ -485,6 +500,13 @@ router.post('/payout-batches', async (req, res) => {
     }
 
     await client.query('COMMIT');
+    await logAdminAction({
+      req,
+      action: 'sacco_payout_batch_create',
+      resource_type: 'payout_batch',
+      resource_id: batchId,
+      payload: { sacco_id: req.saccoId, total_amount: totalAmount, items: items.length },
+    });
     return res.json({ ok: true, batch_id: batchId, total_amount: totalAmount, items });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -523,6 +545,13 @@ router.post('/payout-batches/:id/submit', async (req, res) => {
       eventType: 'BATCH_SUBMITTED',
       message: 'Batch submitted',
       meta: {},
+    });
+    await logAdminAction({
+      req,
+      action: 'sacco_payout_batch_submit',
+      resource_type: 'payout_batch',
+      resource_id: batchId,
+      payload: { sacco_id: req.saccoId },
     });
     return res.json({ ok: true, batch: rows[0] });
   } catch (err) {
@@ -628,6 +657,13 @@ router.delete('/payout-batches/:id', async (req, res) => {
     if (!deleted.rows.length) {
       return res.status(404).json({ ok: false, error: 'Draft batch not found' });
     }
+    await logAdminAction({
+      req,
+      action: 'sacco_payout_batch_delete',
+      resource_type: 'payout_batch',
+      resource_id: batchId,
+      payload: { sacco_id: req.saccoId },
+    });
     return res.json({ ok: true, deleted: batchId });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
@@ -808,6 +844,13 @@ router.post('/payout-batches/:id/update', async (req, res) => {
     });
 
     await pool.query('COMMIT');
+    await logAdminAction({
+      req,
+      action: 'sacco_payout_batch_update',
+      resource_type: 'payout_batch',
+      resource_id: batchId,
+      payload: { sacco_id: req.saccoId, total_amount: totalAmount, items: items.length },
+    });
     return res.json({ ok: true, batch_id: batchId, total_amount: totalAmount });
   } catch (err) {
     await pool.query('ROLLBACK');

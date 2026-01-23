@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const pool = require('../db/pool');
-const { requireAdminAccess } = require('../middleware/admin-access');
+const pool = process.env.NODE_ENV === 'test' && global.__testPool ? global.__testPool : require('../db/pool');
+const { requireSystemOrSuper } = require('../middleware/requireAdmin');
+const { logAdminAction } = require('../services/audit.service');
 
-router.use(requireAdminAccess);
+router.use(requireSystemOrSuper);
 
 const SMS_SETTING_FIELDS = [
   'sender_id',
@@ -66,6 +67,20 @@ function pickSmsSettings(input) {
   return out;
 }
 
+async function logSmsAction(req, action, resourceId = null, payload = null) {
+  try {
+    await logAdminAction({
+      req,
+      action,
+      resource_type: 'sms',
+      resource_id: resourceId,
+      payload,
+    });
+  } catch {
+    // best-effort audit log
+  }
+}
+
 // List SMS messages with optional status filter
 router.get('/sms', async (req, res) => {
   const status = (req.query.status || '').toUpperCase();
@@ -120,6 +135,7 @@ router.patch('/sms/settings', async (req, res) => {
   `;
   try {
     const { rows } = await pool.query(sql, values);
+    await logSmsAction(req, 'sms_settings_update', 'settings', updates);
     res.json({ ok: true, settings: rows[0] || null });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -167,6 +183,7 @@ router.patch('/sms/templates/:code', async (req, res) => {
       `,
       [code, label, body, isActive]
     );
+    await logSmsAction(req, 'sms_template_upsert', code, { label, isActive });
     res.json({ ok: true, template: rows[0] || null });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -190,6 +207,7 @@ router.post('/sms/:id/retry', async (req, res) => {
       [id]
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: 'not found' });
+    await logSmsAction(req, 'sms_retry', id, { status: rows[0]?.status || 'PENDING' });
     res.json({ ok: true, sms: rows[0] });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });

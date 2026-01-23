@@ -3,6 +3,7 @@ const { createClient } = require('@supabase/supabase-js');
 const url = (process.env.SUPABASE_URL || '').trim();
 const anon = (process.env.SUPABASE_ANON_KEY || '').trim();
 const service = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+const isTest = process.env.NODE_ENV === 'test';
 
 if (!url || !anon) throw new Error('Missing SUPABASE_URL or SUPABASE_ANON_KEY');
 if (process.env.NODE_ENV === 'production' && !service) {
@@ -19,8 +20,34 @@ try {
 }
 
 const supabaseAnon = createClient(url, anon, { auth: { persistSession: false, detectSessionInUrl: false } });
-const supabaseAdmin = service
+function createMockSupabaseAdmin() {
+  const defaultResult = { data: [], error: null };
+  const builder = {
+    select: () => builder,
+    eq: () => builder,
+    in: () => builder,
+    order: () => builder,
+    limit: () => builder,
+    insert: async () => defaultResult,
+    update: async () => defaultResult,
+    maybeSingle: async () => defaultResult,
+    single: async () => defaultResult,
+  };
+  return {
+    from: () => builder,
+    rpc: async () => defaultResult,
+    auth: {
+      getUser: async () => ({ data: { user: { id: 'mock-user' } }, error: null }),
+      admin: {},
+    },
+  };
+}
+
+const useMockAdmin = isTest && String(process.env.MOCK_SUPABASE_ADMIN || '1') !== '0';
+const supabaseAdmin = service && !useMockAdmin
   ? createClient(url, service, { auth: { persistSession: false, detectSessionInUrl: false } })
-  : null;
+  : useMockAdmin
+    ? createMockSupabaseAdmin()
+    : null;
 
 module.exports = { supabaseAnon, supabaseAdmin };

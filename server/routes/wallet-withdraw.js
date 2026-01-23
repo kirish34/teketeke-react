@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 
-const { requireAdminAccess } = require('../middleware/admin-access');
+const { requireSystemOrSuper } = require('../middleware/requireAdmin');
+const { logAdminAction } = require('../services/audit.service');
 const {
   debitWalletAndCreateWithdrawal,
   createBankWithdrawal,
@@ -10,7 +11,21 @@ const {
 } = require('../wallet/wallet.service');
 const { sendB2CPayment } = require('../mpesa/mpesaB2C.service');
 
-router.use('/wallets', requireAdminAccess);
+router.use('/wallets', requireSystemOrSuper);
+
+async function logWalletAdminAction(req, action, resourceId = null, payload = null) {
+  try {
+    await logAdminAction({
+      req,
+      action,
+      resource_type: 'wallet',
+      resource_id: resourceId,
+      payload,
+    });
+  } catch {
+    // best-effort audit log
+  }
+}
 
 /**
  * GET /wallets/:virtualAccountCode
@@ -88,6 +103,11 @@ router.post('/wallets/:virtualAccountCode/withdraw', async (req, res) => {
         mpesa: b2cResult.mpesa,
       },
     });
+    await logWalletAdminAction(req, 'wallet_withdraw_mpesa', virtualAccountCode, {
+      amount,
+      phoneNumber,
+      withdrawalId: withdrawalData.withdrawalId,
+    });
   } catch (err) {
     console.error('Error in withdraw route:', err.message);
     return res.status(400).json({
@@ -126,6 +146,12 @@ router.post('/wallets/:virtualAccountCode/withdraw/bank', async (req, res) => {
       ok: true,
       message: 'Bank withdrawal request created',
       data: result,
+    });
+    await logWalletAdminAction(req, 'wallet_withdraw_bank', virtualAccountCode, {
+      amount,
+      bankName,
+      bankBranch,
+      bankAccountNumber,
     });
   } catch (err) {
     console.error('Error in bank withdraw route:', err.message);

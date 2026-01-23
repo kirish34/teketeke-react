@@ -24,12 +24,21 @@ const {
 } = require('../wallet/wallet.aliases');
 const { validatePaybillCode } = require('../wallet/paybillCode.util');
 const { requireUser } = require('../middleware/auth');
-const { requireSystemOrSuper } = require('../middleware/requireAdmin');
+const { requireSystemOrSuper, requireSuperOnly } = require('../middleware/requireAdmin');
 const { normalizeMsisdn, maskMsisdn, extractMsisdnFromRaw, safeDisplayMsisdn } = require('../utils/msisdn');
 const { logAdminAction } = require('../services/audit.service');
+const { enqueueJob, isQueueEnabled, getQueue } = require('../queues/queue');
+const { processPayoutBatch } = require('../services/payoutBatchProcessor.service');
+const { runReconciliation } = require('../services/reconciliation.service');
+const { ensureIdempotent, logCallbackAudit, safeAck } = require('../services/callbackHardening.service');
+const { shouldQuarantine, quarantineOperation } = require('../services/quarantine.service');
 const router = express.Router();
 
 router.use(requireSystemOrSuper);
+
+const allowReplayDrill =
+  (process.env.NODE_ENV && process.env.NODE_ENV !== 'production') ||
+  String(process.env.ENABLE_REPLAY_DRILL || '').toLowerCase() === 'true';
 
 function parseDateRange(query = {}) {
   const range = (query.range || '').toLowerCase();
@@ -208,6 +217,299 @@ router.get('/audit', async (req, res) => {
   }
 });
 
+// Staging-only: replay callback drill to test idempotency/ignore paths
+router.post('/dev/replay-callback', async (req, res) => {
+  if (!allowReplayDrill) {
+    return res.status(404).json({ ok: false, error: 'not_enabled' });
+  }
+  try {
+    const kind = String(req.body?.kind || '').trim().toUpperCase();
+    const payload = req.body?.payload || {};
+    if (!kind) return res.status(400).json({ ok: false, error: 'kind required' });
+    const key = payload.TransID || payload.transId || payload.receipt || payload.checkout_request_id || payload.id || null;
+    const idem = await ensureIdempotent({ kind, key: key || `DRILL:${kind}:${Date.now()}`, payload });
+    await logCallbackAudit({
+      req,
+      key: key || null,
+      kind,
+      result: idem.firstTime ? 'accepted' : 'ignored',
+      reason: idem.firstTime ? null : 'duplicate',
+    });
+    return res.json({
+      ok: true,
+      result: idem.firstTime ? 'accepted' : 'duplicate_ignored',
+      idempotency_key: key,
+      store: idem.store,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Reconciliation endpoints
+router.post('/reconciliation/run', async (req, res) => {
+  const from = req.body?.from || req.body?.fromTs || req.query?.from || null;
+  const to = req.body?.to || req.body?.toTs || req.query?.to || null;
+  const mode = req.body?.mode === 'dry' ? 'dry' : 'write';
+  if (!from || !to) return res.status(400).json({ ok: false, error: 'from and to required' });
+  try {
+    const result = await runReconciliation({
+      fromTs: from,
+      toTs: to,
+      actorUserId: req.user?.id || null,
+      actorRole: req.user?.role || null,
+      requestId: req.requestId || null,
+      mode,
+    });
+    return res.json({
+      ok: true,
+      totals: result.totals,
+      sample_exceptions: result.exceptions,
+    });
+  } catch (err) {
+    await logAdminAction({
+      req,
+      action: 'recon_run_failed',
+      resource_type: 'reconciliation',
+      resource_id: `${from}_${to}`,
+      payload: { error: err.message },
+    });
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/reconciliation/runs', async (req, res) => {
+  const limitRaw = Number(req.query.limit);
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+  try {
+    const { rows } = await pool.query(
+      `
+        SELECT id, created_at, from_ts, to_ts, status, totals, actor_user_id, actor_role
+        FROM recon_runs
+        WHERE domain = $1
+        ORDER BY created_at DESC
+        LIMIT $2
+      `,
+      ['teketeke', limit],
+    );
+    return res.json({ ok: true, items: rows || [] });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/reconciliation/exceptions', async (req, res) => {
+  const limitRaw = Number(req.query.limit);
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 100;
+  const status = String(req.query.status || '').trim();
+  const from = req.query.from ? new Date(req.query.from) : null;
+  const to = req.query.to ? new Date(req.query.to) : null;
+  const where = ['domain = $1', "status <> 'matched'"];
+  const params = ['teketeke'];
+  if (status) {
+    params.push(status);
+    where.push(`status = $${params.length}`);
+  }
+  if (from && !Number.isNaN(from.getTime())) {
+    params.push(from.toISOString());
+    where.push(`created_at >= $${params.length}`);
+  }
+  if (to && !Number.isNaN(to.getTime())) {
+    params.push(to.toISOString());
+    where.push(`created_at <= $${params.length}`);
+  }
+  const whereClause = `WHERE ${where.join(' AND ')}`;
+  try {
+    const { rows } = await pool.query(
+      `
+        SELECT id, kind, provider_ref, internal_ref, amount, status, details, created_at
+        FROM recon_items
+        ${whereClause}
+        ORDER BY created_at DESC
+        LIMIT $${params.length + 1}
+      `,
+      [...params, limit],
+    );
+    return res.json({ ok: true, items: rows || [] });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/reconciliation/override', requireSuperOnly, async (req, res) => {
+  const { kind, provider_ref, status, note } = req.body || {};
+  if (!kind || !provider_ref || !status) {
+    return res.status(400).json({ ok: false, error: 'kind, provider_ref, status required' });
+  }
+  try {
+    await pool.query(
+      `
+        INSERT INTO recon_items (domain, kind, provider_ref, status, details, last_seen_at)
+        VALUES ($1, $2, $3, $4, $5, now())
+        ON CONFLICT (domain, kind, provider_ref) DO UPDATE
+          SET status = EXCLUDED.status,
+              details = EXCLUDED.details,
+              last_seen_at = now(),
+              resolved = true
+      `,
+      ['teketeke', kind, provider_ref, status, { override: true, note: note || null }],
+    );
+    await logAdminAction({
+      req,
+      action: 'recon_override',
+      resource_type: 'reconciliation',
+      resource_id: provider_ref,
+      payload: { kind, status, note: note || null },
+    });
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Callback audit summary (callback health)
+router.get('/callback-audit/summary', async (req, res) => {
+  const from = req.query.from ? new Date(req.query.from) : null;
+  const to = req.query.to ? new Date(req.query.to) : null;
+  const filters = [];
+  const params = ['teketeke'];
+  filters.push(`domain = $1`);
+  if (from && !Number.isNaN(from.getTime())) {
+    params.push(from.toISOString());
+    filters.push(`created_at >= $${params.length}`);
+  }
+  if (to && !Number.isNaN(to.getTime())) {
+    params.push(to.toISOString());
+    filters.push(`created_at <= $${params.length}`);
+  }
+  const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('admin_audit_logs')
+      .select('action, resource_type, payload, created_at')
+      .eq('domain', 'teketeke')
+      .limit(1);
+    if (error) {
+      console.warn('callback-audit summary warning (table maybe missing):', error.message);
+    }
+  } catch (_) {
+    // ignore probe errors
+  }
+  try {
+    const { rows } = await pool.query(
+      `
+        SELECT
+          resource_type AS kind,
+          (payload->>'result')::text AS result,
+          COUNT(*)::int AS count
+        FROM admin_audit_logs
+        ${where}
+        GROUP BY resource_type, result
+        ORDER BY resource_type, result
+      `,
+      params,
+    );
+    return res.json({ ok: true, from: from?.toISOString() || null, to: to?.toISOString() || null, rows: rows || [] });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Callback audit events (recent failures/ignored/etc.)
+router.get('/callback-audit/events', async (req, res) => {
+  const limitRaw = Number(req.query.limit);
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+  const resultFilter = String(req.query.result || '').trim().toLowerCase();
+
+  const params = ['teketeke'];
+  const where = ['domain = $1', "action = 'mpesa_callback'"];
+  if (resultFilter) {
+    params.push(resultFilter);
+    where.push(`(payload->>'result') = $${params.length}`);
+  }
+  const whereClause = `WHERE ${where.join(' AND ')}`;
+
+  try {
+    const { rows } = await pool.query(
+      `
+        SELECT
+          created_at,
+          resource_type AS kind,
+          resource_id,
+          payload
+        FROM admin_audit_logs
+        ${whereClause}
+        ORDER BY created_at DESC
+        LIMIT $${params.length + 1}
+      `,
+      [...params, limit],
+    );
+    return res.json({ ok: true, items: rows || [], limit });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Queue job status endpoints
+router.get('/jobs/:id', async (req, res) => {
+  if (!isQueueEnabled()) return res.status(404).json({ ok: false, error: 'queue_disabled' });
+  const jobId = req.params.id;
+  if (!jobId) return res.status(400).json({ ok: false, error: 'job id required' });
+  try {
+    const queue = getQueue();
+    const job = await queue.getJob(jobId);
+    if (!job) return res.status(404).json({ ok: false, error: 'job_not_found' });
+    const state = await job.getState();
+    return res.json({
+      ok: true,
+      id: job.id,
+      name: job.name,
+      state,
+      progress: job.progress,
+      attemptsMade: job.attemptsMade,
+      failedReason: job.failedReason,
+      timestamp: job.timestamp,
+      processedOn: job.processedOn,
+      finishedOn: job.finishedOn,
+      returnvalue: job.returnvalue,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/jobs', async (req, res) => {
+  if (!isQueueEnabled()) return res.status(404).json({ ok: false, error: 'queue_disabled' });
+  const limitRaw = Number(req.query.limit);
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+  const name = String(req.query.name || '').trim();
+  try {
+    const queue = getQueue();
+    const jobs = await queue.getJobs(
+      ['waiting', 'active', 'completed', 'failed', 'delayed'],
+      0,
+      limit - 1,
+      true,
+    );
+    const filtered = name ? jobs.filter((j) => j.name === name) : jobs;
+    return res.json({
+      ok: true,
+      items: filtered.map((job) => ({
+        id: job.id,
+        name: job.name,
+        state: job.finishedOn ? 'completed' : job.failedReason ? 'failed' : job.opts?.state || 'pending',
+        attemptsMade: job.attemptsMade,
+        failedReason: job.failedReason,
+        timestamp: job.timestamp,
+        processedOn: job.processedOn,
+        finishedOn: job.finishedOn,
+      })),
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Manual wallet credit (admin adjustment)
 router.post('/wallets/credit', async (req, res) => {
   try {
@@ -218,6 +520,36 @@ router.post('/wallets/credit', async (req, res) => {
       sourceRef,
       description,
     } = req.body || {};
+    const qDecision = await shouldQuarantine({
+      operationType: 'WALLET_CREDIT',
+      entityType: 'WALLET',
+      entityId: virtualAccountCode || null,
+      db: pool,
+    });
+    if (qDecision.quarantine) {
+      const record = await quarantineOperation({
+        operationType: 'WALLET_CREDIT',
+        operationId: virtualAccountCode || 'wallet',
+        entityType: 'WALLET',
+        entityId: virtualAccountCode || null,
+        reason: qDecision.reason || 'quarantined',
+        source: qDecision.alert_id ? 'FRAUD_ALERT' : 'MANUAL',
+        severity: qDecision.severity || 'high',
+        alert_id: qDecision.alert_id || null,
+        incident_id: qDecision.incident_id || null,
+        payload: { virtualAccountCode, amount, source, sourceRef, description },
+        actorReq: req,
+        db: pool,
+      });
+      await logAdminAction({
+        req,
+        action: 'wallet_credit_quarantined',
+        resource_type: 'wallet',
+        resource_id: virtualAccountCode || null,
+        payload: { amount, source: source || 'ADMIN_ADJUST', quarantine_id: record?.id || null },
+      });
+      return res.status(202).json({ ok: true, quarantined: true, quarantine_id: record?.id || null });
+    }
     const result = await creditWallet({
       virtualAccountCode,
       amount,
@@ -919,12 +1251,19 @@ router.post('/c2b/:id/resolve', async (req, res) => {
           adminUserId,
           paymentId: id,
           action: 'REJECT',
-          note,
-          meta: { previous_status: payment.status, idempotent: true },
-        });
-        await client.query('COMMIT');
-        return res.json({ ok: true, message: 'Already rejected' });
-      }
+        note,
+        meta: { previous_status: payment.status, idempotent: true },
+      });
+      await client.query('COMMIT');
+      await logAdminAction({
+        req,
+        action: 'c2b_resolve_reject',
+        resource_type: 'c2b_payment',
+        resource_id: id,
+        payload: { idempotent: true, previous_status: payment.status },
+      });
+      return res.json({ ok: true, message: 'Already rejected' });
+    }
       const updated = await client.query(
         `UPDATE mpesa_c2b_payments SET status = 'REJECTED' WHERE id = $1 AND status IN ('RECEIVED', 'QUARANTINED')`,
         [id]
@@ -942,6 +1281,13 @@ router.post('/c2b/:id/resolve', async (req, res) => {
         meta: { previous_status: payment.status },
       });
       await client.query('COMMIT');
+      await logAdminAction({
+        req,
+        action: 'c2b_resolve_reject',
+        resource_type: 'c2b_payment',
+        resource_id: id,
+        payload: { previous_status: payment.status },
+      });
       return res.json({ ok: true, message: 'Payment rejected' });
     }
 
@@ -955,6 +1301,13 @@ router.post('/c2b/:id/resolve', async (req, res) => {
         meta: { previous_status: payment.status, idempotent: true },
       });
       await client.query('COMMIT');
+      await logAdminAction({
+        req,
+        action: 'c2b_resolve_credit',
+        resource_type: 'c2b_payment',
+        resource_id: id,
+        payload: { idempotent: true, previous_status: payment.status },
+      });
       return res.json({ ok: true, message: 'Already credited' });
     }
 
@@ -1005,6 +1358,13 @@ router.post('/c2b/:id/resolve', async (req, res) => {
         meta: { previous_status: payment.status, idempotent: true },
       });
       await client.query('COMMIT');
+      await logAdminAction({
+        req,
+        action: 'c2b_resolve_credit',
+        resource_type: 'c2b_payment',
+        resource_id: id,
+        payload: { idempotent: true, previous_status: payment.status },
+      });
       return res.json({ ok: true, message: 'Already credited (idempotent)' });
     }
 
@@ -1036,6 +1396,13 @@ router.post('/c2b/:id/resolve', async (req, res) => {
       meta: { previous_status: payment.status, wallet_id: resolvedWalletId },
     });
     await client.query('COMMIT');
+    await logAdminAction({
+      req,
+      action: 'c2b_resolve_credit',
+      resource_type: 'c2b_payment',
+      resource_id: id,
+      payload: { wallet_id: resolvedWalletId, amount, receipt: payment.receipt || null },
+    });
     return res.json({ ok: true, message: 'Credited', data: result });
   } catch (e) {
     await client.query('ROLLBACK');
@@ -1106,7 +1473,7 @@ router.get('/ops-alerts', async (req, res) => {
 });
 
 // SACCO payout destinations (verification)
-router.post('/payout-destinations/:id/verify', async (req, res) => {
+router.post('/payout-destinations/:id/verify', requireSuperOnly, async (req, res) => {
   const id = req.params.id;
   if (!id) return res.status(400).json({ ok: false, error: 'destination id required' });
   try {
@@ -1120,6 +1487,13 @@ router.post('/payout-destinations/:id/verify', async (req, res) => {
       [id],
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: 'destination not found' });
+    await logAdminAction({
+      req,
+      action: 'payout_destination_verify',
+      resource_type: 'payout_destination',
+      resource_id: id,
+      payload: { is_verified: true },
+    });
     return res.json({ ok: true, destination: rows[0] });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
@@ -1212,7 +1586,7 @@ router.get('/payout-batches/:id', async (req, res) => {
   }
 });
 
-router.post('/payout-batches/:id/approve', async (req, res) => {
+router.post('/payout-batches/:id/approve', requireSuperOnly, async (req, res) => {
   const batchId = req.params.id;
   if (!batchId) return res.status(400).json({ ok: false, error: 'batch id required' });
   try {
@@ -1321,7 +1695,7 @@ router.post('/payout-batches/:id/approve', async (req, res) => {
   }
 });
 
-router.post('/payout-batches/:id/process', async (req, res) => {
+router.post('/payout-batches/:id/process', requireSuperOnly, async (req, res) => {
   const batchId = req.params.id;
   if (!batchId) return res.status(400).json({ ok: false, error: 'batch id required' });
   try {
@@ -1340,150 +1714,38 @@ router.post('/payout-batches/:id/process', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'batch not approved for processing' });
     }
 
-    if (batch.status !== 'PROCESSING') {
-      await pool.query(
-        `UPDATE payout_batches SET status = 'PROCESSING' WHERE id = $1`,
-        [batchId],
-      );
-      await insertPayoutEvent({
-        batchId,
-        actorId: req.user?.id || null,
-        eventType: 'BATCH_PROCESSING',
-        message: 'Batch processing started',
-        meta: {},
-      });
-    }
+    const actorRole = req.user?.role || null;
+    const jobId = `payout_batch_process:${batchId}:${batch.updated_at || batch.approved_at || ''}`;
 
-    const itemsRes = await pool.query(
-      `
-        SELECT *
-        FROM payout_items
-        WHERE batch_id = $1
-        ORDER BY created_at ASC
-      `,
-      [batchId],
-    );
-    const items = itemsRes.rows || [];
-    const results = [];
-
-    for (const item of items) {
-      if (item.status !== 'PENDING') continue;
-
-      if (item.destination_type !== 'MSISDN') {
-        const updated = await pool.query(
-          `
-            UPDATE payout_items
-            SET status = 'BLOCKED',
-                block_reason = 'B2B_NOT_SUPPORTED'
-            WHERE id = $1 AND status = 'PENDING'
-            RETURNING *
-          `,
-          [item.id],
-        );
-        if (updated.rows.length) {
-          await insertPayoutEvent({
-            batchId,
-            itemId: item.id,
-            actorId: req.user?.id || null,
-            eventType: 'ITEM_BLOCKED',
-            message: 'Manual transfer required (B2B not supported)',
-            meta: { reason: 'B2B_NOT_SUPPORTED' },
-          });
-          results.push({ id: item.id, status: 'BLOCKED' });
-        }
-        continue;
-      }
-
-      const claim = await pool.query(
-        `
-          UPDATE payout_items
-          SET status = 'SENT',
-              provider_request_id = $2,
-              provider_conversation_id = NULL,
-              updated_at = now()
-          WHERE id = $1 AND status = 'PENDING'
-          RETURNING *
-        `,
-        [item.id, item.idempotency_key],
-      );
-      if (!claim.rows.length) continue;
-
+    if (isQueueEnabled()) {
       try {
-        const b2cRes = await sendB2CPayout({
-          payoutItemId: item.id,
-          amount: item.amount,
-          phoneNumber: item.destination_ref,
-          idempotencyKey: item.idempotency_key,
-        });
-        if (b2cRes.providerRequestId || b2cRes.conversationId || b2cRes.originatorConversationId) {
-          await pool.query(
-            `
-              UPDATE payout_items
-              SET provider_request_id = COALESCE($2, provider_request_id),
-                  provider_conversation_id = COALESCE($3, provider_conversation_id)
-              WHERE id = $1
-            `,
-            [item.id, b2cRes.providerRequestId || null, b2cRes.conversationId || null],
-          );
-        }
-        await insertPayoutEvent({
-          batchId,
-          itemId: item.id,
-          actorId: req.user?.id || null,
-          eventType: 'ITEM_SENT',
-          message: 'B2C payout sent',
-          meta: {
-            provider_request_id: b2cRes.providerRequestId || null,
-            provider_conversation_id: b2cRes.conversationId || null,
-            response: b2cRes.response,
-          },
-        });
-        results.push({ id: item.id, status: 'SENT' });
-      } catch (err) {
-        await pool.query(
-          `
-            UPDATE payout_items
-            SET status = 'FAILED',
-                failure_reason = $2
-            WHERE id = $1
-          `,
-          [item.id, err.message || 'B2C send failed'],
+        const job = await enqueueJob(
+          'PAYOUT_BATCH_PROCESS',
+          { batchId, actorUserId: req.user?.id || null, actorRole },
+          { jobId },
         );
-        await insertPayoutEvent({
-          batchId,
-          itemId: item.id,
-          actorId: req.user?.id || null,
-          eventType: 'ITEM_FAILED',
-          message: 'B2C send failed',
-          meta: { error: err.message },
+        await logAdminAction({
+          req,
+          action: 'payout_batch_process_enqueued',
+          resource_type: 'payout_batch',
+          resource_id: batchId,
+          payload: { sacco_id: batch.sacco_id, total_amount: batch.total_amount, job_id: job.id },
         });
-        await createOpsAlert({
-          type: 'PAYOUT_ITEM_FAILED',
-          severity: 'WARN',
-          entity_type: 'SACCO',
-          entity_id: String(batch.sacco_id || ''),
-          payment_id: null,
-          message: 'B2C payout send failed.',
-          meta: { batch_id: batchId, item_id: item.id, error: err.message },
-        });
-        results.push({ id: item.id, status: 'FAILED' });
+        return res.status(202).json({ ok: true, job_id: job.id, batch_id: batchId, mode: 'queued' });
+      } catch (err) {
+        if (err.message !== 'queue_disabled') {
+          return res.status(500).json({ ok: false, error: err.message });
+        }
       }
     }
 
-    const updatedBatch = await updateBatchStatusFromItems({
+    const result = await processPayoutBatch({
       batchId,
-      actorId: req.user?.id || null,
+      actorUserId: req.user?.id || null,
+      actorRole,
+      requestId: req.requestId || null,
     });
-
-    await logAdminAction({
-      req,
-      action: 'payout_batch_process',
-      resource_type: 'payout_batch',
-      resource_id: batchId,
-      payload: { sacco_id: batch.sacco_id, total_amount: batch.total_amount },
-    });
-
-    return res.json({ ok: true, results, batch_status: updatedBatch?.status || 'PROCESSING' });
+    return res.json({ ok: true, mode: 'inline', ...result });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
   }
@@ -1873,6 +2135,13 @@ router.post('/register-sacco', async (req,res)=>{
   } catch (e) {
     return res.status(500).json({ error: 'SACCO created but wallet failed: ' + e.message });
   }
+  await logAdminAction({
+    req,
+    action: 'sacco_register',
+    resource_type: 'sacco',
+    resource_id: result.id,
+    payload: { name: result.name, operator_type: result.operator_type, created_user: result.created_user || null },
+  });
   res.json(result);
 });
 router.post('/update-sacco', async (req,res)=>{
@@ -1888,11 +2157,25 @@ router.post('/update-sacco', async (req,res)=>{
   }
   const { data, error } = await supabaseAdmin.from('saccos').update(rest).eq('id',id).select().single();
   if (error) return res.status(500).json({ error: error.message });
+  await logAdminAction({
+    req,
+    action: 'sacco_update',
+    resource_type: 'sacco',
+    resource_id: id,
+    payload: rest,
+  });
   res.json(data);
 });
-router.delete('/delete-sacco/:id', async (req,res)=>{
+router.delete('/delete-sacco/:id', requireSuperOnly, async (req,res)=>{
   const { error } = await supabaseAdmin.from('saccos').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
+  await logAdminAction({
+    req,
+    action: 'sacco_delete',
+    resource_type: 'sacco',
+    resource_id: req.params.id,
+    payload: {},
+  });
   res.json({ deleted: 1 });
 });
 
@@ -2042,6 +2325,14 @@ router.post('/register-matatu', async (req,res)=>{
       }
       await client.query('COMMIT');
 
+      await logAdminAction({
+        req,
+        action: 'matatu_register',
+        resource_type: normalizedType === 'BODABODA' ? 'boda' : 'matatu',
+        resource_id: data.id,
+        payload: { sacco_id: data.sacco_id || null, vehicle_type: normalizedType, number_plate: data.number_plate },
+      });
+
       res.json({
         ...data,
         wallet_id: primaryWallet?.id || null,
@@ -2084,11 +2375,26 @@ router.post('/update-matatu', async (req,res)=>{
     }
   }
 
+  await logAdminAction({
+    req,
+    action: 'matatu_update',
+    resource_type: 'matatu',
+    resource_id: id,
+    payload: rest,
+  });
+
   res.json(data);
 });
-router.delete('/delete-matatu/:id', async (req,res)=>{
+router.delete('/delete-matatu/:id', requireSuperOnly, async (req,res)=>{
   const { error } = await supabaseAdmin.from('matatus').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
+  await logAdminAction({
+    req,
+    action: 'matatu_delete',
+    resource_type: 'matatu',
+    resource_id: req.params.id,
+    payload: {},
+  });
   res.json({ deleted: 1 });
 });
 
@@ -2268,6 +2574,14 @@ router.post('/register-shuttle', async (req,res)=>{
     return res.status(500).json({ error: 'Shuttle created but wallet failed: ' + e.message });
   }
 
+  await logAdminAction({
+    req,
+    action: 'shuttle_register',
+    resource_type: 'shuttle',
+    resource_id: data.id,
+    payload: { operator_id: operatorId, plate, vehicle_type: vehicleType },
+  });
+
   res.json({ ...data, owner: ownerData, paybill_codes: paybillCodes, plate_alias: plateAlias });
 });
 router.post('/update-shuttle', async (req,res)=>{
@@ -2356,11 +2670,25 @@ router.post('/update-shuttle', async (req,res)=>{
     .eq('id', id)
     .single();
   if (error) return res.status(500).json({ error: error.message });
+  await logAdminAction({
+    req,
+    action: 'shuttle_update',
+    resource_type: 'shuttle',
+    resource_id: id,
+    payload: { operator_id: operatorId, plate, vehicle_type: vehicleType },
+  });
   res.json(data);
 });
-router.delete('/delete-shuttle/:id', async (req,res)=>{
+router.delete('/delete-shuttle/:id', requireSuperOnly, async (req,res)=>{
   const { error } = await supabaseAdmin.from('shuttles').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
+  await logAdminAction({
+    req,
+    action: 'shuttle_delete',
+    resource_type: 'shuttle',
+    resource_id: req.params.id,
+    payload: {},
+  });
   res.json({ deleted: 1 });
 });
 
@@ -2459,6 +2787,13 @@ router.post('/register-taxi', async (req,res)=>{
         client,
       });
       await client.query('COMMIT');
+      await logAdminAction({
+        req,
+        action: 'taxi_register',
+        resource_type: 'taxi',
+        resource_id: data.id,
+        payload: { operator_id: operatorId, plate, category },
+      });
       return res.json({
         ...data,
         owner: ownerData,
@@ -2548,11 +2883,25 @@ router.post('/update-taxi', async (req,res)=>{
     .eq('id', id)
     .single();
   if (error) return res.status(500).json({ error: error.message });
+  await logAdminAction({
+    req,
+    action: 'taxi_update',
+    resource_type: 'taxi',
+    resource_id: id,
+    payload: { operator_id: operatorId, plate, category },
+  });
   res.json(data);
 });
-router.delete('/delete-taxi/:id', async (req,res)=>{
+router.delete('/delete-taxi/:id', requireSuperOnly, async (req,res)=>{
   const { error } = await supabaseAdmin.from('taxis').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
+  await logAdminAction({
+    req,
+    action: 'taxi_delete',
+    resource_type: 'taxi',
+    resource_id: req.params.id,
+    payload: {},
+  });
   res.json({ deleted: 1 });
 });
 
@@ -2634,6 +2983,13 @@ router.post('/register-boda', async (req,res)=>{
         client,
       });
       await client.query('COMMIT');
+      await logAdminAction({
+        req,
+        action: 'boda_register',
+        resource_type: 'boda_bike',
+        resource_id: data.id,
+        payload: { operator_id: operatorId, identifier, rider_id: riderData.id },
+      });
       return res.json({
         ...data,
         rider: riderData,
@@ -2706,11 +3062,25 @@ router.post('/update-boda', async (req,res)=>{
     .eq('id', id)
     .single();
   if (error) return res.status(500).json({ error: error.message });
+  await logAdminAction({
+    req,
+    action: 'boda_update',
+    resource_type: 'boda_bike',
+    resource_id: id,
+    payload: { operator_id: operatorId, identifier },
+  });
   res.json(data);
 });
-router.delete('/delete-boda/:id', async (req,res)=>{
+router.delete('/delete-boda/:id', requireSuperOnly, async (req,res)=>{
   const { error } = await supabaseAdmin.from('boda_bikes').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
+  await logAdminAction({
+    req,
+    action: 'boda_delete',
+    resource_type: 'boda_bike',
+    resource_id: req.params.id,
+    payload: {},
+  });
   res.json({ deleted: 1 });
 });
 
@@ -2938,6 +3308,13 @@ router.post('/user-roles/create-user', async (req,res)=>{
     }
     const { userId } = await ensureAuthUser(email, password);
     await upsertUserRole({ user_id: userId, role, sacco_id: saccoId, matatu_id: resolvedMatatuId });
+    await logAdminAction({
+      req,
+      action: 'user_role_create',
+      resource_type: 'user_role',
+      resource_id: userId,
+      payload: { role, sacco_id: saccoId, matatu_id: resolvedMatatuId },
+    });
     res.json({ user_id: userId, role, sacco_id: saccoId, matatu_id: resolvedMatatuId });
   }catch(e){
     res.status(500).json({ error: e.message || 'Failed to create role user' });
@@ -3017,13 +3394,20 @@ router.post('/user-roles/update', async (req,res)=>{
       if (error) throw error;
     }
 
+    await logAdminAction({
+      req,
+      action: 'user_role_update',
+      resource_type: 'user_role',
+      resource_id: userId,
+      payload: { role: nextRole || null, sacco_id: saccoId, matatu_id: update.matatu_id || matatuId || null },
+    });
     res.json({ ok:true });
   }catch(e){
     res.status(500).json({ error: e.message || 'Failed to update login' });
   }
 });
 
-router.delete('/user-roles/:user_id', async (req,res)=>{
+router.delete('/user-roles/:user_id', requireSuperOnly, async (req,res)=>{
   const userId = req.params.user_id;
   if (!userId) return res.status(400).json({ error:'user_id required' });
   const removeAuth = String(req.query.remove_user || '').toLowerCase() === 'true';
@@ -3035,6 +3419,13 @@ router.delete('/user-roles/:user_id', async (req,res)=>{
         await supabaseAdmin.auth.admin.deleteUser(userId);
       }catch(_){ /* ignore */ }
     }
+    await logAdminAction({
+      req,
+      action: 'user_role_delete',
+      resource_type: 'user_role',
+      resource_id: userId,
+      payload: { remove_auth: removeAuth },
+    });
     res.json({ ok:true });
   }catch(e){
     res.status(500).json({ error: e.message || 'Failed to delete login' });
@@ -3193,6 +3584,13 @@ router.post('/ussd/pool/assign-next', async (req,res)=>{
   const upd = { status:'ALLOCATED', allocated_at: new Date().toISOString(), allocated_to_type: req.body?.level||'MATATU', allocated_to_id: req.body?.matatu_id || req.body?.sacco_id || null };
   const { error: ue } = await supabaseAdmin.from('ussd_pool').update(upd).eq('id', row.id);
   if (ue) return res.status(500).json({ error: ue.message });
+  await logAdminAction({
+    req,
+    action: 'ussd_assign',
+    resource_type: 'ussd_code',
+    resource_id: row.id,
+    payload: { full_code: row.full_code, allocated_to_type: upd.allocated_to_type, allocated_to_id: upd.allocated_to_id },
+  });
   res.json({ success:true, ussd_code: row.full_code });
 });
 router.post('/ussd/bind-from-pool', async (req,res)=>{
@@ -3203,6 +3601,13 @@ router.post('/ussd/bind-from-pool', async (req,res)=>{
   const upd = { status:'ALLOCATED', allocated_at: new Date().toISOString(), allocated_to_type: req.body?.level||'MATATU', allocated_to_id: req.body?.matatu_id || req.body?.sacco_id || null };
   const { error: ue } = await supabaseAdmin.from('ussd_pool').update(upd).eq('id', row.id);
   if (ue) return res.status(500).json({ success:false, error: ue.message });
+  await logAdminAction({
+    req,
+    action: 'ussd_bind',
+    resource_type: 'ussd_code',
+    resource_id: row.id,
+    payload: { full_code: code, allocated_to_type: upd.allocated_to_type, allocated_to_id: upd.allocated_to_id },
+  });
   res.json({ success:true, ussd_code: code });
 });
 
@@ -3218,6 +3623,13 @@ router.post('/ussd/pool/release', async (req,res)=>{
   const { data, error } = await q.select().maybeSingle();
   if (error) return res.status(500).json({ success:false, error: error.message });
   if (!data) return res.status(404).json({ success:false, error:'code not found' });
+  await logAdminAction({
+    req,
+    action: 'ussd_release',
+    resource_type: 'ussd_code',
+    resource_id: data.id,
+    payload: { full_code: data.full_code },
+  });
   res.json({ success:true, ussd_code: data.full_code });
 });
 
@@ -3273,6 +3685,14 @@ router.post('/ussd/pool/import', async (req,res)=>{
     const { error } = await supabaseAdmin.from('ussd_pool').insert(toInsert);
     if (error) return res.status(500).json({ ok:false, error: error.message, errors });
   }
+
+  await logAdminAction({
+    req,
+    action: 'ussd_import',
+    resource_type: 'ussd_pool',
+    resource_id: null,
+    payload: { inserted: toInsert.length, skipped: rows.length - toInsert.length, total: rows.length },
+  });
 
   res.json({
     ok: true,
@@ -3502,7 +3922,7 @@ router.patch('/routes/:routeId', async (req,res)=>{
 });
 
 // Delete a route (system admin only)
-router.delete('/routes/:routeId', async (req,res)=>{
+router.delete('/routes/:routeId', requireSuperOnly, async (req,res)=>{
   const routeId = req.params.routeId;
   if (!routeId) return res.status(400).json({ error: 'routeId required' });
   try{
@@ -3511,6 +3931,13 @@ router.delete('/routes/:routeId', async (req,res)=>{
       .delete()
       .eq('id', routeId);
     if (error) return res.status(500).json({ error: error.message });
+    await logAdminAction({
+      req,
+      action: 'route_delete',
+      resource_type: 'route',
+      resource_id: routeId,
+      payload: {},
+    });
     return res.json({ ok:true });
   }catch(e){
     res.status(500).json({ error: e.message || 'Failed to delete route' });

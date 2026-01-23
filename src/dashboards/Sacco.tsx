@@ -255,6 +255,7 @@ type SaccoTabId =
   | 'staff'
   | 'routes'
   | 'vehicle_care'
+  | 'intelligence'
 
 function fmtKES(v: number | undefined | null) {
   return `KES ${(Number(v || 0)).toLocaleString('en-KE')}`
@@ -309,6 +310,9 @@ export default function SaccoDashboard() {
   const [statusMsg, setStatusMsg] = useState('Loading organizations...')
   const [activeTab, setActiveTab] = useState<SaccoTabId>('overview')
   const [timeLabel, setTimeLabel] = useState('')
+  const [intelData, setIntelData] = useState<any | null>(null)
+  const [intelLoading, setIntelLoading] = useState(false)
+  const [intelError, setIntelError] = useState<string | null>(null)
 
   const [fromDate, setFromDate] = useState(todayIso())
   const [toDate, setToDate] = useState(todayIso())
@@ -499,6 +503,7 @@ export default function SaccoDashboard() {
     items.push({ id: 'staff', label: 'Staff' })
     items.push({ id: 'routes', label: routesLabel })
     items.push({ id: 'vehicle_care', label: 'Vehicle Care' })
+    items.push({ id: 'intelligence', label: 'Intelligence' })
     return items
   }, [feeLabel, isOperatorAdmin, memberLabel, routesLabel])
   const showFilters = true
@@ -941,6 +946,29 @@ export default function SaccoDashboard() {
       void loadLedger()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, currentSacco])
+
+  useEffect(() => {
+    if (activeTab !== 'intelligence' || !currentSacco) return
+    let cancelled = false
+    const run = async () => {
+      setIntelLoading(true)
+      setIntelError(null)
+      try {
+        const res = await authFetch('/api/sacco/intelligence/overview')
+        if (!res.ok) throw new Error(await res.text())
+        const json = await res.json()
+        if (!cancelled) setIntelData(json || {})
+      } catch (err) {
+        if (!cancelled) setIntelError(err instanceof Error ? err.message : 'Failed to load intelligence')
+      } finally {
+        if (!cancelled) setIntelLoading(false)
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
   }, [activeTab, currentSacco])
 
   const filteredTx = useMemo(() => {
@@ -4661,6 +4689,93 @@ export default function SaccoDashboard() {
       </section>
       ) : null}
 
+      {activeTab === 'intelligence' ? (
+        <section className="card">
+          <div className="topline" style={{ flexWrap: 'wrap', gap: 8 }}>
+            <div>
+              <h3 style={{ margin: 0 }}>Intelligence</h3>
+              <div className="muted small">Performance and risk signals for this SACCO</div>
+            </div>
+            {intelLoading ? <span className="muted small">Loading...</span> : null}
+            {intelError ? <span className="err">{intelError}</span> : null}
+          </div>
+          {!intelData ? (
+            <div className="muted small" style={{ marginTop: 8 }}>
+              {intelLoading ? 'Loading...' : intelError || 'No data'}
+            </div>
+          ) : (
+            <>
+              <div className="row" style={{ flexWrap: 'wrap', gap: 12, marginTop: 8 }}>
+                <div className="card" style={{ padding: 10 }}>
+                  <div className="muted tiny">Vehicles</div>
+                  <div style={{ fontWeight: 600 }}>
+                    {intelData?.fleet?.active_vehicles ?? 0}/{intelData?.fleet?.vehicles_total ?? 0} active
+                  </div>
+                </div>
+                <div className="card" style={{ padding: 10 }}>
+                  <div className="muted tiny">Daily fees</div>
+                  <div style={{ fontWeight: 600 }}>{intelData?.collections?.daily_fees_total ?? 0}</div>
+                </div>
+                <div className="card" style={{ padding: 10 }}>
+                  <div className="muted tiny">Savings</div>
+                  <div style={{ fontWeight: 600 }}>{intelData?.collections?.savings_total ?? 0}</div>
+                </div>
+                <div className="card" style={{ padding: 10 }}>
+                  <div className="muted tiny">Loan repayments</div>
+                  <div style={{ fontWeight: 600 }}>{intelData?.collections?.loans_repaid_total ?? 0}</div>
+                </div>
+              </div>
+              <div className="row" style={{ flexWrap: 'wrap', gap: 12, marginTop: 12 }}>
+                <div className="card" style={{ padding: 10 }}>
+                  <div className="muted tiny">Payments success</div>
+                  <div style={{ fontWeight: 600 }}>{intelData?.payments?.success_rate ?? 0}%</div>
+                  <div className="muted tiny">{intelData?.payments?.c2b_count ?? 0} C2B</div>
+                </div>
+                <div className="card" style={{ padding: 10 }}>
+                  <div className="muted tiny">Open alerts</div>
+                  <div style={{ fontWeight: 600 }}>{intelData?.risk?.open_alerts ?? 0}</div>
+                  <div className="muted tiny">High: {intelData?.risk?.high_alerts ?? 0}</div>
+                </div>
+                <div className="card" style={{ padding: 10 }}>
+                  <div className="muted tiny">Recon exceptions</div>
+                  <div style={{ fontWeight: 600 }}>{intelData?.risk?.recon_exceptions ?? 0}</div>
+                </div>
+              </div>
+              <div className="topline" style={{ marginTop: 12 }}>
+                <h4 style={{ margin: 0 }}>Top vehicles</h4>
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Vehicle</th>
+                      <th>Volume</th>
+                      <th>Tx</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(intelData?.performance?.top_vehicles || []).length === 0 ? (
+                      <tr>
+                        <td colSpan={3} className="muted">
+                          No data.
+                        </td>
+                      </tr>
+                    ) : (
+                      (intelData?.performance?.top_vehicles || []).map((v: any) => (
+                        <tr key={v.id}>
+                          <td>{v.name || v.id}</td>
+                          <td>{v.volume ?? 0}</td>
+                          <td>{v.tx_count ?? 0}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </section>
+      ) : null}
 
     </DashboardShell>
   )

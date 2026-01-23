@@ -45,6 +45,38 @@ type AdminAuditLog = {
 
 type Alert = { message: string; to: string }
 
+type CallbackSummaryRow = {
+  kind?: string
+  result?: string | null
+  count?: number
+}
+
+type CallbackEvent = {
+  created_at?: string
+  kind?: string
+  resource_id?: string | null
+  payload?: { [k: string]: any }
+}
+
+type ReconRun = {
+  id?: string
+  created_at?: string
+  from_ts?: string
+  to_ts?: string
+  totals?: Record<string, any>
+}
+
+type ReconException = {
+  id?: string
+  kind?: string
+  provider_ref?: string
+  internal_ref?: string | null
+  amount?: number | null
+  status?: string
+  details?: Record<string, any>
+  created_at?: string
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await authFetch(url, { headers: { Accept: 'application/json' } })
   if (!res.ok) {
@@ -68,6 +100,12 @@ export default function OverviewPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [auditError, setAuditError] = useState<string | null>(null)
+  const [callbackSummary, setCallbackSummary] = useState<CallbackSummaryRow[]>([])
+  const [callbackEvents, setCallbackEvents] = useState<CallbackEvent[]>([])
+  const [callbackError, setCallbackError] = useState<string | null>(null)
+  const [reconRuns, setReconRuns] = useState<ReconRun[]>([])
+  const [reconExceptions, setReconExceptions] = useState<ReconException[]>([])
+  const [reconError, setReconError] = useState<string | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
 
   const loadAll = async () => {
@@ -85,6 +123,32 @@ export default function OverviewPage() {
       setAssignments(toList<RegistryAssignment>(assignmentResRaw))
       const auditItems = Array.isArray((auditRes as any)?.items) ? ((auditRes as any).items as AdminAuditLog[]) : []
       setAuditLogs(auditItems.slice(0, 20))
+      try {
+        const [summaryRes, eventsRes] = await Promise.all([
+          authFetch('/api/admin/callback-audit/summary?from=&to='),
+          authFetch('/api/admin/callback-audit/events?limit=10&result=failure'),
+        ])
+        if (summaryRes.status === 403 || eventsRes.status === 403) {
+          setCallbackError('Not permitted')
+        } else {
+          if (!summaryRes.ok) {
+            throw new Error(await summaryRes.text())
+          }
+          if (!eventsRes.ok) {
+            throw new Error(await eventsRes.text())
+          }
+          const summaryJson = (await summaryRes.json()) as { rows?: CallbackSummaryRow[] }
+          const eventsJson = (await eventsRes.json()) as { items?: CallbackEvent[] }
+        setCallbackSummary(summaryJson.rows || [])
+        setCallbackEvents(eventsJson.items || [])
+        setCallbackError(null)
+      }
+    } catch (cbErr) {
+        const msg = cbErr instanceof Error ? cbErr.message : 'Failed to load callback audit'
+        setCallbackError(msg)
+        setCallbackSummary([])
+        setCallbackEvents([])
+      }
       setLastUpdated(new Date())
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load overview'
@@ -92,6 +156,30 @@ export default function OverviewPage() {
       setAuditError(err instanceof Error ? err.message : 'Failed to load audit')
     } finally {
       setLoading(false)
+    }
+
+    // Reconciliation data (ignore errors separately)
+    try {
+      const [runsRes, excRes] = await Promise.all([
+        authFetch('/api/admin/reconciliation/runs?limit=1'),
+        authFetch('/api/admin/reconciliation/exceptions?limit=10'),
+      ])
+      if (runsRes.status === 403 || excRes.status === 403) {
+        setReconError('Not permitted')
+      } else {
+        if (!runsRes.ok) throw new Error(await runsRes.text())
+        if (!excRes.ok) throw new Error(await excRes.text())
+        const runsJson = (await runsRes.json()) as { items?: ReconRun[] }
+        const excJson = (await excRes.json()) as { items?: ReconException[] }
+        setReconRuns(runsJson.items || [])
+        setReconExceptions(excJson.items || [])
+        setReconError(null)
+      }
+    } catch (rErr) {
+      const msg = rErr instanceof Error ? rErr.message : 'Failed to load reconciliation'
+      setReconError(msg)
+      setReconRuns([])
+      setReconExceptions([])
     }
   }
 
@@ -171,6 +259,22 @@ export default function OverviewPage() {
 
   const statusLabel = loading ? 'Loading' : error ? 'Error' : 'Healthy'
 
+  const callbackCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      accepted: 0,
+      duplicate: 0,
+      ignored: 0,
+      failure: 0,
+      rejected: 0,
+    }
+    callbackSummary.forEach((row) => {
+      const key = (row.result || '').toLowerCase()
+      const target = key === 'rejected' ? 'failure' : key
+      counts[target] = (counts[target] || 0) + (row.count || 0)
+    })
+    return counts
+  }, [callbackSummary])
+
   return (
     <div className="stack">
       <SystemPageHeader
@@ -237,6 +341,167 @@ export default function OverviewPage() {
             ))}
           </ul>
         )}
+      </section>
+
+      <section className="card">
+        <div className="topline">
+          <h3 style={{ margin: 0 }}>M-Pesa callback health</h3>
+          <span className="muted small">Last 24h</span>
+        </div>
+      {callbackError ? (
+        <div className="muted small">Callback data unavailable: {callbackError}</div>
+      ) : (
+        <>
+          <div className="grid metrics">
+              {['accepted', 'duplicate', 'ignored', 'failure'].map((key) => (
+                <div key={key} className="metric">
+                  <div className="k">{key}</div>
+                  <div className="v">{callbackCounts[key] ?? 0}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <div className="muted small" style={{ marginBottom: 6 }}>
+                Recent failures (up to 10)
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>When</th>
+                      <th>Kind</th>
+                      <th>Reason</th>
+                      <th>Key</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {callbackEvents.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="muted">
+                          No recent failures.
+                        </td>
+                      </tr>
+                    ) : (
+                      callbackEvents.map((evt, idx) => {
+                        const reason =
+                          evt.payload?.reason ||
+                          evt.payload?.error ||
+                          evt.payload?.error_code ||
+                          evt.payload?.code ||
+                          '-'
+                        const when = evt.created_at ? new Date(evt.created_at).toLocaleString() : '-'
+                        const key = evt.resource_id || evt.payload?.key || evt.payload?.idempotency_key || '-'
+                        return (
+                          <tr key={evt.resource_id || evt.created_at || idx}>
+                            <td className="mono">{when}</td>
+                            <td>{evt.kind || '-'}</td>
+                            <td>{reason}</td>
+                            <td className="mono">{key}</td>
+                          </tr>
+                        )
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+      </section>
+
+      <section className="card">
+        <div className="topline">
+          <h3 style={{ margin: 0 }}>Reconciliation health</h3>
+          <span className="muted small">Last run + exceptions</span>
+        </div>
+        {reconError ? <div className="muted small">Recon data unavailable: {reconError}</div> : null}
+        <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={async () => {
+              const now = new Date();
+              const from = new Date(now.getTime() - 24 * 3600 * 1000).toISOString();
+              const to = now.toISOString();
+              try {
+                const res = await authFetch('/api/admin/reconciliation/run', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ from, to }),
+                });
+                if (res.status === 403) {
+                  setReconError('Not permitted');
+                  return;
+                }
+                if (!res.ok) throw new Error(await res.text());
+                setReconError(null);
+                void loadAll();
+              } catch (err) {
+                setReconError(err instanceof Error ? err.message : 'Failed to run reconciliation');
+              }
+            }}
+          >
+            Run last 24h
+          </button>
+          {reconRuns[0]?.created_at ? (
+            <span className="muted small">
+              Last run: {new Date(reconRuns[0].created_at || '').toLocaleString()}
+            </span>
+          ) : (
+            <span className="muted small">No runs yet</span>
+          )}
+        </div>
+        <div className="grid metrics" style={{ marginTop: 8 }}>
+          {['C2B', 'STK', 'B2C'].map((k) => (
+            <div key={k} className="metric">
+              <div className="k">{k} unmatched/failed</div>
+              <div className="v">
+                {((reconRuns[0]?.totals || {})[k]?.missing_internal || 0) +
+                  ((reconRuns[0]?.totals || {})[k]?.mismatch_amount || 0) +
+                  ((reconRuns[0]?.totals || {})[k]?.duplicate || 0)}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <div className="muted small" style={{ marginBottom: 6 }}>
+            Recent exceptions (top 10)
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Kind</th>
+                  <th>Status</th>
+                  <th>Provider ref</th>
+                  <th>Internal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reconExceptions.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="muted">
+                      No exceptions.
+                    </td>
+                  </tr>
+                ) : (
+                  reconExceptions.map((ex) => (
+                    <tr key={ex.id || ex.provider_ref}>
+                      <td className="mono">
+                        {ex.created_at ? new Date(ex.created_at).toLocaleString() : '-'}
+                      </td>
+                      <td>{ex.kind || '-'}</td>
+                      <td>{ex.status || '-'}</td>
+                      <td className="mono">{ex.provider_ref || '-'}</td>
+                      <td className="mono">{ex.internal_ref || '-'}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </section>
 
       <section className="card">

@@ -1,4 +1,5 @@
 const express = require('express');
+const express = require('express');
 const fetch = require('node-fetch');
 const { supabaseAdmin } = require('../supabase');
 const pool = require('../db/pool');
@@ -6,6 +7,7 @@ const { creditFareWithFeesByWalletId } = require('../wallet/wallet.service');
 const { normalizeRef, isPlateRef, resolveWalletByRef } = require('../wallet/wallet.aliases');
 const { applyRiskRules } = require('../mpesa/c2bRisk');
 const { normalizeMsisdn, maskMsisdn, extractMsisdnFromRaw } = require('../utils/msisdn');
+const { ensureIdempotent, validateRequired, safeAck, logCallbackAudit } = require('../services/callbackHardening.service');
 const router = express.Router();
 const WEBHOOK_SECRET = process.env.DARAJA_WEBHOOK_SECRET || null;
 
@@ -136,7 +138,10 @@ router.post('/stk/callback', async (req,res)=>{
   try {
     // Parse common Daraja STK callback shape
     const cb = body?.Body?.stkCallback;
-    if (!cb) return res.status(200).json({ ok: true });
+    if (!cb) {
+      await logCallbackAudit({ req, key: null, kind: 'STK_CALLBACK', result: 'ignored', reason: 'missing_callback' });
+      return safeAck(res, { ok: true, ignored: true, reason: 'missing_callback' });
+    }
 
     const resultCode = cb?.ResultCode;
     const checkoutRequestId = cb?.CheckoutRequestID || null;
@@ -150,6 +155,38 @@ router.post('/stk/callback', async (req,res)=>{
     const displayMsisdn = maskMsisdn(normalizedMsisdn);
     const msisdnSource = msisdnRaw ? 'mpesa' : 'missing';
     const msisdnValue = normalizedMsisdn || msisdnRaw || 'unknown';
+
+    const validation = validateRequired({ checkoutRequestId }, ['checkoutRequestId']);
+    if (!validation.ok) {
+      await logCallbackAudit({
+        req,
+        key: checkoutRequestId || null,
+        kind: 'STK_CALLBACK',
+        result: 'ignored',
+        reason: 'invalid_payload',
+        payload: { missing: validation.missing },
+      });
+      return safeAck(res, { ok: true, ignored: true, reason: 'invalid_payload', missing: validation.missing });
+    }
+
+    const idempotencyKey = receipt || checkoutRequestId || null;
+    if (idempotencyKey) {
+      const idem = await ensureIdempotent({
+        kind: 'STK_CALLBACK',
+        key: idempotencyKey,
+        payload: { checkoutRequestId, receipt, resultCode },
+      });
+      if (!idem.firstTime) {
+        await logCallbackAudit({
+          req,
+          key: idempotencyKey,
+          kind: 'STK_CALLBACK',
+          result: 'ignored',
+          reason: 'duplicate',
+        });
+        return safeAck(res, { ok: true, duplicate_ignored: true });
+      }
+    }
 
     let paymentRow = null;
     if (checkoutRequestId) {
@@ -257,7 +294,14 @@ router.post('/stk/callback', async (req,res)=>{
         console.warn('Failed to quarantine STK webhook mismatch:', err.message);
       }
 
-      return res.status(200).json({ ok: true });
+      await logCallbackAudit({
+        req,
+        key: checkoutRequestId || receipt || null,
+        kind: 'STK_CALLBACK',
+        result: 'ignored',
+        reason: 'secret_mismatch',
+      });
+      return safeAck(res, { ok: true, ignored: true, reason: 'secret_mismatch' });
     }
 
     if (paymentRow) {
@@ -533,10 +577,24 @@ router.post('/stk/callback', async (req,res)=>{
       client.release();
     }
 
-    return res.status(200).json({ ok: true });
+    await logCallbackAudit({
+      req,
+      key: idempotencyKey || sourceRef || checkoutRequestId || null,
+      kind: 'STK_CALLBACK',
+      result: 'accepted',
+    });
+    return safeAck(res, { ok: true });
   } catch (err) {
     console.error('STK callback error:', err.message);
-    return res.status(200).json({ ok: true });
+    await logCallbackAudit({
+      req,
+      key: null,
+      kind: 'STK_CALLBACK',
+      result: 'rejected',
+      reason: 'server_error',
+      payload: { error: err.message },
+    });
+    return safeAck(res, { ok: true, accepted: false, error: 'server_error' });
   }
 });
 

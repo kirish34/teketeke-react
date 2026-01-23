@@ -1158,6 +1158,7 @@ const SystemDashboard = ({
   const [payoutApprovalRows, setPayoutApprovalRows] = useState<PayoutBatchRow[]>([])
   const [payoutApprovalError, setPayoutApprovalError] = useState<string | null>(null)
   const [payoutApprovalMsg, setPayoutApprovalMsg] = useState('')
+  const [payoutJobId, setPayoutJobId] = useState('')
   const [payoutApprovalSelected, setPayoutApprovalSelected] = useState('')
   const [payoutApprovalDetail, setPayoutApprovalDetail] = useState<PayoutBatchRow | null>(null)
   const [payoutApprovalItems, setPayoutApprovalItems] = useState<PayoutItemRow[]>([])
@@ -3520,9 +3521,19 @@ const SystemDashboard = ({
       return
     }
     setPayoutApprovalMsg('Processing batch...')
+    setPayoutJobId('')
     try {
-      await sendJson(`/api/admin/payout-batches/${encodeURIComponent(batchId)}/process`, 'POST', {})
-      setPayoutApprovalMsg('Processing started')
+      const res = await sendJson<{ ok?: boolean; job_id?: string; mode?: string }>(
+        `/api/admin/payout-batches/${encodeURIComponent(batchId)}/process`,
+        'POST',
+        {},
+      )
+      if (res?.job_id) {
+        setPayoutJobId(res.job_id)
+        setPayoutApprovalMsg(`Queued payout batch. Job ${res.job_id}`)
+      } else {
+        setPayoutApprovalMsg(res?.mode === 'inline' ? 'Processed inline' : 'Processing started')
+      }
       await loadPayoutApprovals()
       await loadPayoutApprovalDetail(batchId)
     } catch (err) {
@@ -8299,6 +8310,16 @@ const SystemDashboard = ({
                   Reload
                 </button>
                 <span className="muted small">{payoutApprovalMsg}</span>
+                {payoutJobId ? (
+                  <a
+                    className="btn ghost"
+                    href={`/api/admin/jobs/${encodeURIComponent(payoutJobId)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    View job {payoutJobId}
+                  </a>
+                ) : null}
                 {payoutApprovalError ? <span className="err">{payoutApprovalError}</span> : null}
               </div>
             </div>

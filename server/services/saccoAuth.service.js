@@ -171,7 +171,7 @@ function requireSaccoMembership({ allowRoles = [], allowStaff = true } = {}) {
         request_id: req.requestId || null,
         details: {
           user_id: userId,
-          role,
+          role: normalizedRole,
           requested_sacco_id: requested,
           active_sacco_id: ctx.active_sacco_id,
           allowed_sacco_ids: ctx.allowed_sacco_ids,

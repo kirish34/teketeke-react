@@ -5,6 +5,10 @@ import { useAuth } from '../../state/auth'
 const systemLinks = [
   { to: '/system', label: 'Overview', end: true },
   { to: '/system/analytics', label: 'Analytics' },
+  { to: '/system/monitoring', label: 'Monitoring' },
+  { to: '/system/intelligence', label: 'Intelligence' },
+  { to: '/system/alerts', label: 'Alerts' },
+  { to: '/system/quarantine', label: 'Quarantine' },
   { to: '/system/operators', label: 'Operators' },
   { to: '/system/payments', label: 'Payments' },
   { to: '/system/finance', label: 'Finance' },

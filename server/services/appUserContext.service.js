@@ -1,4 +1,4 @@
-const pool = require('../db/pool');
+const pool = process.env.NODE_ENV === 'test' && global.__testPool ? global.__testPool : require('../db/pool');
 
 const ROLE_MAP = {
   SYSTEM_ADMIN: 'SYSTEM_ADMIN',

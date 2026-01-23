@@ -19,6 +19,10 @@ import PaymentsPage from "../pages/system/PaymentsPage";
 import FinancePage from "../pages/system/FinancePage";
 import CommsPage from "../pages/system/CommsPage";
 import RegistryPage from "../pages/system/RegistryPage";
+import MonitoringPage from "../pages/system/MonitoringPage";
+import IntelligencePage from "../pages/system/IntelligencePage";
+import AlertsPage from "../pages/system/AlertsPage";
+import QuarantinePage from "../pages/system/QuarantinePage";
 import OpsDashboard from "../dashboards/Ops";
 import DashHome from "../dashboards/DashHome";
 import SaccoApprovals from "../pages/SaccoApprovals";
@@ -151,6 +155,10 @@ export const routes: RouteObject[] = [
     children: [
       { index: true, element: <OverviewPage /> },
       { path: "analytics", element: <AnalyticsPage /> },
+      { path: "monitoring", element: <MonitoringPage /> },
+      { path: "intelligence", element: <IntelligencePage /> },
+      { path: "alerts", element: <AlertsPage /> },
+      { path: "quarantine", element: <QuarantinePage /> },
       { path: "operators", element: <OperatorsPage /> },
       { path: "payments", element: <PaymentsPage /> },
       { path: "finance", element: <FinancePage /> },

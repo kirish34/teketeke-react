@@ -9,6 +9,13 @@ const { applyRiskRules } = require('../mpesa/c2bRisk');
 const { insertPayoutEvent, updateBatchStatusFromItems } = require('../services/saccoPayouts.service');
 const { createOpsAlert } = require('../services/opsAlerts.service');
 const { normalizeMsisdn, maskMsisdn } = require('../utils/msisdn');
+const {
+  ensureIdempotent,
+  validateRequired,
+  verifyShortcode,
+  safeAck,
+  logCallbackAudit,
+} = require('../services/callbackHardening.service');
 
 const C2B_ACK = { ResultCode: 0, ResultDesc: 'Accepted' };
 const EXPECTED_PAYBILL = process.env.MPESA_C2B_SHORTCODE || process.env.DARAJA_SHORTCODE || null;
@@ -483,11 +490,50 @@ function extractResultValue(result, key) {
   return match ? match.Value ?? match.value ?? null : null;
 }
 
-function handleB2CResult(req, res) {
+async function handleB2CResult(req, res) {
   const body = req.body || {};
   console.log('Received M-Pesa B2C Result:', JSON.stringify(body));
 
-  res.status(200).json({ ResultCode: 0, ResultDesc: 'Received' });
+  const result = body.Result || body.result || body || {};
+  const originator = result.OriginatorConversationID || result.originatorConversationID || null;
+  const conversationId = result.ConversationID || result.conversationID || null;
+  const transactionId =
+    result.TransactionID ||
+    result.transactionID ||
+    extractResultValue(result, 'TransactionReceipt') ||
+    null;
+
+  const idemKey = transactionId || conversationId || originator || null;
+  if (idemKey) {
+    const idem = await ensureIdempotent({
+      kind: 'B2C_RESULT',
+      key: idemKey,
+      payload: { originator, conversationId, transactionId },
+    });
+    if (!idem.firstTime) {
+      await logCallbackAudit({
+        req,
+        key: idemKey,
+        kind: 'B2C_RESULT',
+        result: 'ignored',
+        reason: 'duplicate',
+      });
+      return safeAck(res, { ResultCode: 0, ResultDesc: 'Received', duplicate_ignored: true });
+    }
+  }
+
+  const validation = validateRequired({ conversationId: conversationId || originator }, ['conversationId']);
+  if (!validation.ok) {
+    logCallbackAudit({
+      req,
+      key: idemKey,
+      kind: 'B2C_RESULT',
+      result: 'ignored',
+      reason: 'invalid_payload',
+    });
+  }
+
+  safeAck(res, { ResultCode: 0, ResultDesc: 'Received' });
 
   const webhookSecret = process.env.DARAJA_WEBHOOK_SECRET || null;
   const got = (req.headers && req.headers['x-webhook-secret']) || '';
@@ -544,17 +590,56 @@ function handleB2CResult(req, res) {
           conversationId,
         ],
       );
+
+      await logCallbackAudit({
+        req,
+        key: transactionId || conversationId || originator || null,
+        kind: 'B2C_RESULT',
+        result: 'accepted',
+      });
     } catch (err) {
       console.error('Error processing B2C Result:', err.message);
+      logCallbackAudit({
+        req,
+        key: conversationId || null,
+        kind: 'B2C_RESULT',
+        result: 'rejected',
+        reason: 'server_error',
+        payload: { error: err.message },
+      });
     }
   });
 }
 
-function handleB2CTimeout(req, res) {
+async function handleB2CTimeout(req, res) {
   const body = req.body || {};
   console.log('Received M-Pesa B2C Timeout:', JSON.stringify(body));
 
-  res.status(200).json({ ResultCode: 0, ResultDesc: 'Received' });
+  const result = body.Result || body.result || body || {};
+  const originator = result.OriginatorConversationID || result.originatorConversationID || null;
+  const conversationId = result.ConversationID || result.conversationID || null;
+  const resultDesc = result.ResultDesc ?? result.resultDesc ?? 'Timeout';
+  const idemKey = conversationId || originator || null;
+
+  if (idemKey) {
+    const idem = await ensureIdempotent({
+      kind: 'B2C_TIMEOUT',
+      key: idemKey,
+      payload: { originator, conversationId, resultDesc },
+    });
+    if (!idem.firstTime) {
+      await logCallbackAudit({
+        req,
+        key: idemKey,
+        kind: 'B2C_TIMEOUT',
+        result: 'ignored',
+        reason: 'duplicate',
+      });
+      return safeAck(res, { ResultCode: 0, ResultDesc: 'Received', duplicate_ignored: true });
+    }
+  }
+
+  safeAck(res, { ResultCode: 0, ResultDesc: 'Received' });
 
   const webhookSecret = process.env.DARAJA_WEBHOOK_SECRET || null;
   const got = (req.headers && req.headers['x-webhook-secret']) || '';
@@ -565,11 +650,6 @@ function handleB2CTimeout(req, res) {
 
   setImmediate(async () => {
     try {
-      const result = body.Result || body.result || body || {};
-      const originator = result.OriginatorConversationID || result.originatorConversationID || null;
-      const conversationId = result.ConversationID || result.conversationID || null;
-      const resultDesc = result.ResultDesc ?? result.resultDesc ?? 'Timeout';
-
       await handlePayoutB2CResult({
         originator,
         conversationId,
@@ -578,8 +658,22 @@ function handleB2CTimeout(req, res) {
         resultDesc: String(resultDesc || 'Timeout'),
         isTimeout: true,
       });
+      await logCallbackAudit({
+        req,
+        key: conversationId || originator || null,
+        kind: 'B2C_TIMEOUT',
+        result: 'accepted',
+      });
     } catch (err) {
       console.error('Error processing B2C Timeout:', err.message);
+      logCallbackAudit({
+        req,
+        key: conversationId || originator || null,
+        kind: 'B2C_TIMEOUT',
+        result: 'rejected',
+        reason: 'server_error',
+        payload: { error: err.message },
+      });
     }
   });
 }
@@ -595,8 +689,19 @@ async function handleC2BCallback(req, res) {
   const correlationId = req.correlationId || buildCorrelationId(body);
   let logCtx = { correlation_id: correlationId, source: req.source || 'direct' };
   const log = (level, message, extra = {}) => logWithCtx(level, message, logCtx, extra);
-  const finish = (decision, extra = {}) => {
+  let idempotencyKey = null;
+  const finish = async (decision, extra = {}) => {
     log('info', `Decision=${decision}`, extra);
+    await logCallbackAudit({
+      req,
+      key: idempotencyKey || correlationId || null,
+      kind: 'C2B_CALLBACK',
+      result: ['DUPLICATE', 'ALREADY_CREDITED', 'PARSE_FAILED', 'QUARANTINED'].includes(decision)
+        ? 'ignored'
+        : 'accepted',
+      reason: extra?.reason || null,
+      payload: { decision, ...extra },
+    });
     return respondC2bAck(res);
   };
 
@@ -637,6 +742,7 @@ async function handleC2BCallback(req, res) {
   const normalizedRef = normalizeRef(account_reference);
   const amountNumber = Number(amount);
   const amountValue = Number.isFinite(amountNumber) ? amountNumber : 0;
+  idempotencyKey = mpesa_receipt || body?.TransID || body?.transaction?.id || correlationId;
 
   logCtx = {
     ...logCtx,
@@ -732,6 +838,23 @@ async function handleC2BCallback(req, res) {
   if (parseError) {
     log('error', 'Failed to parse callback', { error: parseError.message });
     return finish('PARSE_FAILED', { reason: parseError.message });
+  }
+
+  const validation = validateRequired({ account_reference: normalizedRef }, ['account_reference']);
+  if (!validation.ok) {
+    log('warn', 'Invalid payload (missing account_reference)', { missing: validation.missing });
+    return finish('PARSE_FAILED', { reason: 'invalid_payload', missing: validation.missing });
+  }
+
+  if (idempotencyKey) {
+    const idem = await ensureIdempotent({
+      kind: 'C2B_CALLBACK',
+      key: idempotencyKey,
+      payload: { receipt: mpesa_receipt, amount: amountValue, account_reference: normalizedRef },
+    });
+    if (!idem.firstTime) {
+      return finish('DUPLICATE', { idempotency_key: idempotencyKey });
+    }
   }
 
   try {
@@ -1028,11 +1151,36 @@ async function handleC2BCallback(req, res) {
 }
 
 const handleC2BValidation = (req, res) => {
-  console.log('Received M-Pesa C2B validation:', JSON.stringify(req.body || {}));
-  return res.status(200).json({ ResultCode: 0, ResultDesc: 'Accepted' });
+  const body = req.body || {};
+  const account_reference =
+    body.BillRefNumber || body.billRefNumber || body.AccountReference || body.account_reference || null;
+  const validation = validateRequired({ account_reference }, ['account_reference']);
+  if (!validation.ok) {
+    logCallbackAudit({
+      req,
+      key: body.TransID || body.transId || null,
+      kind: 'C2B_VALIDATION',
+      result: 'ignored',
+      reason: 'invalid_payload',
+    });
+  } else {
+    logCallbackAudit({
+      req,
+      key: body.TransID || body.transId || null,
+      kind: 'C2B_VALIDATION',
+      result: 'accepted',
+    });
+  }
+  return safeAck(res, { ResultCode: 0, ResultDesc: 'Accepted' });
 };
 
-const handleC2BConfirmation = (req, res) => enqueueC2BProcessing(req, res, 'c2b_confirmation');
+const handleC2BConfirmation = (req, res) => {
+  const key = req.body?.TransID || req.body?.transId || null;
+  if (key) {
+    ensureIdempotent({ kind: 'C2B_CONFIRMATION', key, payload: req.body || {} }).catch(() => {});
+  }
+  return enqueueC2BProcessing(req, res, 'c2b_confirmation');
+};
 
 router.post('/c2b/validation', handleC2BValidation);
 router.post('/c2b/confirmation', handleC2BConfirmation);

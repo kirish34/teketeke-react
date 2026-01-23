@@ -74,6 +74,39 @@ npm run seed:roles
   - `POST /api/admin/c2b/:id/resolve`
   - `GET /api/admin/ops-alerts`
 
+## Queue / Worker (BullMQ)
+- Queue is optional; if `REDIS_URL` is unset payout processing falls back to inline mode.
+- Env:
+  - `REDIS_URL=redis://localhost:6379`
+  - `QUEUE_PREFIX=teketeke` (optional)
+  - `WORKER_CONCURRENCY=5` (optional)
+- Apply the idempotency table once in prod: `ops/sql/mpesa_callback_events.sql`
+- Run API: `npm run server`
+- Run worker (separate process): `node server/worker.js`
+- Job status (admin-only):
+  - `GET /api/admin/jobs/:id`
+  - `GET /api/admin/jobs?limit=50&name=PAYOUT_BATCH_PROCESS`
+
+## Monitoring endpoints
+- `GET /api/admin/monitoring/overview?from=&to=` (callback/payout/wallet/job health)
+- `GET /api/admin/monitoring/callbacks?from=&to=&result=&limit=`
+- `GET /api/admin/monitoring/payouts?from=&to=&status=&limit=`
+- `GET /api/admin/monitoring/jobs?limit=` (returns enabled=false if queue disabled)
+
+## Intelligence dashboards
+- `GET /api/admin/intelligence/overview?from=&to=` (system-wide growth/revenue/ops)
+- `GET /api/admin/intelligence/trends?metric=&from=&to=`
+- `GET /api/admin/intelligence/top-entities?kind=sacco|vehicle|route&from=&to=`
+- `GET /api/sacco/intelligence/overview?from=&to=` (tenant-scoped)
+- `GET /api/sacco/intelligence/vehicles?status=&from=&to=&limit=&offset=`
+
+## Fraud / Anomaly (rules)
+- SQL: `ops/sql/fraud_alerts.sql`
+- Run detector: `POST /api/admin/fraud/run` (mode dry|write; queues when Redis/BullMQ available)
+- List alerts: `GET /api/admin/fraud/alerts`
+- Update status: `POST /api/admin/fraud/alerts/:id/status`
+- UI: System → Alerts
+
 ## SACCO payouts (manual approval, B2C-only)
 Flow:
 1) SACCO admin sets payout destinations (MSISDN or PayBill/Till) in the SACCO dashboard.

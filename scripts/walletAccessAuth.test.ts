@@ -164,8 +164,14 @@ describe('wallet ledger auth guards (mocked)', () => {
     const supabaseAdminMock = createSupabaseMock(tables)
     const supabaseMod = await import('../server/supabase.js')
     supabaseMod.supabaseAdmin.from = supabaseAdminMock.from
+    // Ensure the CommonJS consumer sees the same mock
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const supabaseCjs = require('../server/supabase.js')
+    supabaseCjs.supabaseAdmin.from = supabaseAdminMock.from
     const poolMod = await import('../server/db/pool.js')
     const pool = createPoolMock(store)
+    // Make the router pick up the mocked pool instead of the real Postgres pool
+    ;(global as any).__testPool = pool
     if (poolMod.default) poolMod.default.query = pool.query
     if (poolMod.query) poolMod.query = pool.query
 
