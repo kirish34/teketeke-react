@@ -18,7 +18,7 @@ SUPABASE_ANON_KEY=
 
 DARAJA_CONSUMER_KEY=
 DARAJA_CONSUMER_SECRET=
-DARAJA_CALLBACK_URL=
+DARAJA_CALLBACK_URL=https://your-domain.example/api/pay/stk/callback   # avoid "mpesa" in path; Safaricom blocks it
 MPESA_B2C_SECURITY_CREDENTIAL=
 MPESA_B2C_SHORTCODE=   # or DARAJA_SHORTCODE
 

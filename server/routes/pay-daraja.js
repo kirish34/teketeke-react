@@ -32,7 +32,7 @@ router.get('/status', (_req, res) => {
   const hasSecret = Boolean(process.env.DARAJA_CONSUMER_SECRET);
   const shortcode = process.env.DARAJA_SHORTCODE || '';
   const hasPasskey = Boolean(process.env.DARAJA_PASSKEY);
-  const callback = process.env.DARAJA_CALLBACK_URL || '';
+  const callback = process.env.DARAJA_CALLBACK_URL || 'https://api.teketeke.org/api/pay/stk/callback';
   const ready = hasKey && hasSecret && shortcode && hasPasskey;
   res.json({ ok: true, env, shortcode, hasKey, hasSecret, hasPasskey, callback, ready });
 });
@@ -42,7 +42,7 @@ router.post('/stk', async (req,res)=>{
   const env = process.env.DARAJA_ENV || 'sandbox';
   const shortcode = process.env.DARAJA_SHORTCODE;
   const passkey = process.env.DARAJA_PASSKEY;
-  const callback = process.env.DARAJA_CALLBACK_URL || 'https://example.com/callback';
+  const callback = process.env.DARAJA_CALLBACK_URL || 'https://api.teketeke.org/api/pay/stk/callback';
   const timestamp = new Date().toISOString().replace(/[-:TZ.]/g,'').slice(0,14);
   const password = base64(shortcode + passkey + timestamp);
   const plateRef = normalizeRef(plate || code || '');
