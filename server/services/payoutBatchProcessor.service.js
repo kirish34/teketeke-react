@@ -56,6 +56,10 @@ async function processPayoutBatch({ batchId, actorUserId = null, actorRole = nul
 
   for (const item of items) {
     if (item.status !== 'PENDING') continue;
+    if (item.provider_request_id) {
+      results.push({ id: item.id, status: 'ALREADY_SENT' });
+      continue;
+    }
 
     const qDecision = await shouldQuarantine({
       operationType: 'PAYOUT_ITEM',
@@ -118,13 +122,13 @@ async function processPayoutBatch({ batchId, actorUserId = null, actorRole = nul
       `
         UPDATE payout_items
         SET status = 'SENT',
-            provider_request_id = $2,
-            provider_conversation_id = NULL,
             updated_at = now()
-        WHERE id = $1 AND status = 'PENDING'
+        WHERE id = $1
+          AND status = 'PENDING'
+          AND provider_request_id IS NULL
         RETURNING *
       `,
-      [item.id, item.idempotency_key],
+      [item.id],
     );
     if (!claim.rows.length) continue;
 
@@ -139,11 +143,19 @@ async function processPayoutBatch({ batchId, actorUserId = null, actorRole = nul
         await pool.query(
           `
             UPDATE payout_items
-            SET provider_request_id = COALESCE($2, provider_request_id),
-                provider_conversation_id = COALESCE($3, provider_conversation_id)
+            SET provider_request_id = COALESCE(provider_request_id, $2),
+                provider_conversation_id = COALESCE(provider_conversation_id, $3),
+                sent_at = COALESCE(sent_at, now()),
+                provider_ack = COALESCE(provider_ack, $4)
             WHERE id = $1
+              AND provider_request_id IS NULL
           `,
-          [item.id, b2cRes.providerRequestId || null, b2cRes.conversationId || null],
+          [
+            item.id,
+            b2cRes.originatorConversationId || b2cRes.providerRequestId || null,
+            b2cRes.conversationId || null,
+            b2cRes.response || null,
+          ],
         );
       }
       await insertPayoutEvent({
@@ -168,6 +180,16 @@ async function processPayoutBatch({ batchId, actorUserId = null, actorRole = nul
           WHERE id = $1
         `,
         [item.id, err.message || 'B2C send failed'],
+      );
+      await pool.query(
+        `
+          UPDATE wallet_holds
+          SET status = 'released', released_at = now()
+          WHERE reference_type = 'PAYOUT_ITEM'
+            AND reference_id = $1
+            AND status = 'active'
+        `,
+        [item.id],
       );
       await insertPayoutEvent({
         batchId,

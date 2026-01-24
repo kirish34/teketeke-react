@@ -696,23 +696,30 @@ async function handlePayoutB2CResult({
   resultDesc,
   isTimeout = false,
 }) {
-  const matchKey = originator || conversationId;
-  if (!matchKey) return false;
+  let itemId = null;
+  if (originator) {
+    const byOrigin = await pool.query(
+      `SELECT id FROM payout_items WHERE provider_request_id = $1 LIMIT 1`,
+      [originator],
+    );
+    if (byOrigin.rows.length) itemId = byOrigin.rows[0].id;
+  }
+  if (!itemId && conversationId) {
+    const byConv = await pool.query(
+      `SELECT id FROM payout_items WHERE provider_conversation_id = $1 LIMIT 1`,
+      [conversationId],
+    );
+    if (byConv.rows.length) itemId = byConv.rows[0].id;
+  }
+  if (!itemId && originator) {
+    const byIdem = await pool.query(
+      `SELECT id FROM payout_items WHERE idempotency_key = $1 LIMIT 1`,
+      [originator],
+    );
+    if (byIdem.rows.length) itemId = byIdem.rows[0].id;
+  }
+  if (!itemId) return false;
 
-  const matchRes = await pool.query(
-    `
-      SELECT id
-      FROM payout_items
-      WHERE idempotency_key = $1
-         OR provider_request_id = $1
-         OR provider_conversation_id = $1
-      LIMIT 1
-    `,
-    [matchKey],
-  );
-  if (!matchRes.rows.length) return false;
-
-  const itemId = matchRes.rows[0].id;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
