@@ -261,7 +261,7 @@ async function runReconciliation({ fromTs, toTs, actorUserId = null, actorRole =
   );
   const driftRes = await pool.query(
     `
-      select wallet_id, balance as wallet_balance, drift
+      select wallet_id, wallet_balance, ledger_balance, drift
       from wallet_balances_mv
       where abs(drift) > 0.009
       limit 100
