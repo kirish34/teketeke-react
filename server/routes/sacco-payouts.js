@@ -477,6 +477,7 @@ router.post('/payout-batches', async (req, res) => {
               (wallet_id, amount, currency, status, source, source_id, created_by_user_id, reason, reference_type, reference_id)
             VALUES
               ($1, $2, 'KES', 'active', 'payout_batch', $3, $4, 'payout_item', 'PAYOUT_ITEM', $5)
+            ON CONFLICT (reference_type, reference_id) DO NOTHING
           `,
           [item.wallet_id, item.amount, batchId, createdBy, item.id],
         );
@@ -911,6 +912,7 @@ router.post('/payout-batches/:id/update', async (req, res) => {
               (wallet_id, amount, currency, status, source, source_id, created_by_user_id, reason, reference_type, reference_id)
             VALUES
               ($1, $2, 'KES', 'active', 'payout_batch', $3, $4, 'payout_item', 'PAYOUT_ITEM', $5)
+            ON CONFLICT (reference_type, reference_id) DO NOTHING
           `,
           [item.wallet_id, item.amount, batchId, req.user?.id || null, itemId],
         );

@@ -267,6 +267,16 @@ async function runReconciliation({ fromTs, toTs, actorUserId = null, actorRole =
       limit 100
     `,
   );
+  const staleHoldsRes = await pool.query(
+    `
+      select id, wallet_id, amount, reference_type, reference_id, created_at
+      from wallet_holds
+      where status = 'active'
+        and created_at < now() - interval '1 hour'
+      order by created_at asc
+      limit 100
+    `,
+  );
 
   return {
     ok: true,
@@ -275,6 +285,7 @@ async function runReconciliation({ fromTs, toTs, actorUserId = null, actorRole =
     payout_items_missing_ledger: payoutItemsMissingLedgerRes.rows || [],
     ledger_missing_provider_ref: ledgerMissingProviderRefRes.rows || [],
     wallet_balance_drift: driftRes.rows || [],
+    active_holds_stale: staleHoldsRes.rows || [],
   };
 }
 
