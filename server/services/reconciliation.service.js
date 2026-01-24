@@ -236,10 +236,45 @@ async function runReconciliation({ fromTs, toTs, actorUserId = null, actorRole =
 
   const exceptions = reconItems.filter((r) => r.status !== 'matched');
 
+  const payoutItemsMissingLedgerRes = await pool.query(
+    `
+      select id, wallet_id, amount, status, provider_request_id, provider_receipt
+      from payout_items
+      where status = 'CONFIRMED'
+        and not exists (
+          select 1 from wallet_ledger wl
+          where wl.reference_type = 'PAYOUT_ITEM'
+            and wl.reference_id = payout_items.id::text
+        )
+      limit 100
+    `,
+  );
+  const ledgerMissingProviderRefRes = await pool.query(
+    `
+      select id, wallet_id, reference_id
+      from wallet_ledger
+      where reference_type = 'PAYOUT_ITEM'
+        and (provider_ref is null or provider_ref = '')
+      order by created_at desc
+      limit 100
+    `,
+  );
+  const driftRes = await pool.query(
+    `
+      select wallet_id, balance as wallet_balance, drift
+      from wallet_balances_mv
+      where abs(drift) > 0.009
+      limit 100
+    `,
+  );
+
   return {
     ok: true,
     totals,
     exceptions: exceptions.slice(0, 20),
+    payout_items_missing_ledger: payoutItemsMissingLedgerRes.rows || [],
+    ledger_missing_provider_ref: ledgerMissingProviderRefRes.rows || [],
+    wallet_balance_drift: driftRes.rows || [],
   };
 }
 

@@ -87,6 +87,11 @@ router.post('/wallets/:virtualAccountCode/withdraw', async (req, res) => {
       phoneNumber,
     });
 
+    await logWalletAdminAction(req, 'wallet_withdraw_mpesa', virtualAccountCode, {
+      amount,
+      phoneNumber,
+      withdrawalId: withdrawalData.withdrawalId,
+    });
     return res.json({
       ok: true,
       message: 'Withdrawal initiated',
@@ -102,11 +107,6 @@ router.post('/wallets/:virtualAccountCode/withdraw', async (req, res) => {
         },
         mpesa: b2cResult.mpesa,
       },
-    });
-    await logWalletAdminAction(req, 'wallet_withdraw_mpesa', virtualAccountCode, {
-      amount,
-      phoneNumber,
-      withdrawalId: withdrawalData.withdrawalId,
     });
   } catch (err) {
     console.error('Error in withdraw route:', err.message);
@@ -142,16 +142,16 @@ router.post('/wallets/:virtualAccountCode/withdraw/bank', async (req, res) => {
       bankAccountName,
       feePercent,
     });
-    return res.json({
-      ok: true,
-      message: 'Bank withdrawal request created',
-      data: result,
-    });
     await logWalletAdminAction(req, 'wallet_withdraw_bank', virtualAccountCode, {
       amount,
       bankName,
       bankBranch,
       bankAccountNumber,
+    });
+    return res.json({
+      ok: true,
+      message: 'Bank withdrawal request created',
+      data: result,
     });
   } catch (err) {
     console.error('Error in bank withdraw route:', err.message);

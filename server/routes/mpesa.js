@@ -796,6 +796,11 @@ async function handlePayoutB2CResult({
           client,
         });
         await updateBatchStatusFromItems({ batchId: item.batch_id, client });
+        await client.query(
+          `update wallet_holds set status = 'released', released_at = now()
+           where reference_type = 'PAYOUT_ITEM' and reference_id = $1 and status = 'active'`,
+          [item.id],
+        );
         await client.query('COMMIT');
         return true;
       }
@@ -818,9 +823,14 @@ async function handlePayoutB2CResult({
         actorId: null,
         eventType: 'ITEM_CONFIRMED',
         message: 'Payout confirmed',
-          meta: { provider_receipt: providerReceipt },
-          client,
-        });
+        meta: { provider_receipt: providerReceipt },
+        client,
+      });
+      await client.query(
+        `update wallet_holds set status = 'settled', released_at = now()
+         where reference_type = 'PAYOUT_ITEM' and reference_id = $1 and status = 'active'`,
+        [item.id],
+      );
     } else {
       if (isTimeout && item.status === 'FAILED' && String(item.failure_reason || '').includes('TIMEOUT')) {
         await createOpsAlert({
@@ -855,6 +865,11 @@ async function handlePayoutB2CResult({
         meta: { result_code: resultCode, result_desc: resultDesc },
         client,
       });
+      await client.query(
+        `update wallet_holds set status = 'released', released_at = now()
+         where reference_type = 'PAYOUT_ITEM' and reference_id = $1 and status = 'active'`,
+        [item.id],
+      );
       await createOpsAlert({
         type: 'PAYOUT_ITEM_FAILED',
         severity: 'WARN',

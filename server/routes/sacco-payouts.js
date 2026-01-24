@@ -440,6 +440,49 @@ router.post('/payout-batches', async (req, res) => {
       throw new Error('No wallet balances available to payout');
     }
 
+    // Lock wallets involved and reserve funds via holds
+    const walletIds = Array.from(new Set(items.filter((i) => i.status === 'PENDING').map((i) => i.wallet_id)));
+    if (walletIds.length) {
+      const locked = await client.query(
+        `SELECT id, balance FROM wallets WHERE id = ANY($1) FOR UPDATE`,
+        [walletIds],
+      );
+      const balanceById = new Map(locked.rows.map((row) => [row.id, Number(row.balance || 0)]));
+      const heldRes = await client.query(
+        `
+          SELECT wallet_id, COALESCE(SUM(amount),0) AS held
+          FROM wallet_holds
+          WHERE wallet_id = ANY($1) AND status = 'active'
+          GROUP BY wallet_id
+        `,
+        [walletIds],
+      );
+      const heldById = new Map(heldRes.rows.map((row) => [row.wallet_id, Number(row.held || 0)]));
+      const requiredById = new Map();
+      for (const item of items.filter((i) => i.status === 'PENDING')) {
+        requiredById.set(item.wallet_id, (requiredById.get(item.wallet_id) || 0) + Number(item.amount || 0));
+      }
+      for (const [wid, required] of requiredById.entries()) {
+        const bal = balanceById.get(wid) ?? 0;
+        const held = heldById.get(wid) ?? 0;
+        const available = bal - held;
+        if (required > available) {
+          throw new Error(`Insufficient available balance for wallet ${wid}`);
+        }
+      }
+      for (const item of items.filter((i) => i.status === 'PENDING')) {
+        await client.query(
+          `
+            INSERT INTO wallet_holds
+              (wallet_id, amount, currency, status, source, source_id, created_by_user_id, reason, reference_type, reference_id)
+            VALUES
+              ($1, $2, 'KES', 'active', 'payout_batch', $3, $4, 'payout_item', 'PAYOUT_ITEM', $5)
+          `,
+          [item.wallet_id, item.amount, batchId, createdBy, item.id],
+        );
+      }
+    }
+
     await client.query(
       `
         INSERT INTO payout_batches
@@ -468,6 +511,7 @@ router.post('/payout-batches', async (req, res) => {
     });
 
     for (const item of items) {
+      const itemId = item.id || crypto.randomUUID();
       await client.query(
         `
           INSERT INTO payout_items
@@ -476,7 +520,7 @@ router.post('/payout-batches', async (req, res) => {
             ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         `,
         [
-          item.id,
+          itemId,
           batchId,
           item.wallet_id,
           item.wallet_kind,
@@ -490,7 +534,7 @@ router.post('/payout-batches', async (req, res) => {
       );
       await insertPayoutEvent({
         batchId,
-        itemId: item.id,
+        itemId,
         actorId: createdBy,
         eventType: 'ITEM_CREATED',
         message: `Item created for ${item.wallet_kind}`,
@@ -646,6 +690,11 @@ router.delete('/payout-batches/:id', async (req, res) => {
   const batchId = req.params.id;
   if (!batchId) return res.status(400).json({ ok: false, error: 'batch id required' });
   try {
+    await pool.query(
+      `UPDATE wallet_holds SET status = 'released', released_at = now()
+       WHERE source = 'payout_batch' AND source_id = $1 AND status = 'active'`,
+      [batchId],
+    );
     const deleted = await pool.query(
       `
         DELETE FROM payout_batches
@@ -779,6 +828,7 @@ router.post('/payout-batches/:id/update', async (req, res) => {
       if (destination?.id) destIdByKind[kind] = destination.id;
 
       items.push({
+        id: crypto.randomUUID(),
         wallet_kind: kind,
         wallet_id: wallet.id,
         amount,
@@ -793,10 +843,47 @@ router.post('/payout-batches/:id/update', async (req, res) => {
     if (!items.length) return res.status(400).json({ ok: false, error: 'No items to save' });
 
     await pool.query('BEGIN');
+    await pool.query(
+      `UPDATE wallet_holds SET status = 'released', released_at = now()
+       WHERE source = 'payout_batch' AND source_id = $1 AND status = 'active'`,
+      [batchId],
+    );
     await pool.query(`DELETE FROM payout_events WHERE batch_id = $1 AND item_id IS NOT NULL`, [batchId]);
     await pool.query(`DELETE FROM payout_items WHERE batch_id = $1`, [batchId]);
 
+    const walletIds = Array.from(new Set(items.filter((i) => i.status === 'PENDING').map((i) => i.wallet_id)));
+    if (walletIds.length) {
+      const locked = await pool.query(
+        `SELECT id, balance FROM wallets WHERE id = ANY($1) FOR UPDATE`,
+        [walletIds],
+      );
+      const balanceById = new Map(locked.rows.map((row) => [row.id, Number(row.balance || 0)]));
+      const heldRes = await pool.query(
+        `
+          SELECT wallet_id, COALESCE(SUM(amount),0) AS held
+          FROM wallet_holds
+          WHERE wallet_id = ANY($1) AND status = 'active'
+          GROUP BY wallet_id
+        `,
+        [walletIds],
+      );
+      const heldById = new Map(heldRes.rows.map((row) => [row.wallet_id, Number(row.held || 0)]));
+      const requiredById = new Map();
+      for (const item of items.filter((i) => i.status === 'PENDING')) {
+        requiredById.set(item.wallet_id, (requiredById.get(item.wallet_id) || 0) + Number(item.amount || 0));
+      }
+      for (const [wid, required] of requiredById.entries()) {
+        const bal = balanceById.get(wid) ?? 0;
+        const held = heldById.get(wid) ?? 0;
+        const available = bal - held;
+        if (required > available) {
+          throw new Error(`Insufficient available balance for wallet ${wid}`);
+        }
+      }
+    }
+
     for (const item of items) {
+      const itemId = item.id || crypto.randomUUID();
       await pool.query(
         `
           INSERT INTO payout_items
@@ -805,7 +892,7 @@ router.post('/payout-batches/:id/update', async (req, res) => {
             ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         `,
         [
-          crypto.randomUUID(),
+          itemId,
           batchId,
           item.wallet_id,
           item.wallet_kind,
@@ -817,6 +904,17 @@ router.post('/payout-batches/:id/update', async (req, res) => {
           item.block_reason,
         ],
       );
+      if (item.status === 'PENDING') {
+        await pool.query(
+          `
+            INSERT INTO wallet_holds
+              (wallet_id, amount, currency, status, source, source_id, created_by_user_id, reason, reference_type, reference_id)
+            VALUES
+              ($1, $2, 'KES', 'active', 'payout_batch', $3, $4, 'payout_item', 'PAYOUT_ITEM', $5)
+          `,
+          [item.wallet_id, item.amount, batchId, req.user?.id || null, itemId],
+        );
+      }
     }
 
     const newMeta = {
