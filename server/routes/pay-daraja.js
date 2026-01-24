@@ -542,14 +542,17 @@ router.post('/stk/callback', async (req,res)=>{
           return res.status(200).json({ ok: true });
         }
       }
-      await creditFareWithFeesByWalletId({
+      const providerRef = receipt || checkoutRequestId || (paymentRow ? String(paymentRow.id) : null);
+      const ledgerResult = await creditFareWithFeesByWalletId({
         walletId,
         amount,
         source: 'MPESA_STK',
-        sourceRef: sourceRef || null,
-        referenceId: paymentRow?.id || null,
+        sourceRef: providerRef || null,
+        referenceId: paymentRow?.id || providerRef || null,
         referenceType: 'MPESA_C2B',
         description: `STK payment from ${msisdn || 'unknown'}`,
+        provider: 'mpesa',
+        providerRef,
         client,
       });
       if (paymentRow) {
@@ -580,7 +583,7 @@ router.post('/stk/callback', async (req,res)=>{
       req,
       key: idempotencyKey || sourceRef || checkoutRequestId || null,
       kind: 'STK_CALLBACK',
-      result: 'accepted',
+      result: ledgerResult?.deduped ? 'accepted_deduped' : 'accepted',
     });
     return safeAck(res, { ok: true });
   } catch (err) {

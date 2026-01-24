@@ -342,6 +342,7 @@ async function handlePayoutB2CResult({
 
     const providerRequestId = originator || conversationId || null;
     const providerReceipt = transactionId || null;
+    const providerRef = providerReceipt || providerRequestId || null;
     const success = Number(resultCode) === 0;
     if (!success && item.status === 'FAILED') {
       await client.query('ROLLBACK');
@@ -349,8 +350,9 @@ async function handlePayoutB2CResult({
     }
 
     if (success) {
+      let debitResult = null;
       try {
-        await debitWallet({
+        debitResult = await debitWallet({
           walletId: item.wallet_id,
           amount: item.amount,
           source: 'SACCO_PAYOUT',
@@ -359,6 +361,8 @@ async function handlePayoutB2CResult({
           referenceType: 'PAYOUT_ITEM',
           referenceId: item.id,
           description: `SACCO payout ${item.wallet_kind || ''}`.trim(),
+          provider: 'MPESA',
+          providerRef,
           client,
         });
       } catch (err) {
@@ -418,9 +422,9 @@ async function handlePayoutB2CResult({
         actorId: null,
         eventType: 'ITEM_CONFIRMED',
         message: 'Payout confirmed',
-        meta: { provider_receipt: providerReceipt },
-        client,
-      });
+          meta: { provider_receipt: providerReceipt },
+          client,
+        });
     } else {
       if (isTimeout && item.status === 'FAILED' && String(item.failure_reason || '').includes('TIMEOUT')) {
         await createOpsAlert({
