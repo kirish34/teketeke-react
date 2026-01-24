@@ -1,14 +1,17 @@
 const express = require('express');
+const fetch = require('node-fetch');
 const router = express.Router();
 
 const pool = require('../db/pool');
 const { creditFareWithFeesByWalletId, debitWallet } = require('../wallet/wallet.service');
+const { creditWalletWithLedger } = require('../services/walletLedger.service');
 const { normalizeRef, resolveWalletByRef } = require('../wallet/wallet.aliases');
 const { validatePaybillCode } = require('../wallet/paybillCode.util');
 const { applyRiskRules } = require('../mpesa/c2bRisk');
 const { insertPayoutEvent, updateBatchStatusFromItems } = require('../services/saccoPayouts.service');
 const { createOpsAlert } = require('../services/opsAlerts.service');
 const { normalizeMsisdn, maskMsisdn } = require('../utils/msisdn');
+const { requireSystemOrSuper } = require('../middleware/requireAdmin');
 const {
   ensureIdempotent,
   validateRequired,
@@ -19,6 +22,399 @@ const {
 
 const C2B_ACK = { ResultCode: 0, ResultDesc: 'Accepted' };
 const EXPECTED_PAYBILL = process.env.MPESA_C2B_SHORTCODE || process.env.DARAJA_SHORTCODE || null;
+
+const DARAJA_ENV = process.env.DARAJA_ENV || 'sandbox';
+const DARAJA_SHORTCODE = process.env.DARAJA_SHORTCODE || null;
+const DARAJA_PASSKEY = process.env.DARAJA_PASSKEY || null;
+const DARAJA_CALLBACK_URL = process.env.DARAJA_CALLBACK_URL || null;
+const DARAJA_CONSUMER_KEY = process.env.DARAJA_CONSUMER_KEY || null;
+const DARAJA_CONSUMER_SECRET = process.env.DARAJA_CONSUMER_SECRET || null;
+
+function darajaHost() {
+  return DARAJA_ENV === 'production' ? 'https://api.safaricom.co.ke' : 'https://sandbox.safaricom.co.ke';
+}
+
+function base64(str) {
+  return Buffer.from(str).toString('base64');
+}
+
+async function getDarajaToken() {
+  const key = DARAJA_CONSUMER_KEY;
+  const secret = DARAJA_CONSUMER_SECRET;
+  if (!key || !secret) throw new Error('Daraja credentials missing');
+  const res = await fetch(`${darajaHost()}/oauth/v1/generate?grant_type=client_credentials`, {
+    headers: { Authorization: `Basic ${base64(`${key}:${secret}`)}` },
+  });
+  if (!res.ok) throw new Error(`Daraja token error: ${res.statusText}`);
+  const j = await res.json();
+  return j.access_token;
+}
+
+async function resolveWalletTarget({
+  walletCode,
+  aliasRef,
+  matatuId,
+  saccoId,
+  walletKind,
+}) {
+  if (walletCode) {
+    const res = await pool.query(
+      `SELECT id, wallet_code FROM wallets WHERE wallet_code = $1 LIMIT 1`,
+      [walletCode],
+    );
+    if (res.rows.length) return { walletId: res.rows[0].id, walletCode: res.rows[0].wallet_code };
+  }
+
+  if (aliasRef) {
+    const walletId = await resolveWalletByRef(aliasRef);
+    if (walletId) {
+      const res = await pool.query(`SELECT wallet_code FROM wallets WHERE id = $1 LIMIT 1`, [walletId]);
+      return { walletId, walletCode: res.rows[0]?.wallet_code || aliasRef };
+    }
+  }
+
+  if (matatuId || saccoId) {
+    const where = [];
+    const params = [];
+    if (matatuId) {
+      params.push(matatuId);
+      where.push(`matatu_id = $${params.length}`);
+    }
+    if (saccoId) {
+      params.push(saccoId);
+      where.push(`sacco_id = $${params.length}`);
+    }
+    if (walletKind) {
+      params.push(walletKind);
+      where.push(`wallet_kind = $${params.length}`);
+    }
+    params.push(1);
+    const res = await pool.query(
+      `
+        SELECT id, wallet_code
+        FROM wallets
+        WHERE ${where.join(' AND ')}
+        LIMIT $${params.length}
+      `,
+      params,
+    );
+    if (res.rows.length) return { walletId: res.rows[0].id, walletCode: res.rows[0].wallet_code };
+  }
+
+  return { walletId: null, walletCode: walletCode || aliasRef || null };
+}
+
+function buildAccountReference({ accountReference, aliasRef, walletCode }) {
+  const ref = accountReference || aliasRef || walletCode || null;
+  return ref ? normalizeRef(ref) : null;
+}
+
+// --- STK Push: initiate ---
+router.post('/stk/initiate', async (req, res) => {
+  const {
+    phone,
+    amount,
+    wallet_code: walletCodeRaw,
+    alias,
+    matatu_id: matatuId,
+    sacco_id: saccoId,
+    wallet_kind: walletKindRaw,
+    account_reference: accountRefInput,
+  } = req.body || {};
+
+  const walletKind = walletKindRaw ? String(walletKindRaw).toUpperCase() : null;
+  const aliasRef = alias ? normalizeRef(alias) : null;
+
+  const amt = Number(amount || 0);
+  if (!Number.isFinite(amt) || amt <= 0) {
+    return res.status(400).json({ ok: false, error: 'amount must be > 0' });
+  }
+
+  const normalizedMsisdn = normalizeMsisdn(phone);
+  if (!normalizedMsisdn) {
+    return res.status(400).json({ ok: false, error: 'invalid phone' });
+  }
+
+  const { walletId, walletCode } = await resolveWalletTarget({
+    walletCode: walletCodeRaw,
+    aliasRef,
+    matatuId,
+    saccoId,
+    walletKind,
+  });
+
+  if (!walletId) {
+    return res.status(404).json({ ok: false, error: 'wallet not found' });
+  }
+
+  const accountRef = buildAccountReference({ accountReference: accountRefInput, aliasRef, walletCode });
+
+  if (!DARAJA_SHORTCODE || !DARAJA_PASSKEY || !DARAJA_CALLBACK_URL) {
+    return res.status(500).json({ ok: false, error: 'Daraja STK config missing' });
+  }
+
+  try {
+    const token = await getDarajaToken();
+    const timestamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
+    const password = base64(DARAJA_SHORTCODE + DARAJA_PASSKEY + timestamp);
+    const payload = {
+      BusinessShortCode: DARAJA_SHORTCODE,
+      Password: password,
+      Timestamp: timestamp,
+      TransactionType: 'CustomerPayBillOnline',
+      Amount: amt,
+      PartyA: normalizedMsisdn,
+      PartyB: DARAJA_SHORTCODE,
+      PhoneNumber: normalizedMsisdn,
+      CallBackURL: DARAJA_CALLBACK_URL,
+      AccountReference: accountRef,
+      TransactionDesc: 'TekeTeke STK',
+    };
+
+    const r = await fetch(`${darajaHost()}/mpesa/stkpush/v1/processrequest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(payload),
+    });
+    const j = await r.json();
+    if (!r.ok) return res.status(502).json({ ok: false, error: j.errorMessage || 'Daraja error', raw: j });
+
+    const checkoutRequestId = j.CheckoutRequestID || null;
+    const merchantRequestId = j.MerchantRequestID || null;
+
+    await pool.query(
+      `
+        insert into mpesa_stk_requests
+          (wallet_id, wallet_code, account_reference, amount, msisdn, msisdn_normalized, display_msisdn, msisdn_source,
+           checkout_request_id, merchant_request_id, status, raw_request)
+        values
+          ($1, $2, $3, $4, $5, $6, $7, 'mpesa', $8, $9, 'REQUESTED', $10)
+        on conflict (checkout_request_id) do update
+          set raw_request = excluded.raw_request
+      `,
+      [
+        walletId,
+        walletCode,
+        accountRef,
+        amt,
+        phone || normalizedMsisdn,
+        normalizedMsisdn,
+        maskMsisdn(normalizedMsisdn),
+        checkoutRequestId,
+        merchantRequestId,
+        { request: payload, response: j },
+      ],
+    );
+
+    return res.json({
+      ok: true,
+      checkoutRequestId,
+      merchantRequestId,
+      status: j.ResponseDescription || 'REQUESTED',
+    });
+  } catch (err) {
+    console.error('STK initiate error:', err.message);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// --- STK Push: callback ---
+router.post('/stk/callback', async (req, res) => {
+  const cb = req.body?.Body?.stkCallback;
+  if (!cb) {
+    await logCallbackAudit({ req, key: null, kind: 'STK_CALLBACK', result: 'ignored', reason: 'missing_callback' });
+    return safeAck(res, { ok: true, ignored: true });
+  }
+
+  const checkoutRequestId = cb?.CheckoutRequestID || null;
+  const resultCode = Number(cb?.ResultCode || 0);
+  const resultDesc = cb?.ResultDesc || null;
+  const items = Array.isArray(cb?.CallbackMetadata?.Item) ? cb.CallbackMetadata.Item : [];
+  const getItem = (name) => items.find((i) => i?.Name === name)?.Value;
+  const receipt = getItem('MpesaReceiptNumber') || null;
+  const amount = Number(getItem('Amount') || 0);
+  const msisdnRaw = String(getItem('PhoneNumber') || '');
+  const normalizedMsisdn = normalizeMsisdn(msisdnRaw);
+  const providerRef = receipt || checkoutRequestId || null;
+
+  const validation = validateRequired({ checkoutRequestId }, ['checkoutRequestId']);
+  if (!validation.ok) {
+    await logCallbackAudit({
+      req,
+      key: checkoutRequestId || null,
+      kind: 'STK_CALLBACK',
+      result: 'ignored',
+      reason: 'invalid_payload',
+      payload: { missing: validation.missing },
+    });
+    return safeAck(res, { ok: true, ignored: true, reason: 'invalid_payload' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const stkRes = await client.query(
+      `
+        select *
+        from mpesa_stk_requests
+        where checkout_request_id = $1
+        for update
+      `,
+      [checkoutRequestId],
+    );
+    let stkRow = stkRes.rows[0] || null;
+
+    if (!stkRow) {
+      const insertRes = await client.query(
+        `
+          insert into mpesa_stk_requests (checkout_request_id, status, raw_callback, amount, msisdn, msisdn_normalized, provider_receipt, error)
+          values ($1, $2, $3, $4, $5, $6, $7, $8)
+          returning *
+        `,
+        [
+          checkoutRequestId,
+          resultCode === 0 ? 'RECEIVED' : 'FAILED',
+          cb,
+          amount || 0,
+          msisdnRaw || null,
+          normalizedMsisdn || null,
+          receipt || null,
+          resultCode === 0 ? null : resultDesc || 'STK failed',
+        ],
+      );
+      stkRow = insertRes.rows[0];
+    } else {
+      await client.query(
+        `
+          update mpesa_stk_requests
+          set raw_callback = $2,
+              provider_receipt = $3,
+              msisdn = coalesce(msisdn, $4),
+              msisdn_normalized = coalesce(msisdn_normalized, $5),
+              amount = coalesce(amount, $6),
+              status = $7,
+              error = $8
+          where checkout_request_id = $1
+        `,
+        [
+          checkoutRequestId,
+          cb,
+          receipt || stkRow.provider_receipt || null,
+          msisdnRaw || null,
+          normalizedMsisdn || null,
+          amount || stkRow.amount || 0,
+          resultCode === 0 ? 'RECEIVED' : 'FAILED',
+          resultCode === 0 ? null : resultDesc || 'STK failed',
+        ],
+      );
+    }
+
+    if (stkRow.status === 'SUCCESS') {
+      await client.query('COMMIT');
+      return safeAck(res, { ok: true, duplicate: true });
+    }
+
+    if (resultCode !== 0) {
+      await client.query('COMMIT');
+      return safeAck(res, { ok: true, failed: true });
+    }
+
+    const walletId = stkRow.wallet_id || (stkRow.account_reference ? await resolveWalletByRef(stkRow.account_reference) : null);
+    if (!walletId) {
+      await client.query(
+        `
+          update mpesa_stk_requests
+          set status = 'QUARANTINED', error = 'wallet_not_found'
+          where checkout_request_id = $1
+        `,
+        [checkoutRequestId],
+      );
+      await client.query('COMMIT');
+      return safeAck(res, { ok: true, quarantined: true });
+    }
+
+    const ledgerResult = await creditWalletWithLedger({
+      walletId,
+      amount: amount || stkRow.amount || 0,
+      entryType: 'STK_CREDIT',
+      referenceType: 'STK_CHECKOUT',
+      referenceId: checkoutRequestId,
+      description: `STK payment from ${normalizedMsisdn || msisdnRaw || 'unknown'}`,
+      provider: 'MPESA',
+      providerRef,
+      source: 'MPESA_STK',
+      sourceRef: checkoutRequestId,
+      client,
+    });
+
+    await client.query(
+      `
+        update mpesa_stk_requests
+        set status = 'SUCCESS',
+            credited_ledger_id = coalesce($2, credited_ledger_id),
+            provider_receipt = coalesce($3, provider_receipt),
+            wallet_id = $4,
+            wallet_code = coalesce(wallet_code, $5),
+            account_reference = coalesce(account_reference, $6)
+        where checkout_request_id = $1
+      `,
+      [
+        checkoutRequestId,
+        ledgerResult.ledgerId || null,
+        receipt || null,
+        walletId,
+        stkRow.wallet_code || null,
+        stkRow.account_reference || null,
+      ],
+    );
+
+    await logCallbackAudit({
+      req,
+      key: providerRef || checkoutRequestId,
+      kind: 'STK_CALLBACK',
+      result: ledgerResult?.deduped ? 'accepted_deduped' : 'accepted',
+    });
+
+    await client.query('COMMIT');
+    return safeAck(res, { ok: true, credited: Boolean(ledgerResult.ledgerId), deduped: Boolean(ledgerResult.deduped) });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('STK callback error:', err.message);
+    return safeAck(res, { ok: false, error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// --- STK reconciliation/admin report ---
+router.get('/stk/recon', requireSystemOrSuper, async (_req, res) => {
+  try {
+    const missingLedger = await pool.query(
+      `
+        select checkout_request_id, wallet_id, amount, status
+        from mpesa_stk_requests
+        where status = 'SUCCESS' and credited_ledger_id is null
+        limit 100
+      `,
+    );
+    const ledgerNoProviderRef = await pool.query(
+      `
+        select id, wallet_id, reference_id, provider_ref
+        from wallet_ledger
+        where reference_type = 'STK_CHECKOUT' and (provider_ref is null or provider_ref = '')
+        order by created_at desc
+        limit 100
+      `,
+    );
+    return res.json({
+      ok: true,
+      missingLedger: missingLedger.rows || [],
+      ledgerMissingProviderRef: ledgerNoProviderRef.rows || [],
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
 /**
  * Normalize incoming M-Pesa callback payload.
