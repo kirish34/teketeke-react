@@ -121,7 +121,7 @@ async function processPayoutBatch({ batchId, actorUserId = null, actorRole = nul
     const claim = await pool.query(
       `
         UPDATE payout_items
-        SET status = 'SENT',
+        SET status = 'SENDING',
             updated_at = now()
         WHERE id = $1
           AND status = 'PENDING'
@@ -131,13 +131,14 @@ async function processPayoutBatch({ batchId, actorUserId = null, actorRole = nul
       [item.id],
     );
     if (!claim.rows.length) continue;
+    const claimedItem = claim.rows[0];
 
     try {
       const b2cRes = await sendB2CPayout({
-        payoutItemId: item.id,
-        amount: item.amount,
-        phoneNumber: item.destination_ref,
-        idempotencyKey: item.idempotency_key,
+        payoutItemId: claimedItem.id,
+        amount: claimedItem.amount,
+        phoneNumber: claimedItem.destination_ref,
+        idempotencyKey: claimedItem.idempotency_key,
       });
       if (b2cRes.providerRequestId || b2cRes.conversationId || b2cRes.originatorConversationId) {
         await pool.query(
@@ -146,12 +147,18 @@ async function processPayoutBatch({ batchId, actorUserId = null, actorRole = nul
             SET provider_request_id = COALESCE(provider_request_id, $2),
                 provider_conversation_id = COALESCE(provider_conversation_id, $3),
                 sent_at = COALESCE(sent_at, now()),
-                provider_ack = COALESCE(provider_ack, $4)
+                provider_ack = CASE
+                  WHEN provider_ack IS NULL OR provider_ack = '{}'::jsonb THEN $4
+                  ELSE provider_ack
+                END,
+                status = 'SENT',
+                updated_at = now()
             WHERE id = $1
+              AND status = 'SENDING'
               AND provider_request_id IS NULL
           `,
           [
-            item.id,
+            claimedItem.id,
             b2cRes.originatorConversationId || b2cRes.providerRequestId || null,
             b2cRes.conversationId || null,
             b2cRes.response || null,
