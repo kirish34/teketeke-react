@@ -277,6 +277,16 @@ async function runReconciliation({ fromTs, toTs, actorUserId = null, actorRole =
       limit 100
     `,
   );
+  const stuckSendingRes = await pool.query(
+    `
+      select id, wallet_id, amount, sending_at
+      from payout_items
+      where status = 'SENDING'
+        and provider_request_id is null
+        and sending_at < now() - interval '10 minutes'
+      limit 100
+    `,
+  );
 
   return {
     ok: true,
@@ -286,6 +296,7 @@ async function runReconciliation({ fromTs, toTs, actorUserId = null, actorRole =
     ledger_missing_provider_ref: ledgerMissingProviderRefRes.rows || [],
     wallet_balance_drift: driftRes.rows || [],
     active_holds_stale: staleHoldsRes.rows || [],
+    stuck_sending_items: stuckSendingRes.rows || [],
   };
 }
 

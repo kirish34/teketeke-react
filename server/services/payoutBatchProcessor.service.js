@@ -122,10 +122,14 @@ async function processPayoutBatch({ batchId, actorUserId = null, actorRole = nul
       `
         UPDATE payout_items
         SET status = 'SENDING',
+            sending_at = now(),
             updated_at = now()
         WHERE id = $1
-          AND status = 'PENDING'
           AND provider_request_id IS NULL
+          AND (
+            status = 'PENDING'
+            OR (status = 'SENDING' AND sending_at < now() - interval '5 minutes')
+          )
         RETURNING *
       `,
       [item.id],
