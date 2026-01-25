@@ -344,6 +344,22 @@ type LoginInlineEdit = {
   password?: string
 }
 
+type SystemAdminPerms = {
+  can_finance_act: boolean
+  can_registry: boolean
+  can_monitor: boolean
+  can_alerts: boolean
+  is_active?: boolean
+}
+
+type SystemAdminRow = {
+  user_id?: string
+  email?: string | null
+  role?: string
+  created_at?: string
+  permissions?: SystemAdminPerms
+}
+
 type SystemTabId =
   | 'overview'
   | 'analytics'
@@ -362,6 +378,7 @@ type SystemTabId =
   | 'ussd'
   | 'paybill'
   | 'sms'
+  | 'system_admins'
   | 'logins'
   | 'routes'
   | 'registry'
@@ -1096,7 +1113,10 @@ const SystemDashboard = ({
 }: SystemDashboardProps) => {
   const { user } = useAuth()
   const userRole = (user?.role || '').toLowerCase()
-  const canFinanceAct = canFinanceActProp ?? (userRole === 'system_admin' || userRole === 'super_admin')
+  const [systemPerms, setSystemPerms] = useState<SystemAdminPerms | null>(null)
+  const canFinanceAct =
+    canFinanceActProp ??
+    (systemPerms ? systemPerms.can_finance_act : userRole === 'system_admin' || userRole === 'super_admin')
   const [overview, setOverview] = useState<Overview | null>(null)
   const [overviewError, setOverviewError] = useState<string | null>(null)
 
@@ -1342,6 +1362,19 @@ const SystemDashboard = ({
     vehicle_id: '',
   })
   const [loginMsg, setLoginMsg] = useState('')
+  const [systemAdmins, setSystemAdmins] = useState<SystemAdminRow[]>([])
+  const [systemAdminsError, setSystemAdminsError] = useState<string | null>(null)
+  const [systemAdminsMsg, setSystemAdminsMsg] = useState('')
+  const [systemAdminSaving, setSystemAdminSaving] = useState<Record<string, boolean>>({})
+  const [systemAdminForm, setSystemAdminForm] = useState({
+    email: '',
+    password: '',
+    role: 'SYSTEM_ADMIN',
+    can_finance_act: true,
+    can_registry: true,
+    can_monitor: true,
+    can_alerts: true,
+  })
 
   const [activeTab, setActiveTab] = useState<SystemTabId>(controlledTab || 'overview')
   const isControlledTab = controlledTab !== undefined
@@ -1382,6 +1415,7 @@ const SystemDashboard = ({
     { id: 'ussd', label: 'USSD' },
     { id: 'paybill', label: 'Paybill' },
     { id: 'sms', label: 'SMS' },
+    { id: 'system_admins', label: 'System Admins' },
     { id: 'logins', label: 'Logins' },
     { id: 'routes', label: 'Routes Overview' },
   ]
@@ -1402,6 +1436,19 @@ const SystemDashboard = ({
       handleTabChange(next)
     }
   }, [activeTab, handleTabChange, isControlledTab, tabFromPath, tabFromState])
+
+  useEffect(() => {
+    if (canFinanceActProp !== undefined) return
+    if (userRole !== 'system_admin' && userRole !== 'super_admin') return
+    ;(async () => {
+      try {
+        const data = await fetchJson<{ permissions?: SystemAdminPerms }>('/api/admin/system-admins/self')
+        if (data?.permissions) setSystemPerms(data.permissions)
+      } catch (err) {
+        console.warn('system-admin-perms failed', err)
+      }
+    })()
+  }, [userRole, canFinanceActProp])
 
   const selectedRoute = useMemo(
     () => routes.find((r) => (r.id || '') === routeEditId) || null,
@@ -4343,6 +4390,75 @@ const SystemDashboard = ({
     }
   }
 
+  async function loadSystemAdmins() {
+    try {
+      const rows = await fetchList<SystemAdminRow>('/api/admin/system-admins')
+      setSystemAdmins(rows)
+      setSystemAdminsError(null)
+    } catch (err) {
+      setSystemAdmins([])
+      setSystemAdminsError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function saveSystemAdmin() {
+    const email = systemAdminForm.email.trim()
+    const password = systemAdminForm.password
+    if (!email) {
+      setSystemAdminsMsg('Email is required')
+      return
+    }
+    if (!password) {
+      setSystemAdminsMsg('Password is required')
+      return
+    }
+    setSystemAdminsMsg('Saving system admin...')
+    try {
+      await sendJson('/api/admin/system-admins', 'POST', {
+        email,
+        password,
+        role: systemAdminForm.role,
+        permissions: {
+          can_finance_act: systemAdminForm.can_finance_act,
+          can_registry: systemAdminForm.can_registry,
+          can_monitor: systemAdminForm.can_monitor,
+          can_alerts: systemAdminForm.can_alerts,
+        },
+      })
+      setSystemAdminsMsg('System admin created')
+      setSystemAdminForm({
+        email: '',
+        password: '',
+        role: 'SYSTEM_ADMIN',
+        can_finance_act: true,
+        can_registry: true,
+        can_monitor: true,
+        can_alerts: true,
+      })
+      await loadSystemAdmins()
+    } catch (err) {
+      setSystemAdminsMsg(err instanceof Error ? err.message : 'Create failed')
+    }
+  }
+
+  async function updateSystemAdmin(userId: string, patch: { role?: string; permissions?: Partial<SystemAdminPerms> }) {
+    if (!userId) return
+    setSystemAdminSaving((prev) => ({ ...prev, [userId]: true }))
+    try {
+      await sendJson(`/api/admin/system-admins/${encodeURIComponent(userId)}`, 'PATCH', patch)
+      await loadSystemAdmins()
+      setSystemAdminsMsg('Saved')
+    } catch (err) {
+      setSystemAdminsMsg(err instanceof Error ? err.message : 'Update failed')
+    } finally {
+      setSystemAdminSaving((prev) => {
+        const next = { ...prev }
+        delete next[userId]
+        return next
+      })
+    }
+  }
+
 
 
 
@@ -4523,6 +4639,9 @@ const SystemDashboard = ({
           await loadSms('')
           await loadSmsSettings()
           await loadSmsTemplates()
+          break
+        case 'system_admins':
+          await loadSystemAdmins()
           break
         case 'routes':
           if (saccos.length === 0) await loadSaccosList()
@@ -10316,6 +10435,150 @@ const SystemDashboard = ({
       ) : null}
     </section>
         </>
+      ) : null}
+
+      {activeTab === 'system_admins' ? (
+      <section className="card">
+        <div className="topline">
+          <h3 style={{ margin: 0 }}>System Admins</h3>
+          <span className="muted small">{systemAdmins.length} admin(s)</span>
+        </div>
+        <p className="muted small" style={{ marginTop: 6 }}>
+          Create or update system administrators and toggle what they can do. Finance actions control wallet credits, payouts, and payment approvals.
+        </p>
+        {systemAdminsError ? <div className="err">System admin error: {systemAdminsError}</div> : null}
+        <div className="card" style={{ marginTop: 10, background: '#f8fafc' }}>
+          <h4 style={{ margin: '0 0 6px' }}>Create / invite</h4>
+          <div className="grid g2" style={{ gap: 12 }}>
+            <label className="muted small">
+              Email
+              <input
+                className="input"
+                placeholder="Email"
+                value={systemAdminForm.email}
+                onChange={(e) => setSystemAdminForm((f) => ({ ...f, email: e.target.value }))}
+              />
+            </label>
+            <label className="muted small">
+              Password
+              <input
+                className="input"
+                placeholder="Password"
+                type="password"
+                value={systemAdminForm.password}
+                onChange={(e) => setSystemAdminForm((f) => ({ ...f, password: e.target.value }))}
+              />
+            </label>
+            <label className="muted small">
+              Role
+              <select
+                value={systemAdminForm.role}
+                onChange={(e) => setSystemAdminForm((f) => ({ ...f, role: e.target.value }))}
+                style={{ padding: 10 }}
+              >
+                <option value="SYSTEM_ADMIN">SYSTEM_ADMIN</option>
+                <option value="SUPER_ADMIN">SUPER_ADMIN</option>
+              </select>
+            </label>
+          </div>
+          <div className="grid g4" style={{ gap: 12, marginTop: 8 }}>
+            {[
+              { key: 'can_finance_act', label: 'Finance actions' },
+              { key: 'can_registry', label: 'Registry edits' },
+              { key: 'can_monitor', label: 'Monitoring' },
+              { key: 'can_alerts', label: 'Alerts' },
+            ].map((perm) => (
+              <label key={perm.key} className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={(systemAdminForm as any)[perm.key] !== false}
+                  onChange={(e) => setSystemAdminForm((f) => ({ ...f, [perm.key]: e.target.checked }))}
+                />
+                {perm.label}
+              </label>
+            ))}
+          </div>
+          <div className="row" style={{ marginTop: 10, gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn" type="button" onClick={saveSystemAdmin}>
+              Save system admin
+            </button>
+            {systemAdminsMsg ? <span className="muted small">{systemAdminsMsg}</span> : null}
+          </div>
+        </div>
+
+        <div className="card" style={{ marginTop: 10 }}>
+          <h4 style={{ margin: '0 0 6px' }}>Existing admins</h4>
+          {systemAdmins.length === 0 ? <div className="muted small">No system admins found.</div> : null}
+          {systemAdmins.length > 0 ? (
+            <div className="table-wrap" style={{ overflowX: 'auto' }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Finance</th>
+                    <th>Registry</th>
+                    <th>Monitoring</th>
+                    <th>Alerts</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {systemAdmins.map((row) => {
+                    const id = row.user_id || ''
+                    const perms: SystemAdminPerms = row.permissions || {
+                      can_finance_act: true,
+                      can_registry: true,
+                      can_monitor: true,
+                      can_alerts: true,
+                      is_active: true,
+                    }
+                    const isSuper = (row.role || '').toUpperCase() === 'SUPER_ADMIN'
+                    return (
+                      <tr key={id}>
+                        <td>{row.email || '—'}</td>
+                        <td>
+                          <select
+                            value={(row.role || 'SYSTEM_ADMIN').toUpperCase()}
+                            onChange={(e) => updateSystemAdmin(id, { role: e.target.value })}
+                            disabled={systemAdminSaving[id] || !id}
+                          >
+                            <option value="SYSTEM_ADMIN">SYSTEM_ADMIN</option>
+                            <option value="SUPER_ADMIN">SUPER_ADMIN</option>
+                          </select>
+                        </td>
+                        {[
+                          { key: 'can_finance_act', label: 'Finance actions' },
+                          { key: 'can_registry', label: 'Registry' },
+                          { key: 'can_monitor', label: 'Monitoring' },
+                          { key: 'can_alerts', label: 'Alerts' },
+                        ].map((perm) => (
+                          <td key={`${id}-${perm.key}`}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <input
+                                type="checkbox"
+                                disabled={systemAdminSaving[id] || isSuper || !id}
+                                checked={(perms as any)[perm.key] !== false}
+                                onChange={(e) =>
+                                  updateSystemAdmin(id, {
+                                    permissions: { ...perms, [perm.key]: e.target.checked },
+                                  })
+                                }
+                              />
+                              <span className="muted small">{isSuper ? 'Always on (super)' : perm.label}</span>
+                            </label>
+                          </td>
+                        ))}
+                        <td>{perms.is_active === false ? 'Inactive' : 'Active'}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </div>
+      </section>
       ) : null}
 
       {activeTab === 'logins' ? (

@@ -1828,6 +1828,60 @@ async function ensureAuthUser(email, password){
   return { userId, created: true };
 }
 
+const SYSTEM_ADMIN_ROLES = new Set(['SYSTEM_ADMIN', 'SUPER_ADMIN']);
+
+function normalizeSystemAdminRole(role) {
+  const r = String(role || '').trim().toUpperCase();
+  return SYSTEM_ADMIN_ROLES.has(r) ? r : null;
+}
+
+function normalizeSystemAdminPerms(raw, role) {
+  const isSuper = normalizeSystemAdminRole(role) === 'SUPER_ADMIN';
+  const base = {
+    can_finance_act: raw?.can_finance_act !== false,
+    can_registry: raw?.can_registry !== false,
+    can_monitor: raw?.can_monitor !== false,
+    can_alerts: raw?.can_alerts !== false,
+    is_active: raw?.is_active !== false,
+  };
+  if (isSuper) {
+    return { ...base, can_finance_act: true, can_registry: true, can_monitor: true, can_alerts: true, is_active: true };
+  }
+  return base;
+}
+
+async function upsertSystemAdminPerms(userId, role, rawPerms) {
+  const perms = normalizeSystemAdminPerms(rawPerms, role);
+  const { error } = await supabaseAdmin.from('system_admin_permissions').upsert({ user_id: userId, ...perms }, { onConflict: 'user_id' });
+  if (error) throw error;
+  return perms;
+}
+
+async function getSystemAdminPermsForUsers(userIds = []) {
+  if (!Array.isArray(userIds) || userIds.length === 0) return [];
+  const { data, error } = await supabaseAdmin
+    .from('system_admin_permissions')
+    .select('user_id, can_finance_act, can_registry, can_monitor, can_alerts, is_active')
+    .in('user_id', userIds);
+  if (error) throw error;
+  return data || [];
+}
+
+async function getSystemAdminPerms(userId, role) {
+  const normalizedRole = normalizeSystemAdminRole(role);
+  const defaultPerms = normalizeSystemAdminPerms({}, normalizedRole);
+  if (!userId) return defaultPerms;
+  if (normalizedRole === 'SUPER_ADMIN') return defaultPerms;
+  const { data, error } = await supabaseAdmin
+    .from('system_admin_permissions')
+    .select('can_finance_act, can_registry, can_monitor, can_alerts, is_active')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error && error.code !== 'PGRST116') throw error;
+  if (!data) return defaultPerms;
+  return normalizeSystemAdminPerms(data, normalizedRole);
+}
+
 function normalizeOperatorType(value){
   const raw = String(value || '').trim().toUpperCase();
   if (raw === 'MATATU_SACCO' || raw === 'MATATU_COMPANY' || raw === 'BODA_GROUP' || raw === 'TAXI_FLEET') {
@@ -3359,6 +3413,114 @@ router.post('/user-roles/create-user', async (req,res)=>{
     res.json({ user_id: userId, role, sacco_id: saccoId, matatu_id: resolvedMatatuId });
   }catch(e){
     res.status(500).json({ error: e.message || 'Failed to create role user' });
+  }
+});
+
+router.get('/system-admins/self', async (req,res)=>{
+  const userId = req.user?.id || null;
+  if (!userId) return res.status(401).json({ error: 'missing user' });
+  const role = normalizeSystemAdminRole(req.user?.role || req.adminCtx?.role || 'SYSTEM_ADMIN');
+  try{
+    const perms = await getSystemAdminPerms(userId, role);
+    res.json({ ok: true, user_id: userId, role, permissions: perms });
+  }catch(e){
+    res.status(500).json({ error: e.message || 'Failed to load permissions' });
+  }
+});
+
+router.get('/system-admins', async (_req,res)=>{
+  try{
+    const { data: roleRows, error } = await supabaseAdmin
+      .from('user_roles')
+      .select('user_id, role, created_at')
+      .in('role', ['SYSTEM_ADMIN','SUPER_ADMIN'])
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    if (!roleRows || roleRows.length === 0) return res.json([]);
+
+    const ids = roleRows.map((r) => r.user_id).filter(Boolean);
+    const permRows = await getSystemAdminPermsForUsers(ids);
+    const permMap = new Map((permRows || []).map((p) => [p.user_id, p]));
+
+    const enriched = await Promise.all(roleRows.map(async (row) => {
+      let email = null;
+      if (row.user_id){
+        try{
+          const { data: userData, error: userErr } = await supabaseAdmin.auth.admin.getUserById(row.user_id);
+          if (!userErr) email = userData?.user?.email || null;
+        }catch(_){ /* ignore */ }
+      }
+      const perms = normalizeSystemAdminPerms(permMap.get(row.user_id), row.role);
+      return { ...row, email, permissions: perms };
+    }));
+    res.json(enriched);
+  }catch(e){
+    res.status(500).json({ error: e.message || 'Failed to load system admins' });
+  }
+});
+
+router.post('/system-admins', async (req,res)=>{
+  const email = (req.body?.email || '').trim();
+  const password = req.body?.password || '';
+  const role = normalizeSystemAdminRole(req.body?.role || 'SYSTEM_ADMIN');
+  const permsBody = req.body?.permissions || {};
+
+  if (!email) return res.status(400).json({ error:'email required' });
+  if (!password) return res.status(400).json({ error:'password required' });
+  if (!role) return res.status(400).json({ error:'role must be SYSTEM_ADMIN or SUPER_ADMIN' });
+
+  try{
+    const { userId } = await ensureAuthUser(email, password);
+    await upsertUserRole({ user_id: userId, role, sacco_id: null, matatu_id: null });
+    const perms = await upsertSystemAdminPerms(userId, role, permsBody);
+    await logAdminAction({
+      req,
+      action: 'system_admin_create',
+      resource_type: 'system_admin',
+      resource_id: userId,
+      payload: { role, permissions: perms },
+    });
+    res.json({ user_id: userId, email, role, permissions: perms });
+  }catch(e){
+    res.status(500).json({ error: e.message || 'Failed to create system admin' });
+  }
+});
+
+router.patch('/system-admins/:userId', async (req,res)=>{
+  const userId = req.params?.userId;
+  if (!userId) return res.status(400).json({ error:'userId required' });
+  const nextRole = req.body?.role ? normalizeSystemAdminRole(req.body.role) : null;
+  const permsBody = req.body?.permissions || null;
+  const password = req.body?.password || null;
+
+  try{
+    let role = nextRole;
+    if (password) {
+      const { error: updErr } = await supabaseAdmin.auth.admin.updateUserById(userId, { password });
+      if (updErr) throw updErr;
+    }
+    if (role) {
+      await upsertUserRole({ user_id: userId, role, sacco_id: null, matatu_id: null });
+    } else {
+      const { data: roleRow, error: roleErr } = await supabaseAdmin
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (roleErr && roleErr.code !== 'PGRST116') throw roleErr;
+      role = normalizeSystemAdminRole(roleRow?.role || 'SYSTEM_ADMIN');
+    }
+    const perms = permsBody ? await upsertSystemAdminPerms(userId, role, permsBody) : await getSystemAdminPerms(userId, role);
+    await logAdminAction({
+      req,
+      action: 'system_admin_update',
+      resource_type: 'system_admin',
+      resource_id: userId,
+      payload: { role, permissions: perms, password_changed: Boolean(password) },
+    });
+    res.json({ user_id: userId, role, permissions: perms });
+  }catch(e){
+    res.status(500).json({ error: e.message || 'Failed to update system admin' });
   }
 });
 
