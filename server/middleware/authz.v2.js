@@ -1,9 +1,11 @@
 const { randomUUID } = require('crypto');
 const pool = require('../db/pool');
 const { supabaseAdmin } = require('../supabase');
+const { normalizeEffectiveRole } = require('../services/appUserContext.service');
 
 function normalizeRole(role) {
-  return String(role || '').trim().toUpperCase();
+  const normalized = normalizeEffectiveRole(role);
+  return String(normalized || '').trim().toUpperCase();
 }
 
 async function fetchAppUserContext(userId) {
