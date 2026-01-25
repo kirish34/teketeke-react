@@ -1845,14 +1845,69 @@ function normalizeSystemAdminPerms(raw, role) {
     is_active: raw?.is_active !== false,
   };
   if (isSuper) {
-    return { ...base, can_finance_act: true, can_registry: true, can_monitor: true, can_alerts: true, is_active: true };
+    return {
+      ...base,
+      can_finance_act: true,
+      can_registry: true,
+      can_monitor: true,
+      can_alerts: true,
+      is_active: true,
+      created_at: raw?.created_at || null,
+      updated_at: raw?.updated_at || null,
+      created_by: raw?.created_by || null,
+      created_by_email: raw?.created_by_email || null,
+      updated_by: raw?.updated_by || raw?.created_by || null,
+      updated_by_email: raw?.updated_by_email || raw?.created_by_email || null,
+    };
   }
-  return base;
+  return {
+    ...base,
+    created_at: raw?.created_at || null,
+    updated_at: raw?.updated_at || null,
+    created_by: raw?.created_by || null,
+    created_by_email: raw?.created_by_email || null,
+    updated_by: raw?.updated_by || raw?.created_by || null,
+    updated_by_email: raw?.updated_by_email || raw?.created_by_email || null,
+  };
 }
 
-async function upsertSystemAdminPerms(userId, role, rawPerms) {
+async function upsertSystemAdminPerms(userId, role, rawPerms, actor = {}) {
   const perms = normalizeSystemAdminPerms(rawPerms, role);
-  const { error } = await supabaseAdmin.from('system_admin_permissions').upsert({ user_id: userId, ...perms }, { onConflict: 'user_id' });
+  const actorId = actor?.id || actor?.user_id || null;
+  const actorEmail = actor?.email || null;
+  let createdBy = perms.created_by || null;
+  let createdByEmail = perms.created_by_email || null;
+
+  // Preserve created_by if record exists.
+  try {
+    const { data: existing, error: existErr } = await supabaseAdmin
+      .from('system_admin_permissions')
+      .select('created_by, created_by_email')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (existErr && existErr.code !== 'PGRST116') throw existErr;
+    if (existing) {
+      createdBy = existing.created_by || createdBy;
+      createdByEmail = existing.created_by_email || createdByEmail;
+    }
+  } catch (err) {
+    // ignore lookup failures; best-effort only
+  }
+
+  const payload = {
+    user_id: userId,
+    can_finance_act: perms.can_finance_act,
+    can_registry: perms.can_registry,
+    can_monitor: perms.can_monitor,
+    can_alerts: perms.can_alerts,
+    is_active: perms.is_active !== false,
+    created_by: createdBy || actorId || null,
+    created_by_email: createdByEmail || actorEmail || null,
+    updated_by: actorId || null,
+    updated_by_email: actorEmail || null,
+  };
+
+  const { error } = await supabaseAdmin.from('system_admin_permissions').upsert(payload, { onConflict: 'user_id' });
   if (error) throw error;
   return perms;
 }
@@ -1861,7 +1916,7 @@ async function getSystemAdminPermsForUsers(userIds = []) {
   if (!Array.isArray(userIds) || userIds.length === 0) return [];
   const { data, error } = await supabaseAdmin
     .from('system_admin_permissions')
-    .select('user_id, can_finance_act, can_registry, can_monitor, can_alerts, is_active')
+    .select('user_id, can_finance_act, can_registry, can_monitor, can_alerts, is_active, created_at, updated_at, created_by, created_by_email, updated_by, updated_by_email')
     .in('user_id', userIds);
   if (error) throw error;
   return data || [];
@@ -3450,8 +3505,16 @@ router.get('/system-admins', async (_req,res)=>{
           if (!userErr) email = userData?.user?.email || null;
         }catch(_){ /* ignore */ }
       }
-      const perms = normalizeSystemAdminPerms(permMap.get(row.user_id), row.role);
-      return { ...row, email, permissions: perms };
+      const permRow = permMap.get(row.user_id) || null;
+      const perms = normalizeSystemAdminPerms(permRow, row.role);
+      return {
+        ...row,
+        email,
+        permissions: perms,
+        updated_at: permRow?.updated_at || null,
+        updated_by: permRow?.updated_by || null,
+        updated_by_email: permRow?.updated_by_email || null,
+      };
     }));
     res.json(enriched);
   }catch(e){
@@ -3472,7 +3535,7 @@ router.post('/system-admins', async (req,res)=>{
   try{
     const { userId } = await ensureAuthUser(email, password);
     await upsertUserRole({ user_id: userId, role, sacco_id: null, matatu_id: null });
-    const perms = await upsertSystemAdminPerms(userId, role, permsBody);
+    const perms = await upsertSystemAdminPerms(userId, role, permsBody, { id: req.user?.id, email: req.user?.email || null });
     await logAdminAction({
       req,
       action: 'system_admin_create',
@@ -3510,7 +3573,9 @@ router.patch('/system-admins/:userId', async (req,res)=>{
       if (roleErr && roleErr.code !== 'PGRST116') throw roleErr;
       role = normalizeSystemAdminRole(roleRow?.role || 'SYSTEM_ADMIN');
     }
-    const perms = permsBody ? await upsertSystemAdminPerms(userId, role, permsBody) : await getSystemAdminPerms(userId, role);
+    const perms = permsBody
+      ? await upsertSystemAdminPerms(userId, role, permsBody, { id: req.user?.id, email: req.user?.email || null })
+      : await getSystemAdminPerms(userId, role);
     await logAdminAction({
       req,
       action: 'system_admin_update',

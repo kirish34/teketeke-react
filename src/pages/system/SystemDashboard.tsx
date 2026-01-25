@@ -350,6 +350,12 @@ type SystemAdminPerms = {
   can_monitor: boolean
   can_alerts: boolean
   is_active?: boolean
+  created_at?: string | null
+  updated_at?: string | null
+  created_by?: string | null
+  created_by_email?: string | null
+  updated_by?: string | null
+  updated_by_email?: string | null
 }
 
 type SystemAdminRow = {
@@ -10522,6 +10528,8 @@ const SystemDashboard = ({
                     <th>Registry</th>
                     <th>Monitoring</th>
                     <th>Alerts</th>
+                    <th>Last updated</th>
+                    <th>By</th>
                     <th>Status</th>
                   </tr>
                 </thead>
@@ -10571,6 +10579,12 @@ const SystemDashboard = ({
                             </label>
                           </td>
                         ))}
+                        <td>
+                          <div className="muted small">{perms.updated_at ? new Date(perms.updated_at).toLocaleString() : '—'}</div>
+                        </td>
+                        <td>
+                          <div className="muted small">{perms.updated_by_email || perms.created_by_email || '—'}</div>
+                        </td>
                         <td>{perms.is_active === false ? 'Inactive' : 'Active'}</td>
                       </tr>
                     )
