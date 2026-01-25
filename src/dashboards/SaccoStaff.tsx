@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { NavLink } from 'react-router-dom'
 import DashboardShell from '../components/DashboardShell'
 import { api } from '../services/api'
 import { useAuth } from '../state/auth'
@@ -53,8 +52,9 @@ function buildPaidMap(txs: Tx[], kinds: string[]) {
 }
 
 const SaccoStaffDashboard = () => {
-  const { token } = useAuth()
+  const { token, user, logout } = useAuth()
 
+  const [saccos, setSaccos] = useState<Sacco[]>([])
   const [matatus, setMatatus] = useState<Matatu[]>([])
   const [loans, setLoans] = useState<Loan[]>([])
   const [saccoId, setSaccoId] = useState('')
@@ -73,6 +73,8 @@ const SaccoStaffDashboard = () => {
   const [savingsAmount, setSavingsAmount] = useState('')
   const [savingsNote, setSavingsNote] = useState('')
   const [savingsMsg, setSavingsMsg] = useState('')
+  const [staffName, setStaffName] = useState('')
+  const [timeLabel, setTimeLabel] = useState('')
 
   const [accessGrants, setAccessGrants] = useState<AccessGrant[]>([])
   const [activeTab, setActiveTab] = useState<'daily' | 'loans' | 'savings' | 'vehicle_care'>('daily')
@@ -84,6 +86,7 @@ const SaccoStaffDashboard = () => {
       try {
         const res = await fetchJson<{ items?: Sacco[] }>('/u/my-saccos')
         const items = res.items || []
+        setSaccos(items)
         if (items.length) setSaccoId(items[0].sacco_id || '')
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load SACCOs')
@@ -127,6 +130,48 @@ const SaccoStaffDashboard = () => {
     }
     void loadData()
   }, [fetchJson, saccoId])
+
+  useEffect(() => {
+    if (!saccoId || !user?.id) {
+      setStaffName('')
+      return
+    }
+    void (async () => {
+      try {
+        const res = await fetchJson<{ items?: Array<{ user_id?: string; name?: string; email?: string }> }>(
+          `/u/sacco/${encodeURIComponent(saccoId)}/staff`,
+        )
+        const items = res.items || []
+        const match =
+          items.find((s) => s.user_id === user.id) ||
+          items.find(
+            (s) =>
+              s.email &&
+              user.email &&
+              s.email.toString().trim().toLowerCase() === user.email.toString().trim().toLowerCase(),
+          ) ||
+          null
+        setStaffName(match?.name || '')
+      } catch {
+        setStaffName('')
+      }
+    })()
+  }, [fetchJson, saccoId, user?.email, user?.id])
+
+  useEffect(() => {
+    const updateTime = () => {
+      setTimeLabel(
+        new Date().toLocaleTimeString('en-KE', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }),
+      )
+    }
+    updateTime()
+    const timer = setInterval(updateTime, 60000)
+    return () => clearInterval(timer)
+  }, [])
 
   const todayIso = todayKey()
   const todayTxs = useMemo(
@@ -263,21 +308,37 @@ const SaccoStaffDashboard = () => {
     })
   }
 
-  const nav = (
-    <>
-      <NavLink className={({ isActive }) => `tab${isActive ? ' active' : ''}`} to="/sacco/staff">
-        Cash Desk
-      </NavLink>
-    </>
-  )
+  const heroRight = user?.role ? `Role: ${user.role}` : 'SACCO Staff'
+  const operatorLabel = useMemo(() => {
+    const match = saccos.find((s) => s.sacco_id === saccoId)
+    return match?.name || 'Operator'
+  }, [saccos, saccoId])
+  const staffLabel = staffName || user?.name || (user?.email ? user.email.split('@')[0] : '') || 'Staff'
 
   return (
-    <DashboardShell title="SACCO Staff" subtitle="Cash Desk" nav={nav} navLabel="SACCO staff navigation">
-      <div className="row" style={{ gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
-        {loading ? <span className="muted small">Loading...</span> : null}
-        {error ? <span className="err">{error}</span> : null}
-        <span className="muted small">Matatus: {matatus.length || 0}</span>
+    <DashboardShell title="SACCO Staff" subtitle="Cash Desk" hideShellChrome>
+      <div className="hero-bar" style={{ marginBottom: 16 }}>
+        <div className="hero-left">
+          <div className="hero-chip">SACCO STAFF</div>
+          <h2 style={{ margin: '6px 0 4px' }}>{operatorLabel} Dashboard</h2>
+          <div className="muted">Hello, {staffLabel}</div>
+          <div className="muted">Collect daily fees, loans, and savings</div>
+          <div className="hero-inline">
+            <span className="sys-pill-lite">{todayKey()}</span>
+            <span className="sys-pill-lite">{timeLabel}</span>
+            <span className="sys-pill-lite">Matatus: {matatus.length || 0}</span>
+          </div>
+        </div>
+        <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+          <div className="badge-ghost">{heroRight}</div>
+          <button type="button" className="btn ghost" onClick={logout}>
+            Logout
+          </button>
+        </div>
       </div>
+
+      {error ? <div className="card err">Error: {error}</div> : null}
+      {loading ? <div className="muted small" style={{ marginTop: 8 }}>Loading...</div> : null}
 
       <nav className="sys-nav" aria-label="SACCO staff sections">
         {[
