@@ -356,6 +356,9 @@ type SystemAdminPerms = {
   created_by_email?: string | null
   updated_by?: string | null
   updated_by_email?: string | null
+  full_name?: string | null
+  id_number?: string | null
+  phone?: string | null
 }
 
 type SystemAdminRow = {
@@ -1380,6 +1383,9 @@ const SystemDashboard = ({
     can_registry: true,
     can_monitor: true,
     can_alerts: true,
+    full_name: '',
+    id_number: '',
+    phone: '',
   })
 
   const [activeTab, setActiveTab] = useState<SystemTabId>(controlledTab || 'overview')
@@ -4426,6 +4432,9 @@ const SystemDashboard = ({
         email,
         password,
         role: systemAdminForm.role,
+        full_name: systemAdminForm.full_name || null,
+        id_number: systemAdminForm.id_number || null,
+        phone: systemAdminForm.phone || null,
         permissions: {
           can_finance_act: systemAdminForm.can_finance_act,
           can_registry: systemAdminForm.can_registry,
@@ -4442,6 +4451,9 @@ const SystemDashboard = ({
         can_registry: true,
         can_monitor: true,
         can_alerts: true,
+        full_name: '',
+        id_number: '',
+        phone: '',
       })
       await loadSystemAdmins()
     } catch (err) {
@@ -4449,7 +4461,7 @@ const SystemDashboard = ({
     }
   }
 
-  async function updateSystemAdmin(userId: string, patch: { role?: string; permissions?: Partial<SystemAdminPerms> }) {
+  async function updateSystemAdmin(userId: string, patch: { role?: string; permissions?: Partial<SystemAdminPerms>; full_name?: string | null; id_number?: string | null; phone?: string | null }) {
     if (!userId) return
     setSystemAdminSaving((prev) => ({ ...prev, [userId]: true }))
     try {
@@ -10478,6 +10490,33 @@ const SystemDashboard = ({
               />
             </label>
             <label className="muted small">
+              Full name
+              <input
+                className="input"
+                placeholder="Full name"
+                value={systemAdminForm.full_name}
+                onChange={(e) => setSystemAdminForm((f) => ({ ...f, full_name: e.target.value }))}
+              />
+            </label>
+            <label className="muted small">
+              ID number
+              <input
+                className="input"
+                placeholder="ID number"
+                value={systemAdminForm.id_number}
+                onChange={(e) => setSystemAdminForm((f) => ({ ...f, id_number: e.target.value }))}
+              />
+            </label>
+            <label className="muted small">
+              Phone
+              <input
+                className="input"
+                placeholder="Phone"
+                value={systemAdminForm.phone}
+                onChange={(e) => setSystemAdminForm((f) => ({ ...f, phone: e.target.value }))}
+              />
+            </label>
+            <label className="muted small">
               Role
               <select
                 value={systemAdminForm.role}
@@ -10523,6 +10562,9 @@ const SystemDashboard = ({
                 <thead>
                   <tr>
                     <th>Email</th>
+                    <th>Name</th>
+                    <th>ID</th>
+                    <th>Phone</th>
                     <th>Role</th>
                     <th>Finance</th>
                     <th>Registry</th>
@@ -10547,6 +10589,9 @@ const SystemDashboard = ({
                     return (
                       <tr key={id}>
                         <td>{row.email || '—'}</td>
+                        <td>{perms.full_name || '—'}</td>
+                        <td>{perms.id_number || '—'}</td>
+                        <td>{perms.phone || '—'}</td>
                         <td>
                           <select
                             value={(row.role || 'SYSTEM_ADMIN').toUpperCase()}

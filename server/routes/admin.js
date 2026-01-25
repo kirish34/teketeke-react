@@ -1843,6 +1843,9 @@ function normalizeSystemAdminPerms(raw, role) {
     can_monitor: raw?.can_monitor !== false,
     can_alerts: raw?.can_alerts !== false,
     is_active: raw?.is_active !== false,
+    full_name: raw?.full_name || null,
+    id_number: raw?.id_number || null,
+    phone: raw?.phone || null,
   };
   if (isSuper) {
     return {
@@ -1852,6 +1855,9 @@ function normalizeSystemAdminPerms(raw, role) {
       can_monitor: true,
       can_alerts: true,
       is_active: true,
+      full_name: raw?.full_name || null,
+      id_number: raw?.id_number || null,
+      phone: raw?.phone || null,
       created_at: raw?.created_at || null,
       updated_at: raw?.updated_at || null,
       created_by: raw?.created_by || null,
@@ -1868,6 +1874,9 @@ function normalizeSystemAdminPerms(raw, role) {
     created_by_email: raw?.created_by_email || null,
     updated_by: raw?.updated_by || raw?.created_by || null,
     updated_by_email: raw?.updated_by_email || raw?.created_by_email || null,
+    full_name: raw?.full_name || null,
+    id_number: raw?.id_number || null,
+    phone: raw?.phone || null,
   };
 }
 
@@ -1901,6 +1910,9 @@ async function upsertSystemAdminPerms(userId, role, rawPerms, actor = {}) {
     can_monitor: perms.can_monitor,
     can_alerts: perms.can_alerts,
     is_active: perms.is_active !== false,
+    full_name: perms.full_name || null,
+    id_number: perms.id_number || null,
+    phone: perms.phone || null,
     created_by: createdBy || actorId || null,
     created_by_email: createdByEmail || actorEmail || null,
     updated_by: actorId || null,
@@ -1916,7 +1928,7 @@ async function getSystemAdminPermsForUsers(userIds = []) {
   if (!Array.isArray(userIds) || userIds.length === 0) return [];
   const { data, error } = await supabaseAdmin
     .from('system_admin_permissions')
-    .select('user_id, can_finance_act, can_registry, can_monitor, can_alerts, is_active, created_at, updated_at, created_by, created_by_email, updated_by, updated_by_email')
+    .select('user_id, can_finance_act, can_registry, can_monitor, can_alerts, is_active, created_at, updated_at, created_by, created_by_email, updated_by, updated_by_email, full_name, id_number, phone')
     .in('user_id', userIds);
   if (error) throw error;
   return data || [];
@@ -3527,6 +3539,9 @@ router.post('/system-admins', async (req,res)=>{
   const password = req.body?.password || '';
   const role = normalizeSystemAdminRole(req.body?.role || 'SYSTEM_ADMIN');
   const permsBody = req.body?.permissions || {};
+  if (req.body?.full_name) permsBody.full_name = req.body.full_name;
+  if (req.body?.id_number) permsBody.id_number = req.body.id_number;
+  if (req.body?.phone) permsBody.phone = req.body.phone;
 
   if (!email) return res.status(400).json({ error:'email required' });
   if (!password) return res.status(400).json({ error:'password required' });
@@ -3553,7 +3568,10 @@ router.patch('/system-admins/:userId', async (req,res)=>{
   const userId = req.params?.userId;
   if (!userId) return res.status(400).json({ error:'userId required' });
   const nextRole = req.body?.role ? normalizeSystemAdminRole(req.body.role) : null;
-  const permsBody = req.body?.permissions || null;
+  const permsBody = req.body?.permissions || {};
+  if (req.body?.full_name !== undefined) permsBody.full_name = req.body.full_name;
+  if (req.body?.id_number !== undefined) permsBody.id_number = req.body.id_number;
+  if (req.body?.phone !== undefined) permsBody.phone = req.body.phone;
   const password = req.body?.password || null;
 
   try{
