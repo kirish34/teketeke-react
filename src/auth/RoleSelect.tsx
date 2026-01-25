@@ -8,6 +8,7 @@ type DashCard = {
 };
 
 const dashboards: DashCard[] = [
+  { code: "SSA", title: "Super System Admin", desc: "Full platform control, registry, audits and operator oversight.", next: "/system" },
   { code: "SA", title: "System Admin", desc: "Platform settings, alerts and audit logs.", next: "/system" },
   { code: "SC", title: "SACCO Admin", desc: "Manage members, vehicles, transactions, loans and reports.", next: "/sacco" },
   { code: "SS", title: "SACCO Staff", desc: "Cash desk: record fees, savings and loan repayments.", next: "/sacco/staff" },
