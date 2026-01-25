@@ -23,7 +23,6 @@ import MonitoringPage from "../pages/system/MonitoringPage";
 import IntelligencePage from "../pages/system/IntelligencePage";
 import AlertsPage from "../pages/system/AlertsPage";
 import QuarantinePage from "../pages/system/QuarantinePage";
-import AdminsPage from "../pages/system/AdminsPage";
 import OpsDashboard from "../dashboards/Ops";
 import DashHome from "../dashboards/DashHome";
 import SaccoApprovals from "../pages/SaccoApprovals";
@@ -159,7 +158,6 @@ export const routes: RouteObject[] = [
       { path: "monitoring", element: <MonitoringPage /> },
       { path: "intelligence", element: <IntelligencePage /> },
       { path: "alerts", element: <AlertsPage /> },
-      { path: "admins", element: <AdminsPage /> },
       { path: "quarantine", element: <QuarantinePage /> },
       { path: "operators", element: <OperatorsPage /> },
       { path: "payments", element: <PaymentsPage /> },
