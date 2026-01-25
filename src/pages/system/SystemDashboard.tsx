@@ -1426,6 +1426,8 @@ const SystemDashboard = ({
       ? 'payouts'
       : location.pathname === '/system/worker-monitor'
         ? 'worker_monitor'
+        : location.pathname === '/system/admins'
+          ? 'system_admins'
         : null
 
   useEffect(() => {

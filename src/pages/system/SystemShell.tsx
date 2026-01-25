@@ -8,6 +8,7 @@ const systemLinks = [
   { to: '/system/monitoring', label: 'Monitoring' },
   { to: '/system/intelligence', label: 'Intelligence' },
   { to: '/system/alerts', label: 'Alerts' },
+  { to: '/system/admins', label: 'Admins' },
   { to: '/system/quarantine', label: 'Quarantine' },
   { to: '/system/operators', label: 'Operators' },
   { to: '/system/payments', label: 'Payments' },
