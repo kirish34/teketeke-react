@@ -498,9 +498,6 @@ export default function SaccoDashboard() {
       { id: 'savings', label: 'Savings' },
       { id: 'loans', label: 'Loans' },
     ]
-    if (isOperatorAdmin) {
-      items.push({ id: 'payouts', label: 'Payouts' })
-    }
     items.push({ id: 'staff', label: 'Staff' })
     items.push({ id: 'routes', label: routesLabel })
     items.push({ id: 'vehicle_care', label: 'Vehicle Care' })
