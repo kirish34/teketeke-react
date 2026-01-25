@@ -321,9 +321,6 @@ const SaccoStaffDashboard = () => {
       <NavLink className={({ isActive }) => `tab${isActive ? ' active' : ''}`} to="/sacco/staff">
         Cash Desk
       </NavLink>
-      <NavLink className={({ isActive }) => `tab${isActive ? ' active' : ''}`} to="/sacco/live-payments">
-        Live Payments
-      </NavLink>
     </>
   )
 

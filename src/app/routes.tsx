@@ -29,7 +29,6 @@ import DashHome from "../dashboards/DashHome";
 import SaccoApprovals from "../pages/SaccoApprovals";
 import WithdrawalPhonesRoute from "../pages/WithdrawalPhonesRoute";
 import PendingAccess from "../pages/PendingAccess";
-import LivePaymentsPage from "../pages/sacco/LivePayments";
 import MatatuLivePayments from "../pages/matatu/MatatuLivePayments";
 
 export const routes: RouteObject[] = [
@@ -95,14 +94,6 @@ export const routes: RouteObject[] = [
     element: (
       <RequireRole allow={["sacco_staff", "sacco_admin", "super_admin"]}>
         <SaccoStaffDashboard />
-      </RequireRole>
-    ),
-  },
-  {
-    path: "/sacco/live-payments",
-    element: (
-      <RequireRole allow={["sacco_staff", "sacco_admin", "super_admin", "system_admin"]}>
-        <LivePaymentsPage />
       </RequireRole>
     ),
   },
