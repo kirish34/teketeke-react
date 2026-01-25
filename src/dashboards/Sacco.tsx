@@ -2101,6 +2101,11 @@ export default function SaccoDashboard() {
 
     const endpoint = useSacco ? '/api/v2/sacco/wallet-ledger' : '/api/v2/matatu/wallet-ledger'
     const matatuIdForOwner = ownerMatatuId || ''
+    if (useSacco && !currentSacco) {
+      setLedgerError('Select an operator to view the ledger.')
+      debugAuth('ledger_blocked_no_sacco', { role, sacco_id: currentSacco })
+      return
+    }
     if (useOwner && !matatuIdForOwner) {
       setLedgerError('No vehicle found in your profile.')
       debugAuth('ledger_blocked_no_matatu', { role, matatu_id: matatuIdForOwner })
@@ -2115,6 +2120,7 @@ export default function SaccoDashboard() {
       if (ledgerFrom) params.set('from', ledgerFrom)
       if (ledgerTo) params.set('to', ledgerTo)
       if (kind) params.set('wallet_kind', kind)
+      if (useSacco && currentSacco) params.set('sacco_id', currentSacco)
       if (useOwner && matatuIdForOwner) params.set('matatu_id', matatuIdForOwner)
       debugAuth('ledger_fetch', { endpoint, params: Object.fromEntries(params.entries()) })
       const headers = { Accept: 'application/json' }

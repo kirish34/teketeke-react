@@ -4,6 +4,7 @@ export function saccoFetch(url: string, saccoId: string | null | undefined, init
   const headers = new Headers(init?.headers || {})
   if (saccoId) {
     headers.set('x-sacco-id', saccoId)
+    headers.set('x-active-sacco-id', saccoId)
   }
   return authFetch(url, { ...(init || {}), headers })
 }
