@@ -122,13 +122,12 @@ const TaxiDashboard = () => {
       anyRow?.wallet_code ||
       anyRow?.virtual_account_code ||
       ""
-    const account =
+    const accountAlias =
       driverRows.find((r) => String(r.alias_type || "").toUpperCase() === "ACCOUNT_NUMBER")?.alias ||
       driverRows.find((r) => String(r.alias_type || "").toUpperCase() === "WALLET_CODE")?.alias ||
-      paybill ||
-      anyRow?.wallet_code ||
-      anyRow?.virtual_account_code ||
       ""
+    const accountFallback = anyRow?.wallet_code || anyRow?.virtual_account_code || ""
+    const account = accountAlias || accountFallback || paybill
     return { paybill, account }
   }, [paybillAliases, paybillCodes.driver, user?.matatu_id])
 
@@ -415,7 +414,11 @@ const TaxiDashboard = () => {
             />
             {paybillError ? <div className="err">PayBill load error: {paybillError}</div> : null}
             <div style={{ marginTop: 12 }}>
-              <PaybillCodeCard title="Taxi Driver Account" label="TAXI Account (Driver)" code={driverCodes.account} />
+              <PaybillCodeCard
+                title="Taxi Driver Account"
+                label="TAXI Account (Driver)"
+                code={driverCodes.account || driverCodes.paybill || ''}
+              />
               <div className="muted small" style={{ marginTop: 4 }}>
                 PayBill code: {driverCodes.paybill || "—"}
               </div>
