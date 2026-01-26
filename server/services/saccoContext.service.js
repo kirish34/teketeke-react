@@ -19,7 +19,7 @@ function normalizeSaccoRole(role) {
 
 // Unified resolver across app_user_context, user_roles, staff_profiles
 async function getSaccoContextUnified(userId) {
-  if (!userId) return { role: null, saccoId: null, source: null };
+  if (!userId) return { role: null, saccoId: null, matatuId: null, source: null };
   const norm = (r) => normalizeSaccoRole(r);
 
   // 1) app_user_context first
@@ -30,8 +30,9 @@ async function getSaccoContextUnified(userId) {
   const ctx = ctxRes.rows[0] || null;
   const ctxRole = norm(ctx?.effective_role);
   const ctxSacco = ctx?.sacco_id || null;
+  const ctxMatatu = ctx?.matatu_id || null;
   if (ctxRole && ctxSacco) {
-    return { role: ctxRole, saccoId: ctxSacco, source: 'app_user_context' };
+    return { role: ctxRole, saccoId: ctxSacco, matatuId: ctxMatatu, source: 'app_user_context' };
   }
 
   // 2) user_roles via supabaseAdmin or pool
@@ -57,7 +58,7 @@ async function getSaccoContextUnified(userId) {
       sacco_id: sacco1,
       matatu_id: r1?.matatu_id || ctx?.matatu_id || null,
     });
-    return { role: role1, saccoId: sacco1, source: 'user_roles' };
+    return { role: role1, saccoId: sacco1, matatuId: r1?.matatu_id || ctxMatatu || null, source: 'user_roles' };
   }
 
   // 3) staff_profiles
@@ -83,24 +84,30 @@ async function getSaccoContextUnified(userId) {
       sacco_id: sacco2,
       matatu_id: ctx?.matatu_id || null,
     });
-    return { role: role2, saccoId: sacco2, source: 'staff_profiles' };
+    return { role: role2, saccoId: sacco2, matatuId: ctxMatatu || null, source: 'staff_profiles' };
   }
 
   // 4) Last resort repair
   try {
     const repaired = await ensureAppUserContextFromUserRoles(userId, ctx?.email || r2?.email || null);
-    if (repaired?.effective_role && repaired?.sacco_id) {
-      return {
-        role: norm(repaired.effective_role),
-        saccoId: repaired.sacco_id,
-        source: 'repair',
-      };
-    }
+  if (repaired?.effective_role && repaired?.sacco_id) {
+    return {
+      role: norm(repaired.effective_role),
+      saccoId: repaired.sacco_id,
+      matatuId: repaired.matatu_id || ctxMatatu || null,
+      source: 'repair',
+    };
+  }
   } catch {
     // ignore
   }
 
-  return { role: ctxRole || role1 || role2 || null, saccoId: ctxSacco || sacco1 || sacco2 || null, source: 'none' };
+  return {
+    role: ctxRole || role1 || role2 || null,
+    saccoId: ctxSacco || sacco1 || sacco2 || null,
+    matatuId: ctxMatatu || r1?.matatu_id || null,
+    source: 'none',
+  };
 }
 
 function isSaccoAllowedRole(role) {
@@ -123,6 +130,7 @@ function requireSaccoAccess({ allowSystemWithoutSacco = false, allowStaff = true
             user_id: uid,
             role: ctx?.role || null,
             sacco_id: ctx?.saccoId || null,
+            matatu_id: ctx?.matatuId || null,
             source: ctx?.source || null,
             path: req.path,
           });
@@ -136,10 +144,30 @@ function requireSaccoAccess({ allowSystemWithoutSacco = false, allowStaff = true
             role: ctx?.role || null,
             user_sacco_id: ctx?.saccoId || null,
             requested_sacco_id: req.params?.saccoId || req.query?.sacco_id || null,
+            user_matatu_id: ctx?.matatuId || null,
             source: ctx?.source || null,
           },
           request_id: req.requestId || null,
         });
+      }
+      // Fallback: if matatu_id is present but sacco_id missing, derive sacco from matatu row for matatu_staff
+      if (!ctx.saccoId && ctx.role === 'MATATU_STAFF') {
+        const matatuIdParam =
+          (req.params && (req.params.matatu_id || req.params.matatuId)) ||
+          (req.query && (req.query.matatu_id || req.query.matatuId)) ||
+          (req.body && (req.body.matatu_id || req.body.matatuId)) ||
+          null;
+        if (matatuIdParam) {
+          try {
+            const matatuRes = await pool.query(`SELECT sacco_id FROM matatus WHERE id = $1 LIMIT 1`, [matatuIdParam]);
+            const matRow = matatuRes.rows[0] || null;
+            if (matRow?.sacco_id) {
+              ctx.saccoId = matRow.sacco_id;
+            }
+          } catch {
+            /* ignore */
+          }
+        }
       }
       if (!ctx.saccoId && !(allowSystemWithoutSacco && ctx.role === 'SYSTEM_ADMIN')) {
         if (String(process.env.DEBUG_SACCO_AUTH || '').toLowerCase() === 'true') {
@@ -148,6 +176,7 @@ function requireSaccoAccess({ allowSystemWithoutSacco = false, allowStaff = true
             user_id: uid,
             role: ctx.role,
             sacco_id: ctx?.saccoId || null,
+            matatu_id: ctx?.matatuId || null,
             source: ctx?.source || null,
             path: req.path,
           });
@@ -161,6 +190,7 @@ function requireSaccoAccess({ allowSystemWithoutSacco = false, allowStaff = true
             role: ctx?.role || null,
             user_sacco_id: ctx?.saccoId || null,
             requested_sacco_id: req.params?.saccoId || req.query?.sacco_id || null,
+            user_matatu_id: ctx?.matatuId || null,
             source: ctx?.source || null,
           },
           request_id: req.requestId || null,
