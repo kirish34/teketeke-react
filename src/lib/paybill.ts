@@ -6,6 +6,8 @@ export type PaybillAliasRow = {
   entity_id?: string
   entity_type?: string
   wallet_kind?: string
+  wallet_code?: string
+  virtual_account_code?: string
   alias?: string
   alias_type?: string
 }
