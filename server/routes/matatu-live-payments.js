@@ -263,6 +263,7 @@ router.get('/live-payments', async (req, res) => {
           p.created_at,
           p.amount,
           COALESCE(p.display_msisdn, p.msisdn_normalized, p.msisdn) AS msisdn,
+          sc.sender_name AS sender_name_db,
           p.account_reference,
           p.receipt,
           p.status,
@@ -271,6 +272,8 @@ router.get('/live-payments', async (req, res) => {
           p.raw,
           p.raw_payload
         FROM mpesa_c2b_payments p
+        LEFT JOIN sender_contacts sc
+          ON sc.msisdn = p.msisdn
         LEFT JOIN wallet_aliases wa
           ON wa.alias = p.account_reference
          AND wa.is_active = true
@@ -294,9 +297,9 @@ router.get('/live-payments', async (req, res) => {
       rowcount: rows.length,
     });
 
-    const payments = (rows || []).map(({ raw, raw_payload, ...rest }) => ({
+    const payments = (rows || []).map(({ raw, raw_payload, sender_name_db, ...rest }) => ({
       ...rest,
-      sender_name: extractSenderNameFromRaw(raw || raw_payload),
+      sender_name: sender_name_db || extractSenderNameFromRaw(raw || raw_payload),
     }));
 
     return res.json({
