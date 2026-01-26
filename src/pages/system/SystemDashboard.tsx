@@ -1027,6 +1027,14 @@ function formatVehicleLabel(row?: VehicleRow | null) {
   return row.number_plate || row.plate || row.registration || row.id || '-'
 }
 
+function normalizeVehicleType(value?: string) {
+  const val = (value || '').toUpperCase()
+  if (val === 'BODA' || val === 'BODABODA') return 'BODABODA'
+  if (val === 'MATATU') return 'MATATU'
+  if (val === 'TAXI') return 'TAXI'
+  return val
+}
+
 function formatUssdCode(row?: UssdPoolRow | null) {
   if (!row) return '-'
   return row.full_code || row.code || row.base || '-'
@@ -2333,14 +2341,6 @@ const SystemDashboard = ({
     if (ussdImportForm.mode === 'short_base') return 'Paste base codes (1-999), one per line'
     return 'Paste full codes (base + check digit), one per line'
   }, [ussdImportForm.mode])
-
-  const normalizeVehicleType = (value?: string) => {
-    const val = (value || '').toUpperCase()
-    if (val === 'BODA' || val === 'BODABODA') return 'BODABODA'
-    if (val === 'MATATU') return 'MATATU'
-    if (val === 'TAXI') return 'TAXI'
-    return val
-  }
 
   const vehiclesFor = (kind: VehicleKind) =>
     matatus.filter((v) => normalizeVehicleType(v.vehicle_type || v.body_type || v.type) === kind)
