@@ -96,6 +96,7 @@ const TaxiDashboard = () => {
   const [error, setError] = useState<string | null>(null)
   const [accessGrants, setAccessGrants] = useState<AccessGrant[]>([])
   const [activeTab, setActiveTab] = useState<"today" | "cash" | "expenses" | "insights" | "goals" | "automation" | "vehicle_care">("today")
+  const [walletCodeFallback, setWalletCodeFallback] = useState("")
 
   const todayISO = useMemo(() => new Date().toISOString().slice(0, 10), [])
   const weekStartISO = useMemo(() => {
@@ -129,9 +130,9 @@ const TaxiDashboard = () => {
       scopedRows.find((r) => String(r.alias_type || "").toUpperCase() === "WALLET_CODE")?.alias ||
       ""
     const accountFallback = anyRow?.wallet_code || anyRow?.virtual_account_code || ""
-    const account = accountAlias || accountFallback || paybill
+    const account = accountAlias || accountFallback || walletCodeFallback || paybill
     return { paybill, account }
-  }, [paybillAliases, paybillCodes.driver, user?.matatu_id])
+  }, [paybillAliases, paybillCodes.driver, user?.matatu_id, walletCodeFallback])
 
   const filterToday = (rows: Array<{ created_at?: string; time?: string; timestamp?: string }>) => {
     const today = new Date()
@@ -211,6 +212,32 @@ const TaxiDashboard = () => {
       }
     })()
   }, [])
+
+  useEffect(() => {
+    const matatuId = user?.matatu_id || ""
+    if (!matatuId) {
+      setWalletCodeFallback("")
+      return
+    }
+    void (async () => {
+      try {
+        const params = new URLSearchParams({ matatu_id: matatuId, limit: "1" })
+        const res = await authFetch(`/api/wallets/owner-ledger?${params.toString()}`, {
+          headers: { Accept: "application/json" },
+        })
+        if (!res.ok) return
+        const data = (await res.json().catch(() => ({}))) as any
+        const code =
+          data?.wallets?.[0]?.virtual_account_code ||
+          data?.wallets?.[0]?.wallet_code ||
+          data?.wallets?.[0]?.owner_virtual_account_code ||
+          ""
+        if (code) setWalletCodeFallback(code)
+      } catch {
+        /* ignore */
+      }
+    })()
+  }, [user?.matatu_id])
 
   useEffect(() => {
     updateTargetSummary(target ? Number(target) : 0, monthTotals?.net)
