@@ -258,7 +258,7 @@ router.get('/live-payments', async (req, res) => {
       `
         SELECT
           p.id,
-          COALESCE(p.received_at, p.created_at) AS received_at,
+          COALESCE(p.trans_time, p.created_at) AS received_at,
           p.created_at,
           p.amount,
           COALESCE(p.display_msisdn, p.msisdn_normalized, p.msisdn) AS msisdn,
@@ -276,8 +276,8 @@ router.get('/live-payments', async (req, res) => {
         LEFT JOIN wallets w_match
           ON w_match.id = p.matched_wallet_id
         WHERE (w_alias.matatu_id = $1 OR w_match.matatu_id = $1)
-          AND COALESCE(p.received_at, p.created_at) >= $2
-        ORDER BY COALESCE(p.received_at, p.created_at) DESC
+          AND COALESCE(p.trans_time, p.created_at) >= $2
+        ORDER BY COALESCE(p.trans_time, p.created_at) DESC
         LIMIT $3
       `,
       params,
