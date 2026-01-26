@@ -5,7 +5,7 @@ const { requireUser } = require('../middleware/auth');
 const { supabaseAdmin } = require('../supabase');
 const { validate } = require('../middleware/validate');
 const { z } = require('zod');
-const { requireSaccoAccess } = require('../services/saccoContext.service');
+const { requireSaccoAccess, getSaccoContextUnified } = require('../services/saccoContext.service');
 const { resolveSaccoAuthContext, normalizeRole: normalizeSaccoRole } = require('../services/saccoAuth.service');
 
 // Accept broader inputs for SACCO Staff UI and normalize
@@ -52,14 +52,15 @@ async function ensureMatatuTripAccess({ userId, matatuId }) {
   const matatuRes = await pool.query(`SELECT id, sacco_id FROM matatus WHERE id = $1 LIMIT 1`, [matatuId]);
   const matatu = matatuRes.rows[0] || null;
   if (!matatu) return { ok: false, status: 404, error: 'matatu_not_found' };
-  const ctx = await resolveSaccoAuthContext({ userId });
-  const role = normalizeSaccoRole(ctx.effective_role);
+  const ctxUnified = await getSaccoContextUnified(userId);
+  const membership = await resolveSaccoAuthContext({ userId });
+  const role = normalizeSaccoRole(ctxUnified.role || membership.effective_role);
   const saccoMatch =
     matatu.sacco_id &&
-    Array.isArray(ctx.allowed_sacco_ids) &&
-    ctx.allowed_sacco_ids.some((sid) => String(sid) === String(matatu.sacco_id));
-  const matatuMatch = ctx.active_sacco_id && matatu.sacco_id && String(ctx.active_sacco_id) === String(matatu.sacco_id);
-  const ownerMatch = ctx.active_matatu_id && String(ctx.active_matatu_id) === String(matatu.id);
+    Array.isArray(membership.allowed_sacco_ids) &&
+    membership.allowed_sacco_ids.some((sid) => String(sid) === String(matatu.sacco_id));
+  const matatuMatch = ctxUnified.matatuId && String(ctxUnified.matatuId) === String(matatu.id);
+  const ownerMatch = matatuMatch; // treat assigned matatu as ownership for staff scope
   const allowed =
     role === 'SYSTEM_ADMIN' ||
     role === 'SACCO_ADMIN' ||
