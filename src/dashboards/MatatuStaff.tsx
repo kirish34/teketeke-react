@@ -44,6 +44,17 @@ type LedgerWallet = {
   total?: number
   items?: LedgerRow[]
 }
+type Trip = {
+  id?: string
+  status?: string
+  started_at?: string
+  ended_at?: string | null
+  route_id?: string | null
+  mpesa_amount?: number
+  mpesa_count?: number
+  cash_amount?: number
+  cash_count?: number
+}
 
 const fmtKES = (val?: number | null) => `KES ${(Number(val || 0)).toLocaleString("en-KE")}`
 const todayKey = () => new Date().toISOString().slice(0, 10)
@@ -76,6 +87,9 @@ const MatatuStaffDashboard = () => {
   const [manualEntries, setManualEntries] = useState<{ id: string; amount: number; note?: string; created_at: string }[]>([])
   const [staffName, setStaffName] = useState("")
   const [timeLabel, setTimeLabel] = useState("")
+  const [trip, setTrip] = useState<Trip | null>(null)
+  const [tripLoading, setTripLoading] = useState(false)
+  const [tripError, setTripError] = useState<string | null>(null)
 
   const [accessGrants, setAccessGrants] = useState<AccessGrant[]>([])
   const [activeTab, setActiveTab] = useState<"overview" | "trips" | "transactions" | "vehicle_care">("overview")
@@ -256,6 +270,98 @@ const MatatuStaffDashboard = () => {
       setManualEntries([])
     }
   }, [matatuId])
+
+  const loadTrip = useCallback(async () => {
+    if (!matatuId) {
+      setTrip(null)
+      return
+    }
+    setTripLoading(true)
+    setTripError(null)
+    try {
+      const res = await authFetch(`/api/staff/trips/current?matatu_id=${encodeURIComponent(matatuId)}`, {
+        headers: { Accept: "application/json" },
+      })
+      if (!res.ok) {
+        if (res.status === 404) {
+          setTrip(null)
+        } else {
+          const data = await res.json().catch(() => ({}))
+          setTripError(data?.error || res.statusText || "Failed to load trip")
+        }
+        return
+      }
+      const data = await res.json().catch(() => ({}))
+      setTrip(data?.trip || null)
+    } catch (err) {
+      setTripError(err instanceof Error ? err.message : "Failed to load trip")
+    } finally {
+      setTripLoading(false)
+    }
+  }, [matatuId])
+
+  useEffect(() => {
+    if (activeTab !== "trips") return
+    void loadTrip()
+  }, [activeTab, loadTrip])
+
+  useEffect(() => {
+    if (activeTab !== "trips") return
+    const id = setInterval(() => {
+      void loadTrip()
+    }, 5000)
+    return () => clearInterval(id)
+  }, [activeTab, loadTrip])
+
+  const startTrip = useCallback(async () => {
+    if (!saccoId || !matatuId) {
+      setTripError("Select SACCO and matatu first")
+      return
+    }
+    setTripLoading(true)
+    setTripError(null)
+    try {
+      const res = await authFetch("/api/staff/trips/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ sacco_id: saccoId, matatu_id: matatuId, route_id: routeId || null }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        if (data?.trip) setTrip(data.trip)
+        setTripError(data?.error || res.statusText || "Failed to start trip")
+        return
+      }
+      setTrip(data?.trip || null)
+    } catch (err) {
+      setTripError(err instanceof Error ? err.message : "Failed to start trip")
+    } finally {
+      setTripLoading(false)
+    }
+  }, [authFetch, saccoId, matatuId, routeId])
+
+  const endTrip = useCallback(async () => {
+    if (!trip?.id) return
+    setTripLoading(true)
+    setTripError(null)
+    try {
+      const res = await authFetch("/api/staff/trips/end", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ trip_id: trip.id }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setTripError(data?.error || res.statusText || "Failed to end trip")
+        return
+      }
+      setTrip(data?.trip || null)
+    } catch (err) {
+      setTripError(err instanceof Error ? err.message : "Failed to end trip")
+    } finally {
+      setTripLoading(false)
+    }
+  }, [authFetch, trip?.id])
 
   const filteredTx = useMemo(() => (matatuId ? txs.filter((t) => t.matatu_id === matatuId) : []), [txs, matatuId])
   const currentMatatu = useMemo(
@@ -532,38 +638,51 @@ const MatatuStaffDashboard = () => {
             <h3 style={{ margin: 0 }}>Trips</h3>
             <span className="muted small">Route {routeId || "n/a"} - Matatu {assignedMatatuLabel}</span>
           </div>
-          <div className="row" style={{ marginTop: 10, gap: 8, flexWrap: "wrap" }}>
-            <button type="button" className="btn primary">
-              Start Trip
-            </button>
-            <button type="button" className="btn ghost">
-              End Trip
-            </button>
-            <span className="muted small">Start and end trips for the selected route.</span>
+          <div className="row" style={{ marginTop: 10, gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            {!trip || trip?.status === "ENDED" ? (
+              <button type="button" className="btn primary" disabled={tripLoading || !matatuId} onClick={startTrip}>
+                {tripLoading ? "Starting..." : "Start Trip"}
+              </button>
+            ) : (
+              <button type="button" className="btn ghost" disabled={tripLoading} onClick={endTrip}>
+                {tripLoading ? "Ending..." : "End Trip"}
+              </button>
+            )}
+            <span className="muted small">
+              {trip
+                ? trip.status === "ENDED"
+                  ? `Ended ${trip.ended_at ? new Date(trip.ended_at).toLocaleTimeString("en-KE") : ""}`
+                  : `Started ${trip.started_at ? new Date(trip.started_at).toLocaleTimeString("en-KE") : ""}`
+                : "Start and end trips for the selected route."}
+            </span>
+            {tripError ? <span className="err">{tripError}</span> : null}
           </div>
-          <div className="table-wrap" style={{ marginTop: 16 }}>
-            <h4 style={{ margin: "0 0 6px" }}>Today's Trips</h4>
-            <table>
-              <thead>
-                <tr>
-                  <th>Started</th>
-                  <th>Ended</th>
-                  <th>Route</th>
-                  <th>Auto (KES)</th>
-                  <th>Manual (KES)</th>
-                  <th>Total</th>
-                  <th>ID</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td colSpan={7} className="muted">
-                    No trips recorded yet. Use "Start Trip" to begin tracking.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          {trip ? (
+            <div className="grid g3" style={{ gap: 12, marginTop: 12 }}>
+              <div className="card" style={{ boxShadow: "none" }}>
+                <div className="muted small">M-Pesa payments</div>
+                <div style={{ fontSize: 18, fontWeight: 700 }}>{fmtKES(trip.mpesa_amount)}</div>
+                <div className="muted small">Count: {trip.mpesa_count ?? 0}</div>
+              </div>
+              <div className="card" style={{ boxShadow: "none" }}>
+                <div className="muted small">Manual cash</div>
+                <div style={{ fontSize: 18, fontWeight: 700 }}>{fmtKES(trip.cash_amount)}</div>
+                <div className="muted small">Entries: {trip.cash_count ?? 0}</div>
+              </div>
+              <div className="card" style={{ boxShadow: "none" }}>
+                <div className="muted small">Status</div>
+                <div style={{ fontSize: 18, fontWeight: 700 }}>{(trip.status || "").replaceAll("_", " ")}</div>
+                <div className="muted small">
+                  {trip.started_at ? new Date(trip.started_at).toLocaleString("en-KE") : ""}{" "}
+                  {trip.ended_at ? `→ ${new Date(trip.ended_at).toLocaleTimeString("en-KE")}` : "(in progress)"}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="muted small" style={{ marginTop: 12 }}>
+              No trip running. Start a trip to track collections.
+            </div>
+          )}
         </section>
       ) : null}
 

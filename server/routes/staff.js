@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const pool = process.env.NODE_ENV === 'test' && global.__testPool ? global.__testPool : require('../db/pool');
 const { requireUser } = require('../middleware/auth');
 const { supabaseAdmin } = require('../supabase');
 const { validate } = require('../middleware/validate');
@@ -33,6 +34,14 @@ const tripPositionsSchema = z.object({
     lng: z.number().gte(-180).lte(180),
     ts: z.string().optional().nullable()
   })).min(1)
+});
+const startTripSchema = z.object({
+  sacco_id: z.string().uuid(),
+  matatu_id: z.string().uuid(),
+  route_id: z.string().uuid().optional().nullable()
+});
+const endTripSchema = z.object({
+  trip_id: z.string().uuid()
 });
 
 router.use(requireUser);
@@ -177,6 +186,166 @@ router.post('/trips/positions', requireUser, validate(tripPositionsSchema), asyn
     res.json({ inserted: rows.length });
   }catch(e){
     res.status(500).json({ error: e.message || 'Failed to record trip positions' });
+  }
+});
+
+async function computeTripTotals(matatuId, startedAt, endedAt) {
+  const start = startedAt ? new Date(startedAt) : null;
+  const end = endedAt ? new Date(endedAt) : new Date();
+  const bounds = [];
+  const params = [matatuId];
+  if (start && !Number.isNaN(start.getTime())) {
+    params.push(start.toISOString());
+    bounds.push(`COALESCE(p.trans_time, p.created_at) >= $${params.length}`);
+  }
+  if (end && !Number.isNaN(end.getTime())) {
+    params.push(end.toISOString());
+    bounds.push(`COALESCE(p.trans_time, p.created_at) <= $${params.length}`);
+  }
+  const where = bounds.length ? `AND ${bounds.join(' AND ')}` : '';
+
+  const mpesaRes = await pool.query(
+    `
+      SELECT
+        COUNT(*)::int AS mpesa_count,
+        COALESCE(SUM(p.amount), 0)::numeric AS mpesa_amount
+      FROM mpesa_c2b_payments p
+      LEFT JOIN wallet_aliases wa
+        ON wa.alias = p.account_reference
+       AND wa.is_active = true
+      LEFT JOIN wallets w_alias
+        ON w_alias.id = wa.wallet_id
+      LEFT JOIN wallets w_match
+        ON w_match.id = p.matched_wallet_id
+      WHERE (w_alias.matatu_id = $1 OR w_match.matatu_id = $1)
+      ${where}
+    `,
+    params,
+  );
+
+  const cashRes = await pool.query(
+    `
+      SELECT
+        COUNT(*)::int AS cash_count,
+        COALESCE(SUM(fare_amount_kes), 0)::numeric AS cash_amount
+      FROM transactions
+      WHERE matatu_id = $1
+        AND kind = 'CASH'
+        ${start ? `AND created_at >= $2` : ''}
+        ${start && end ? `AND created_at <= $3` : end ? `AND created_at <= $2` : ''}
+    `,
+    (() => {
+      if (!start && !end) return [matatuId];
+      if (start && !end) return [matatuId, start.toISOString()];
+      if (!start && end) return [matatuId, end.toISOString()];
+      return [matatuId, start.toISOString(), end.toISOString()];
+    })(),
+  );
+
+  const mpesaRow = mpesaRes.rows[0] || { mpesa_amount: 0, mpesa_count: 0 };
+  const cashRow = cashRes.rows[0] || { cash_amount: 0, cash_count: 0 };
+  return {
+    mpesa_amount: Number(mpesaRow.mpesa_amount || 0),
+    mpesa_count: Number(mpesaRow.mpesa_count || 0),
+    cash_amount: Number(cashRow.cash_amount || 0),
+    cash_count: Number(cashRow.cash_count || 0),
+  };
+}
+
+router.post('/trips/start', validate(startTripSchema), async (req, res) => {
+  try {
+    const { sacco_id, matatu_id, route_id = null } = req.body;
+    if (req.saccoId && String(req.saccoId) !== String(sacco_id)) {
+      return res.status(403).json({ error: 'sacco_id mismatch' });
+    }
+    const existing = await pool.query(
+      `SELECT * FROM matatu_trips WHERE matatu_id = $1 AND status = 'IN_PROGRESS' ORDER BY started_at DESC LIMIT 1`,
+      [matatu_id],
+    );
+    if (existing.rows.length) {
+      return res.status(409).json({ error: 'trip_already_running', trip: existing.rows[0] });
+    }
+    const insert = await pool.query(
+      `
+        INSERT INTO matatu_trips (sacco_id, matatu_id, route_id, status, started_by_user_id)
+        VALUES ($1, $2, $3, 'IN_PROGRESS', $4)
+        RETURNING *
+      `,
+      [sacco_id, matatu_id, route_id || null, req.user?.id || null],
+    );
+    const trip = insert.rows[0] || null;
+    return res.json({ trip });
+  } catch (e) {
+    return res.status(500).json({ error: e.message || 'Failed to start trip' });
+  }
+});
+
+router.post('/trips/end', validate(endTripSchema), async (req, res) => {
+  try {
+    const { trip_id } = req.body;
+    const tripRes = await pool.query(`SELECT * FROM matatu_trips WHERE id = $1 LIMIT 1`, [trip_id]);
+    const trip = tripRes.rows[0] || null;
+    if (!trip) return res.status(404).json({ error: 'trip_not_found' });
+    if (trip.status === 'ENDED') return res.json({ trip });
+    const totals = await computeTripTotals(trip.matatu_id, trip.started_at, new Date());
+    const endAt = new Date();
+    const update = await pool.query(
+      `
+        UPDATE matatu_trips
+        SET status = 'ENDED',
+            ended_at = $2,
+            ended_by_user_id = $3,
+            mpesa_amount = $4,
+            mpesa_count = $5,
+            cash_amount = $6,
+            cash_count = $7
+        WHERE id = $1
+        RETURNING *
+      `,
+      [
+        trip_id,
+        endAt.toISOString(),
+        req.user?.id || null,
+        totals.mpesa_amount,
+        totals.mpesa_count,
+        totals.cash_amount,
+        totals.cash_count,
+      ],
+    );
+    return res.json({ trip: update.rows[0] || null });
+  } catch (e) {
+    return res.status(500).json({ error: e.message || 'Failed to end trip' });
+  }
+});
+
+router.get('/trips/current', async (req, res) => {
+  try {
+    const matatuId = (req.query.matatu_id || '').toString().trim();
+    if (!matatuId) return res.status(400).json({ error: 'matatu_id required' });
+    const tripRes = await pool.query(
+      `
+        SELECT *
+        FROM matatu_trips
+        WHERE matatu_id = $1
+        ORDER BY status = 'IN_PROGRESS' DESC, started_at DESC
+        LIMIT 1
+      `,
+      [matatuId],
+    );
+    const trip = tripRes.rows[0] || null;
+    if (!trip) return res.status(404).json({ error: 'trip_not_found' });
+    const totals = await computeTripTotals(matatuId, trip.started_at, trip.status === 'ENDED' ? trip.ended_at : new Date());
+    return res.json({
+      trip: {
+        ...trip,
+        mpesa_amount: totals.mpesa_amount,
+        mpesa_count: totals.mpesa_count,
+        cash_amount: totals.cash_amount,
+        cash_count: totals.cash_count,
+      },
+    });
+  } catch (e) {
+    return res.status(500).json({ error: e.message || 'Failed to load trip' });
   }
 });
 
