@@ -121,7 +121,9 @@ function requireSaccoAccess({ allowSystemWithoutSacco = false, allowStaff = true
       if (!uid) return res.status(401).json({ error: 'unauthorized', request_id: req.requestId || null });
       const ctx = await getSaccoContextUnified(uid);
       const allowedRoles = new Set(
-        allowRoles && allowRoles.length ? allowRoles.map(normalizeSaccoRole) : ['SYSTEM_ADMIN', 'SACCO_ADMIN', ...(allowStaff ? ['SACCO_STAFF'] : [])],
+        allowRoles && allowRoles.length
+          ? allowRoles.map(normalizeSaccoRole)
+          : ['SYSTEM_ADMIN', 'SACCO_ADMIN', ...(allowStaff ? ['SACCO_STAFF', 'MATATU_STAFF'] : [])],
       );
       if (!ctx?.role || !allowedRoles.has(ctx.role)) {
         if (String(process.env.DEBUG_SACCO_AUTH || '').toLowerCase() === 'true') {
