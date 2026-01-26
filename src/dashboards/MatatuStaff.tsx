@@ -354,19 +354,8 @@ const MatatuStaffDashboard = () => {
 
   const staffLabel = staffName || user?.name || (user?.email ? user.email.split("@")[0] : "") || "Staff"
   const heroRight = user?.role ? `Role: ${user.role}` : "Matatu Staff"
-  const nav = (
-    <>
-      <NavLink className={({ isActive }) => `tab${isActive ? " active" : ""}`} to="/matatu/staff">
-        Dashboard
-      </NavLink>
-      <NavLink className={({ isActive }) => `tab${isActive ? " active" : ""}`} to="/matatu/live-payments">
-        Live Payments
-      </NavLink>
-    </>
-  )
-
   return (
-    <DashboardShell title="Matatu Staff" subtitle="Staff Dashboard" nav={nav} navLabel="Matatu navigation">
+    <DashboardShell title="Matatu Staff" subtitle="Staff Dashboard" navLabel="Matatu navigation" hideShellChrome>
       <div className="hero-bar" style={{ marginBottom: 16 }}>
         <div className="hero-left">
           <div className="hero-chip">MATATU STAFF</div>

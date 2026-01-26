@@ -55,6 +55,7 @@ export default function MatatuLivePayments() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const logoutRef = useRef(false);
+  const autoPausedRef = useRef(false);
 
   const nav = (
     <>
@@ -67,19 +68,36 @@ export default function MatatuLivePayments() {
     </>
   );
 
-  const ensureMatatu = useCallback(async () => {
-    if (matatuId) return;
+  const resolveAssignment = useCallback(async (force = false) => {
+    if (!force && matatuId && user?.role !== "matatu_staff") {
+      return { updated: false, matatuId: matatuId || null };
+    }
     try {
       const res = await authFetch("/api/matatu/my-assignment", {
         headers: { Accept: "application/json" },
       });
-      if (!res.ok) return;
+      if (!res.ok) return { updated: false, matatuId: null };
       const data = await res.json().catch(() => ({}));
-      if (data?.matatu_id) setMatatuId(data.matatu_id);
+      const nextMatatuId = data?.matatu_id ? String(data.matatu_id) : "";
+      if (nextMatatuId && nextMatatuId !== matatuId) {
+        setMatatuId(nextMatatuId);
+        setError(null);
+        if (autoPausedRef.current) {
+          autoPausedRef.current = false;
+          setPaused(false);
+        }
+        return { updated: true, matatuId: nextMatatuId };
+      }
+      if (!nextMatatuId && user?.role === "matatu_staff" && matatuId) {
+        setMatatuId("");
+        setError(null);
+        return { updated: true, matatuId: null };
+      }
+      return { updated: false, matatuId: nextMatatuId || null };
     } catch {
-      /* ignore */
+      return { updated: false, matatuId: null };
     }
-  }, [matatuId]);
+  }, [matatuId, user?.role]);
 
   const fetchPayments = useCallback(async () => {
     if (!token || !matatuId || paused) return;
@@ -111,6 +129,7 @@ export default function MatatuLivePayments() {
       if (!res.ok) {
         if (res.status === 401) {
           setPaused(true);
+          autoPausedRef.current = true;
           if (!logoutRef.current) {
             logoutRef.current = true;
             void logout();
@@ -118,7 +137,10 @@ export default function MatatuLivePayments() {
           return;
         }
         if (res.status === 403 && (data?.code === "MATATU_ACCESS_DENIED" || data?.error === "forbidden")) {
+          const assignment = await resolveAssignment(true);
+          if (assignment.updated) return;
           setPaused(true);
+          autoPausedRef.current = true;
           const msg = "No matatu assignment found for this account. Contact SACCO admin.";
           const idPart = reqId || data?.request_id;
           setError(idPart ? `${msg} (request ${idPart})` : msg);
@@ -140,7 +162,7 @@ export default function MatatuLivePayments() {
       inflightRef.current = false;
       setLoading(false);
     }
-  }, [limit, matatuId, paused, token, windowMinutes, logout]);
+  }, [limit, matatuId, paused, resolveAssignment, token, windowMinutes, logout]);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current) {
@@ -159,8 +181,8 @@ export default function MatatuLivePayments() {
   }, [clearTimer, fetchPayments, matatuId, paused]);
 
   useEffect(() => {
-    void ensureMatatu();
-  }, [ensureMatatu]);
+    void resolveAssignment();
+  }, [resolveAssignment]);
 
   useEffect(() => {
     startPolling();
@@ -218,7 +240,16 @@ export default function MatatuLivePayments() {
                 ))}
               </select>
             </label>
-            <button type="button" className="btn" onClick={() => setPaused((p) => !p)}>
+            <button
+              type="button"
+              className="btn"
+              onClick={() =>
+                setPaused((p) => {
+                  autoPausedRef.current = false;
+                  return !p;
+                })
+              }
+            >
               {paused ? "Resume" : "Pause"}
             </button>
           </div>
