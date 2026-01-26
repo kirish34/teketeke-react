@@ -215,6 +215,10 @@ const TaxiDashboard = () => {
   const canManageCompliance = operatorGrant ? Boolean(operatorGrant.can_manage_compliance) : true
   const canViewVehicleCareAnalytics = operatorGrant ? operatorGrant.can_view_analytics !== false : true
   const hasVehicleCareAccess = Boolean(vehicleCareScopeId)
+  const driverName = useMemo(
+    () => user?.name || (user?.email ? user.email.split("@")[0] : "") || "driver",
+    [user?.name, user?.email],
+  )
 
   async function saveCash() {
     if (!cashForm.amount) {
@@ -351,8 +355,8 @@ const TaxiDashboard = () => {
       <div className="hero-bar" style={{ marginBottom: 12 }}>
         <div className="hero-left">
           <div className="hero-chip">TAXI CONSOLE</div>
-          <h2 style={{ margin: "6px 0 4px" }}>Taxi Console</h2>
-          <div className="muted">Hello, taxi operator. Track cash, expenses and goals.</div>
+          <h2 style={{ margin: "6px 0 4px" }}>Hello, {driverName}</h2>
+          <div className="muted">Track cash, expenses and goals.</div>
           <div className="hero-inline">
             <span className="sys-pill-lite">{todayISO}</span>
             <span className="sys-pill-lite">Cash & expenses</span>
