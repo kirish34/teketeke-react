@@ -206,7 +206,7 @@ const MatatuStaffDashboard = () => {
   useEffect(() => {
     if (!saccoId) return
     void loadTransactions()
-    if (activeTab === "overview") {
+    if (activeTab === "overview" || activeTab === "transactions") {
       void loadWallets()
     }
   }, [activeTab, loadTransactions, loadWallets, saccoId])
@@ -425,9 +425,17 @@ const MatatuStaffDashboard = () => {
     let manualCash = 0
     let mpesa = 0
     let mpesaCount = 0
+    let walletTotal = 0
+    let withdrawals = 0
+    let withdrawalsCount = 0
+    let autoFees = 0
+    let autoFeesCount = 0
     let dailyFee = 0
     let savings = 0
     let loans = 0
+    wallets.forEach((w) => {
+      walletTotal += Number(w.balance || 0)
+    })
     filteredTx.forEach((t) => {
       const kind = (t.kind || "").toUpperCase()
       const amount = Number(t.fare_amount_kes || 0)
@@ -435,6 +443,14 @@ const MatatuStaffDashboard = () => {
       if (kind === "SACCO_FEE" || kind === "DAILY_FEE") dailyFee += amount
       if (kind === "SAVINGS") savings += amount
       if (kind === "LOAN_REPAY") loans += amount
+      if (kind === "WITHDRAW" || kind === "WITHDRAWAL") {
+        withdrawals += amount
+        withdrawalsCount += 1
+      }
+      if (kind === "AUTO_FEE" || kind === "DAILY_FEE") {
+        autoFees += amount
+        autoFeesCount += 1
+      }
       if (!["CASH", "SACCO_FEE", "DAILY_FEE", "SAVINGS", "LOAN_REPAY"].includes(kind)) {
         mpesa += amount
         mpesaCount += 1
@@ -446,13 +462,18 @@ const MatatuStaffDashboard = () => {
       manualCash: manualTotal,
       mpesa,
       mpesaCount,
+      walletTotal,
+      withdrawals,
+      withdrawalsCount,
+      autoFees,
+      autoFeesCount,
       dailyFee,
       savings,
       loans,
       accountTotal,
       collectedTotal: manualTotal + accountTotal + mpesa,
     }
-  }, [filteredTx, manualEntries])
+  }, [filteredTx, manualEntries, wallets])
 
   const ownerScopeId = user?.matatu_id || ""
   const vehicleCareGrant = useMemo(
@@ -549,6 +570,9 @@ const MatatuStaffDashboard = () => {
 
   function refresh() {
     void loadTransactions()
+    if (activeTab === "transactions" || activeTab === "overview") {
+      void loadWallets()
+    }
   }
 
   const staffLabel = staffName || user?.name || (user?.email ? user.email.split("@")[0] : "") || "Staff"
@@ -909,11 +933,36 @@ const MatatuStaffDashboard = () => {
                 <div className="muted small">Total collected</div>
                 <div style={{ fontSize: 22, fontWeight: 700 }}>{fmtKES(transactionTotals.collectedTotal)}</div>
               </div>
+              <div className="card" style={{ boxShadow: "none" }}>
+                <div className="muted small">Wallet balance total</div>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>{fmtKES(transactionTotals.walletTotal)}</div>
+              </div>
             </div>
             <div className="grid g3" style={{ gap: 12, marginTop: 12 }}>
               <div className="card" style={{ boxShadow: "none" }}>
                 <div className="muted small">Daily fee deducted</div>
                 <div style={{ fontWeight: 700 }}>{fmtKES(transactionTotals.dailyFee)}</div>
+              </div>
+              <div className="card" style={{ boxShadow: "none" }}>
+                <div className="muted small">Savings deducted</div>
+                <div style={{ fontWeight: 700 }}>{fmtKES(transactionTotals.savings)}</div>
+              </div>
+              <div className="card" style={{ boxShadow: "none" }}>
+                <div className="muted small">Loan repayments</div>
+                <div style={{ fontWeight: 700 }}>{fmtKES(transactionTotals.loans)}</div>
+              </div>
+            </div>
+
+            <div className="grid g4" style={{ gap: 12, marginTop: 12 }}>
+              <div className="card" style={{ boxShadow: "none" }}>
+                <div className="muted small">Withdrawals</div>
+                <div style={{ fontWeight: 700 }}>{fmtKES(transactionTotals.withdrawals)}</div>
+                <div className="muted small">Count: {transactionTotals.withdrawalsCount}</div>
+              </div>
+              <div className="card" style={{ boxShadow: "none" }}>
+                <div className="muted small">Auto fee / Daily fee</div>
+                <div style={{ fontWeight: 700 }}>{fmtKES(transactionTotals.autoFees)}</div>
+                <div className="muted small">Count: {transactionTotals.autoFeesCount}</div>
               </div>
               <div className="card" style={{ boxShadow: "none" }}>
                 <div className="muted small">Savings deducted</div>
