@@ -4,7 +4,7 @@ import PaybillCodeCard from "../components/PaybillCodeCard"
 import PaybillHeader from "../components/PaybillHeader"
 import StickerPrintModal from "../components/StickerPrintModal"
 import { authFetch } from "../lib/auth"
-import { mapPaybillCodes, type PaybillAliasRow } from "../lib/paybill"
+import { mapPaybillCodes, resolveWalletKind, type PaybillAliasRow } from "../lib/paybill"
 import { useAuth } from "../state/auth"
 import VehicleCarePage from "../modules/vehicleCare/VehicleCarePage"
 import { fetchAccessGrants, type AccessGrant } from "../modules/vehicleCare/vehicleCare.api"
@@ -109,7 +109,16 @@ const TaxiDashboard = () => {
     return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10)
   }, [])
   const paybillCodes = useMemo(() => mapPaybillCodes(paybillAliases), [paybillAliases])
-  const taxiCode = paybillCodes.driver || ""
+  const driverCodes = useMemo(() => {
+    const driverRows = paybillAliases.filter((r) => resolveWalletKind(r) === "TAXI_DRIVER")
+    const paybill = paybillCodes.driver || driverRows.find((r) => String(r.alias_type || "").toUpperCase() === "PAYBILL_CODE")?.alias || ""
+    const account =
+      driverRows.find((r) => String(r.alias_type || "").toUpperCase() === "ACCOUNT_NUMBER")?.alias ||
+      driverRows.find((r) => String(r.alias_type || "").toUpperCase() === "WALLET_CODE")?.alias ||
+      paybill ||
+      ""
+    return { paybill, account }
+  }, [paybillAliases, paybillCodes.driver])
 
   const filterToday = (rows: Array<{ created_at?: string; time?: string; timestamp?: string }>) => {
     const today = new Date()
@@ -390,7 +399,10 @@ const TaxiDashboard = () => {
             />
             {paybillError ? <div className="err">PayBill load error: {paybillError}</div> : null}
             <div style={{ marginTop: 12 }}>
-              <PaybillCodeCard title="Taxi Driver Account" label="TAXI Account (Driver)" code={taxiCode} />
+              <PaybillCodeCard title="Taxi Driver Account" label="TAXI Account (Driver)" code={driverCodes.account} />
+              <div className="muted small" style={{ marginTop: 4 }}>
+                PayBill code: {driverCodes.paybill || "—"}
+              </div>
             </div>
           </section>
 
@@ -419,7 +431,7 @@ const TaxiDashboard = () => {
             open={showPaybillSticker}
             title="Taxi PayBill Account (4814003)"
             onClose={() => setShowPaybillSticker(false)}
-            lines={[{ label: "Taxi Driver Account - TAXI Account (Driver)", value: taxiCode }]}
+            lines={[{ label: "Taxi Driver Account - TAXI Account (Driver)", value: driverCodes.account || driverCodes.paybill }]}
           />
         </>
       ) : null}
