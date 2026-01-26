@@ -2257,12 +2257,9 @@ const SystemDashboard = ({
       const type: 'MATATU' | 'TAXI' | 'BODA' =
         vehicleType === 'TAXI' ? 'TAXI' : vehicleType === 'BODABODA' ? 'BODA' : 'MATATU'
       const ussdRow = ussdByMatatuId.get(row.id)
-      const codes =
-        type === 'MATATU'
-          ? paybillCodesByMatatuId.get(row.id)
-          : type === 'TAXI'
-          ? paybillCodesByTaxiId.get(row.id)
-          : paybillCodesByBodaId.get(row.id)
+      const matatuCodes = type === 'MATATU' ? paybillCodesByMatatuId.get(row.id) : null
+      const taxiCodes = type === 'TAXI' ? paybillCodesByTaxiId.get(row.id) : null
+      const bodaCodes = type === 'BODA' ? paybillCodesByBodaId.get(row.id) : null
       const sacco = row.sacco_id ? saccoById.get(row.sacco_id) : null
       const saccoName =
         row.sacco_name || sacco?.display_name || sacco?.name || sacco?.sacco_name || row.sacco || ''
@@ -2274,9 +2271,9 @@ const SystemDashboard = ({
         ussd_code: ussdRow ? formatUssdCode(ussdRow) : '',
         ussd_assigned_at: ussdRow?.allocated_at || '',
         parent: saccoName,
-        owner_code: codes?.owner || '',
-        vehicle_code: codes?.vehicle || codes?.code || '',
-        plate_alias: codes?.plate || '',
+        owner_code: matatuCodes?.owner || '',
+        vehicle_code: matatuCodes?.vehicle || taxiCodes?.code || bodaCodes?.code || '',
+        plate_alias: matatuCodes?.plate || '',
       })
     })
 
