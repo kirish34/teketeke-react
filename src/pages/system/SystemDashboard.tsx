@@ -9733,18 +9733,22 @@ const SystemDashboard = ({
             >
               <option value="MATATU">MATATU</option>
               <option value="SACCO">SACCO</option>
+              <option value="TAXI">TAXI</option>
+              <option value="BODA">BODABODA</option>
             </select>
           </label>
-          {paybillForm.level === 'MATATU' ? (
+          {paybillForm.level === 'MATATU' || paybillForm.level === 'TAXI' || paybillForm.level === 'BODA' ? (
             <label className="muted small">
-              Matatu
+              {paybillForm.level === 'TAXI' ? 'Taxi' : paybillForm.level === 'BODA' ? 'Bodaboda' : 'Matatu'}
               <select
                 value={paybillForm.matatu_id}
                 onChange={(e) => setPaybillForm((f) => ({ ...f, matatu_id: e.target.value }))}
                 style={{ padding: 10 }}
               >
-                <option value="">Select matatu</option>
-                {vehiclesFor('MATATU').map((v) => (
+                <option value="">{paybillForm.level === 'TAXI' ? 'Select taxi' : paybillForm.level === 'BODA' ? 'Select boda' : 'Select matatu'}</option>
+                {vehiclesFor(
+                  paybillForm.level === 'TAXI' ? 'TAXI' : paybillForm.level === 'BODA' ? 'BODABODA' : 'MATATU',
+                ).map((v) => (
                   <option key={v.id || formatVehicleLabel(v)} value={v.id || ''}>
                     {formatVehicleLabel(v)}
                   </option>
