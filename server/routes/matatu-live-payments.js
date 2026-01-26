@@ -270,10 +270,11 @@ router.get('/live-payments', async (req, res) => {
           p.match_status,
           COALESCE(w_alias.wallet_kind, w_match.wallet_kind) AS wallet_kind,
           p.raw,
-          p.raw_payload
+          p.raw_payload,
+          COALESCE(p.msisdn_normalized, p.msisdn, p.display_msisdn) AS msisdn_lookup
         FROM mpesa_c2b_payments p
         LEFT JOIN sender_contacts sc
-          ON sc.msisdn = p.msisdn
+          ON sc.msisdn = COALESCE(p.msisdn_normalized, p.msisdn, p.display_msisdn)
         LEFT JOIN wallet_aliases wa
           ON wa.alias = p.account_reference
          AND wa.is_active = true
