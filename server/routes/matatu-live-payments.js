@@ -2,6 +2,7 @@ const express = require('express');
 const pool = require('../db/pool');
 const { requireUser } = require('../middleware/auth');
 const { resolveSaccoAuthContext } = require('../services/saccoAuth.service');
+const { ensureAppUserContextFromUserRoles } = require('../services/appUserContext.service');
 
 const router = express.Router();
 
@@ -42,21 +43,43 @@ function logLivePaymentsDebug(payload) {
   }
 }
 
+function needsContextRepair(row, roleNorm) {
+  if (!row || !roleNorm) return true;
+  if ([ROLES.OWNER, ROLES.MATATU_STAFF, ROLES.DRIVER].includes(roleNorm) && !row.matatu_id) return true;
+  if ([ROLES.SACCO_ADMIN, ROLES.SACCO_STAFF].includes(roleNorm) && !row.sacco_id) return true;
+  return false;
+}
+
 async function resolveUserContext(userId) {
   if (!userId) return null;
-  const res = await pool.query(
-    `
-      SELECT effective_role, sacco_id, matatu_id
-      FROM public.app_user_context
-      WHERE user_id = $1
-      LIMIT 1
-    `,
-    [userId],
-  );
-  const row = res.rows[0] || null;
-  if (!row) return null;
-  const role = normalizeRoleName(row.effective_role);
-  if (!role) return null;
+  let row = null;
+  try {
+    const res = await pool.query(
+      `
+        SELECT effective_role, sacco_id, matatu_id
+        FROM public.app_user_context
+        WHERE user_id = $1
+        LIMIT 1
+      `,
+      [userId],
+    );
+    row = res.rows[0] || null;
+  } catch {
+    row = null;
+  }
+  let role = normalizeRoleName(row?.effective_role);
+  if (needsContextRepair(row, role)) {
+    try {
+      const repaired = await ensureAppUserContextFromUserRoles(userId, null);
+      if (repaired) {
+        row = repaired;
+        role = normalizeRoleName(repaired.effective_role);
+      }
+    } catch {
+      // ignore repair failures
+    }
+  }
+  if (!row || !role) return null;
   return {
     role,
     saccoId: row.sacco_id || null,
@@ -314,6 +337,34 @@ router.get('/my-assignment', async (req, res) => {
       if (prof.rows.length) {
         matatuId = prof.rows[0].matatu_id || matatuId;
         saccoId = saccoId || prof.rows[0].sacco_id || null;
+      }
+    }
+
+    if (!matatuId) {
+      const ctxRes = await pool.query(
+        `SELECT matatu_id, sacco_id FROM public.app_user_context WHERE user_id = $1 LIMIT 1`,
+        [userId],
+      );
+      if (ctxRes.rows.length) {
+        matatuId = ctxRes.rows[0].matatu_id || matatuId;
+        saccoId = saccoId || ctxRes.rows[0].sacco_id || null;
+      }
+    }
+
+    if (!matatuId) {
+      const roleRes = await pool.query(
+        `
+          SELECT matatu_id, sacco_id
+          FROM public.user_roles
+          WHERE user_id = $1
+          ORDER BY created_at DESC NULLS LAST, updated_at DESC NULLS LAST
+          LIMIT 1
+        `,
+        [userId],
+      );
+      if (roleRes.rows.length) {
+        matatuId = roleRes.rows[0].matatu_id || matatuId;
+        saccoId = saccoId || roleRes.rows[0].sacco_id || null;
       }
     }
 
