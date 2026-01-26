@@ -1048,6 +1048,18 @@ function normalizeUssdInput(raw?: string) {
   return compact
 }
 
+const DEFAULT_USSD_PREFIX = '*001*'
+
+function buildUssdFullCode(input: string) {
+  const normalized = normalizeUssdInput(input)
+  if (!normalized) return ''
+  if (normalized.includes('*') || normalized.includes('#')) return normalized.endsWith('#') ? normalized : `${normalized}#`
+  const digits = normalized.replace(/\D/g, '')
+  if (!digits) return ''
+  const checksum = Number(digits) % 9
+  return `${DEFAULT_USSD_PREFIX}${digits}${checksum}#`
+}
+
 const smsSettingsDefaults: SmsSettings = {
   sender_id: '',
   quiet_hours_start: '',
@@ -1357,6 +1369,7 @@ const SystemDashboard = ({
     matatu_id: '',
     paybill_account: '',
     ussd_code: '',
+    ussd_manual: false,
   })
   const [paybillMsg, setPaybillMsg] = useState('')
   const [paybillSearch, setPaybillSearch] = useState('')
@@ -2187,9 +2200,13 @@ const SystemDashboard = ({
       const entry = map.get(id) || {}
       const kind = String(row.wallet_kind || '').toUpperCase()
       const aliasType = String(row.alias_type || '').toUpperCase()
+      const fallback = row.alias || row.wallet_code || row.virtual_account_code || ''
       if (aliasType === 'PAYBILL_CODE') {
-        if (kind === 'MATATU_OWNER') entry.owner = row.alias || ''
-        if (kind === 'MATATU_VEHICLE') entry.vehicle = row.alias || ''
+        if (kind === 'MATATU_OWNER') entry.owner = fallback
+        if (kind === 'MATATU_VEHICLE') entry.vehicle = fallback
+      } else if (!aliasType) {
+        if (kind === 'MATATU_OWNER' && fallback) entry.owner = entry.owner || fallback
+        if (kind === 'MATATU_VEHICLE' && fallback) entry.vehicle = entry.vehicle || fallback
       }
       if (aliasType === 'PLATE' && kind === 'MATATU_VEHICLE') {
         entry.plate = row.alias || ''
@@ -4188,8 +4205,30 @@ const SystemDashboard = ({
           return
         }
       } else {
-        const fullCode = match.row?.full_code || match.row?.code || (match.hasSymbols ? match.normalized : '')
+        const fullCode =
+          match.row?.full_code || match.row?.code || (match.hasSymbols ? match.normalized : buildUssdFullCode(ussdInput))
         if (!fullCode) {
+          msg = `${msg}. USSD code not found in pool`
+        } else if (!match.row && paybillForm.ussd_manual) {
+          try {
+            await sendJson('/api/admin/ussd/pool/import', 'POST', {
+              input_mode: 'legacy',
+              prefix: DEFAULT_USSD_PREFIX,
+              codes: [fullCode],
+            })
+            await sendJson('/api/admin/ussd/bind-from-pool', 'POST', {
+              ussd_code: fullCode,
+              level,
+              sacco_id: level === 'SACCO' ? targetId : null,
+              matatu_id: level === 'MATATU' ? targetId : null,
+            })
+            await loadUssd()
+            await refreshOverview()
+            msg = `${msg}. USSD linked`
+          } catch (err) {
+            msg = `${msg}. USSD merge failed: ${err instanceof Error ? err.message : 'Bind failed'}`
+          }
+        } else if (!match.row) {
           msg = `${msg}. USSD code not found in pool`
         } else {
           try {
@@ -4210,7 +4249,7 @@ const SystemDashboard = ({
     }
 
     setPaybillMsg(msg)
-    setPaybillForm((f) => ({ ...f, paybill_account: '', ussd_code: '' }))
+    setPaybillForm((f) => ({ ...f, paybill_account: '', ussd_code: '', ussd_manual: false }))
   }
 
   async function refreshPaybillData() {
@@ -9687,6 +9726,7 @@ const SystemDashboard = ({
                   matatu_id: '',
                   paybill_account: '',
                   ussd_code: '',
+                  ussd_manual: false,
                 }))
               }
               style={{ padding: 10 }}
@@ -9747,6 +9787,14 @@ const SystemDashboard = ({
               onChange={(e) => setPaybillForm((f) => ({ ...f, ussd_code: e.target.value }))}
               placeholder="112 or *001*11013#"
             />
+          </label>
+          <label className="muted small" style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
+            <input
+              type="checkbox"
+              checked={paybillForm.ussd_manual}
+              onChange={(e) => setPaybillForm((f) => ({ ...f, ussd_manual: e.target.checked }))}
+            />
+            Manual USSD (create if missing)
           </label>
         </div>
         <div className="row" style={{ marginTop: 8 }}>
