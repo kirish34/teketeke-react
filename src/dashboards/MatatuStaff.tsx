@@ -93,7 +93,6 @@ const MatatuStaffDashboard = () => {
   const [timeLabel, setTimeLabel] = useState("")
   const [trip, setTrip] = useState<Trip | null>(null)
   const [tripLoading, setTripLoading] = useState(false)
-  const [tripPolling, setTripPolling] = useState(false)
   const [tripError, setTripError] = useState<string | null>(null)
   const [tripHistory, setTripHistory] = useState<Trip[]>([])
   const [tripHistoryLoading, setTripHistoryLoading] = useState(false)
@@ -284,11 +283,7 @@ const MatatuStaffDashboard = () => {
       setTrip(null)
       return
     }
-    if (background) {
-      setTripPolling(true)
-    } else {
-      setTripLoading(true)
-    }
+    if (!background) setTripLoading(true)
     setTripError(null)
     try {
       const res = await authFetch(`/api/staff/trips/current?matatu_id=${encodeURIComponent(matatuId)}`, {
@@ -308,11 +303,7 @@ const MatatuStaffDashboard = () => {
     } catch (err) {
       setTripError(err instanceof Error ? err.message : "Failed to load trip")
     } finally {
-      if (background) {
-        setTripPolling(false)
-      } else {
-        setTripLoading(false)
-      }
+      if (!background) setTripLoading(false)
     }
   }, [matatuId])
 
