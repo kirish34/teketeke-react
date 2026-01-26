@@ -6,6 +6,7 @@ const { supabaseAdmin } = require('../supabase');
 const { validate } = require('../middleware/validate');
 const { z } = require('zod');
 const { requireSaccoAccess } = require('../services/saccoContext.service');
+const { resolveSaccoAuthContext, normalizeRole: normalizeSaccoRole } = require('../services/saccoAuth.service');
 
 // Accept broader inputs for SACCO Staff UI and normalize
 const staffCashSchema = z.object({
@@ -46,6 +47,27 @@ const endTripSchema = z.object({
 
 router.use(requireUser);
 router.use(requireSaccoAccess());
+
+async function ensureMatatuTripAccess({ userId, matatuId }) {
+  const matatuRes = await pool.query(`SELECT id, sacco_id FROM matatus WHERE id = $1 LIMIT 1`, [matatuId]);
+  const matatu = matatuRes.rows[0] || null;
+  if (!matatu) return { ok: false, status: 404, error: 'matatu_not_found' };
+  const ctx = await resolveSaccoAuthContext({ userId });
+  const role = normalizeSaccoRole(ctx.effective_role);
+  const saccoMatch =
+    matatu.sacco_id &&
+    Array.isArray(ctx.allowed_sacco_ids) &&
+    ctx.allowed_sacco_ids.some((sid) => String(sid) === String(matatu.sacco_id));
+  const matatuMatch = ctx.active_sacco_id && matatu.sacco_id && String(ctx.active_sacco_id) === String(matatu.sacco_id);
+  const ownerMatch = ctx.active_matatu_id && String(ctx.active_matatu_id) === String(matatu.id);
+  const allowed =
+    role === 'SYSTEM_ADMIN' ||
+    role === 'SACCO_ADMIN' ||
+    (role === 'SACCO_STAFF' && (saccoMatch || matatuMatch)) ||
+    (role === 'MATATU_STAFF' && (ownerMatch || saccoMatch || matatuMatch));
+  if (!allowed) return { ok: false, status: 403, error: 'forbidden' };
+  return { ok: true, matatu, sacco_id: matatu.sacco_id || null };
+}
 
 // Insert a cash transaction using user-scoped client (RLS enforced)
 router.post('/cash', validate(staffCashSchema), async (req, res) => {
@@ -255,9 +277,8 @@ async function computeTripTotals(matatuId, startedAt, endedAt) {
 router.post('/trips/start', validate(startTripSchema), async (req, res) => {
   try {
     const { sacco_id, matatu_id, route_id = null } = req.body;
-    if (req.saccoId && String(req.saccoId) !== String(sacco_id)) {
-      return res.status(403).json({ error: 'sacco_id mismatch' });
-    }
+    const access = await ensureMatatuTripAccess({ userId: req.user?.id, matatuId: matatu_id });
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
     const existing = await pool.query(
       `SELECT * FROM matatu_trips WHERE matatu_id = $1 AND status = 'IN_PROGRESS' ORDER BY started_at DESC LIMIT 1`,
       [matatu_id],
@@ -287,6 +308,8 @@ router.post('/trips/end', validate(endTripSchema), async (req, res) => {
     const trip = tripRes.rows[0] || null;
     if (!trip) return res.status(404).json({ error: 'trip_not_found' });
     if (trip.status === 'ENDED') return res.json({ trip });
+    const access = await ensureMatatuTripAccess({ userId: req.user?.id, matatuId: trip.matatu_id });
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
     const totals = await computeTripTotals(trip.matatu_id, trip.started_at, new Date());
     const endAt = new Date();
     const update = await pool.query(
@@ -322,6 +345,8 @@ router.get('/trips/current', async (req, res) => {
   try {
     const matatuId = (req.query.matatu_id || '').toString().trim();
     if (!matatuId) return res.status(400).json({ error: 'matatu_id required' });
+    const access = await ensureMatatuTripAccess({ userId: req.user?.id, matatuId });
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
     const tripRes = await pool.query(
       `
         SELECT *
