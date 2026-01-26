@@ -208,6 +208,11 @@ router.get('/live-payments', async (req, res) => {
       userCtx?.saccoId &&
       matatu.sacco_id &&
       String(userCtx.saccoId) === String(matatu.sacco_id);
+    const saccoMembershipScoped =
+      [ROLES.SACCO_ADMIN, ROLES.SACCO_STAFF, ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx?.role) &&
+      Array.isArray(membershipCtx.allowed_sacco_ids) &&
+      matatu.sacco_id &&
+      membershipCtx.allowed_sacco_ids.some((sid) => String(sid) === String(matatu.sacco_id));
     const matatuScoped =
       [ROLES.OWNER, ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx?.role) &&
       (userCtx?.matatuId || staffAccess.params?.assignmentMatatuId) &&
@@ -223,6 +228,7 @@ router.get('/live-payments', async (req, res) => {
     const allowed =
       superUser ||
       saccoScoped ||
+      saccoMembershipScoped ||
       matatuScoped ||
       staffGrant ||
       ownerGrant;
