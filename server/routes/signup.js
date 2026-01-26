@@ -1,7 +1,7 @@
 const express = require('express');
 const { supabaseAdmin } = require('../supabase');
 const { upsertAppUserContext, normalizeEffectiveRole } = require('../services/appUserContext.service');
-const { createWalletRecord } = require('../wallet/wallet.service');
+const { registerWalletForEntity } = require('../wallet/wallet.service');
 const { ensurePaybillAlias } = require('../wallet/wallet.aliases');
 
 const router = express.Router();
@@ -152,19 +152,15 @@ router.post('/taxi', async (req, res) => {
     let walletId = null;
     let paybillCode = null;
     try {
-      const wallet = await createWalletRecord({
+      const wallet = await registerWalletForEntity({
         entityType: 'TAXI',
         entityId: matatuId,
-        walletType: 'matatu',
         walletKind: 'TAXI_DRIVER',
-        saccoId: null,
-        matatuId,
         numericRef: Date.now() % 100000,
       });
       walletId = wallet?.id || null;
-      paybillCode = await ensurePaybillAlias({ walletId, key: '40' });
       if (walletId) {
-        await supabaseAdmin.from('matatus').update({ wallet_id: walletId }).eq('id', matatuId);
+        paybillCode = await ensurePaybillAlias({ walletId, key: '40' }).catch(() => null);
       }
     } catch (err) {
       // Continue even if wallet creation fails; front-end can retry via admin flow
