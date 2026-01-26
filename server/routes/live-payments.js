@@ -2,6 +2,7 @@ const express = require('express');
 const pool = require('../db/pool');
 const { requireUser } = require('../middleware/auth');
 const { requireSaccoMembership } = require('../services/saccoAuth.service');
+const { extractSenderNameFromRaw } = require('../utils/msisdn');
 
 const router = express.Router();
 
@@ -55,7 +56,9 @@ router.get('/live-payments', async (req, res) => {
           p.receipt,
           p.status,
           p.match_status,
-          COALESCE(w_alias.wallet_kind, w_match.wallet_kind) AS wallet_kind
+          COALESCE(w_alias.wallet_kind, w_match.wallet_kind) AS wallet_kind,
+          p.raw,
+          p.raw_payload
         FROM mpesa_c2b_payments p
         LEFT JOIN wallet_aliases wa
           ON wa.alias = p.account_reference
@@ -80,11 +83,16 @@ router.get('/live-payments', async (req, res) => {
       rowcount: rows.length,
     });
 
+    const payments = (rows || []).map(({ raw, raw_payload, ...rest }) => ({
+      ...rest,
+      sender_name: extractSenderNameFromRaw(raw || raw_payload),
+    }));
+
     return res.json({
       ok: true,
       sacco_id: saccoId,
       server_time: new Date().toISOString(),
-      payments: rows || [],
+      payments,
       request_id: req.requestId || null,
     });
   } catch (err) {

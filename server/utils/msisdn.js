@@ -71,6 +71,66 @@ function extractMsisdnFromRaw(raw) {
   return null;
 }
 
+function extractSenderNameFromRaw(raw) {
+  if (!raw) return null;
+  let payload = raw;
+  if (typeof raw === 'string') {
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (!payload || typeof payload !== 'object') return null;
+
+  const normalizeValue = (value) => {
+    if (value === null || value === undefined) return '';
+    return String(value).trim();
+  };
+
+  const buildFromParts = (obj) => {
+    if (!obj || typeof obj !== 'object') return null;
+    const first = normalizeValue(obj.FirstName || obj.first_name || obj.firstName || obj.firstname);
+    const middle = normalizeValue(obj.MiddleName || obj.middle_name || obj.middleName || obj.middlename);
+    const last = normalizeValue(obj.LastName || obj.last_name || obj.lastName || obj.lastname);
+    const parts = [first, middle, last].filter(Boolean);
+    if (parts.length) return parts.join(' ');
+    const direct = normalizeValue(
+      obj.FullName ||
+        obj.full_name ||
+        obj.fullName ||
+        obj.fullname ||
+        obj.Name ||
+        obj.name ||
+        obj.CustomerName ||
+        obj.customer_name ||
+        obj.SenderName ||
+        obj.sender_name ||
+        obj.PayerName ||
+        obj.payer_name,
+    );
+    return direct || null;
+  };
+
+  const candidates = [
+    payload,
+    payload.callback,
+    payload.Callback,
+    payload.Body,
+    payload.Result,
+    payload.transaction,
+    payload.sender,
+    payload.data,
+  ];
+
+  for (const candidate of candidates) {
+    const name = buildFromParts(candidate);
+    if (name) return name;
+  }
+
+  return null;
+}
+
 function safeDisplayMsisdn({ display_msisdn, msisdn_normalized }) {
   return display_msisdn || maskMsisdn(msisdn_normalized) || 'Unknown';
 }
@@ -83,5 +143,6 @@ module.exports = {
   maskMsisdn,
   msisdnDisplay,
   extractMsisdnFromRaw,
+  extractSenderNameFromRaw,
   safeDisplayMsisdn,
 };

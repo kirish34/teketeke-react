@@ -11,6 +11,7 @@ type Payment = {
   created_at?: string;
   amount?: number;
   msisdn?: string;
+  sender_name?: string;
   account_reference?: string;
   receipt?: string;
   status?: string;
@@ -286,7 +287,7 @@ export default function MatatuLivePayments() {
                 <tr>
                   <th>Time</th>
                   <th>Amount</th>
-                  <th>MSISDN</th>
+                  <th>Sender</th>
                   <th>Account Ref</th>
                   <th>Receipt</th>
                   <th>Status</th>
@@ -298,7 +299,7 @@ export default function MatatuLivePayments() {
                   <tr key={p.id || `${p.receipt}-${p.account_reference}-${p.created_at}`}>
                     <td>{formatTime(p.received_at || p.created_at)}</td>
                     <td>{formatAmount(p.amount)}</td>
-                    <td>{p.msisdn || "—"}</td>
+                    <td>{p.sender_name || p.msisdn || "—"}</td>
                     <td>{p.account_reference || "—"}</td>
                     <td>{p.receipt || "—"}</td>
                     <td>
