@@ -44,6 +44,10 @@ const startTripSchema = z.object({
 const endTripSchema = z.object({
   trip_id: z.string().uuid()
 });
+const tripsHistorySchema = z.object({
+  matatu_id: z.string().uuid(),
+  limit: z.number().int().positive().max(50).optional()
+});
 
 router.use(requireUser);
 router.use(requireSaccoAccess());
@@ -372,6 +376,44 @@ router.get('/trips/current', async (req, res) => {
     });
   } catch (e) {
     return res.status(500).json({ error: e.message || 'Failed to load trip' });
+  }
+});
+
+router.get('/trips/history', validate(tripsHistorySchema), async (req, res) => {
+  try {
+    const { matatu_id, limit = 10 } = req.query;
+    const matatuId = (matatu_id || '').toString().trim();
+    const access = await ensureMatatuTripAccess({ userId: req.user?.id, matatuId });
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+    const listRes = await pool.query(
+      `
+        SELECT *
+        FROM matatu_trips
+        WHERE matatu_id = $1
+        ORDER BY started_at DESC
+        LIMIT $2
+      `,
+      [matatuId, Number(limit) || 10],
+    );
+    const items = listRes.rows || [];
+    const enriched = [];
+    for (const item of items) {
+      if (item.status === 'ENDED') {
+        enriched.push(item);
+        continue;
+      }
+      const totals = await computeTripTotals(matatuId, item.started_at, item.ended_at || new Date());
+      enriched.push({
+        ...item,
+        mpesa_amount: totals.mpesa_amount,
+        mpesa_count: totals.mpesa_count,
+        cash_amount: totals.cash_amount,
+        cash_count: totals.cash_count,
+      });
+    }
+    return res.json({ trips: enriched });
+  } catch (e) {
+    return res.status(500).json({ error: e.message || 'Failed to load trips' });
   }
 });
 

@@ -213,8 +213,12 @@ export default function MatatuLivePayments() {
   const empty = !loading && payments.length === 0;
 
   return (
-    <DashboardShell title="Live Payments" subtitle={matatuId || "Matatu"} nav={nav} navLabel="Matatu navigation">
+    <DashboardShell title="Live Payments" subtitle={matatuId || "Matatu"} navLabel="Matatu navigation" hideShellChrome>
       <div className="card" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+        <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
+          {nav}
+        </div>
+
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
           <div>
             <div style={{ fontWeight: 700, fontSize: 18 }}>Live Payments</div>

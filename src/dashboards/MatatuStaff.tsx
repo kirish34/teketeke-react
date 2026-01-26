@@ -85,11 +85,18 @@ const MatatuStaffDashboard = () => {
   const [manualNote, setManualNote] = useState("")
   const [manualMsg, setManualMsg] = useState("")
   const [manualEntries, setManualEntries] = useState<{ id: string; amount: number; note?: string; created_at: string }[]>([])
+  const [tripCashAmount, setTripCashAmount] = useState("")
+  const [tripCashNote, setTripCashNote] = useState("")
+  const [tripCashMsg, setTripCashMsg] = useState("")
+  const [tripCashSaving, setTripCashSaving] = useState(false)
   const [staffName, setStaffName] = useState("")
   const [timeLabel, setTimeLabel] = useState("")
   const [trip, setTrip] = useState<Trip | null>(null)
   const [tripLoading, setTripLoading] = useState(false)
   const [tripError, setTripError] = useState<string | null>(null)
+  const [tripHistory, setTripHistory] = useState<Trip[]>([])
+  const [tripHistoryLoading, setTripHistoryLoading] = useState(false)
+  const [tripHistoryError, setTripHistoryError] = useState<string | null>(null)
 
   const [accessGrants, setAccessGrants] = useState<AccessGrant[]>([])
   const [activeTab, setActiveTab] = useState<"overview" | "trips" | "transactions" | "vehicle_care">("overview")
@@ -300,18 +307,51 @@ const MatatuStaffDashboard = () => {
     }
   }, [matatuId])
 
+  const loadTripHistory = useCallback(async () => {
+    if (!matatuId) {
+      setTripHistory([])
+      setTripHistoryError(null)
+      setTripHistoryLoading(false)
+      return
+    }
+    setTripHistoryLoading(true)
+    setTripHistoryError(null)
+    try {
+      const params = new URLSearchParams()
+      params.set("matatu_id", matatuId)
+      params.set("limit", "20")
+      const res = await authFetch(`/api/staff/trips/history?${params.toString()}`, {
+        headers: { Accept: "application/json" },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setTripHistoryError(data?.error || res.statusText || "Failed to load trips")
+        setTripHistory([])
+        return
+      }
+      setTripHistory(Array.isArray(data?.trips) ? data.trips : [])
+    } catch (err) {
+      setTripHistoryError(err instanceof Error ? err.message : "Failed to load trips")
+      setTripHistory([])
+    } finally {
+      setTripHistoryLoading(false)
+    }
+  }, [matatuId])
+
   useEffect(() => {
     if (activeTab !== "trips") return
     void loadTrip()
-  }, [activeTab, loadTrip])
+    void loadTripHistory()
+  }, [activeTab, loadTrip, loadTripHistory])
 
   useEffect(() => {
     if (activeTab !== "trips") return
     const id = setInterval(() => {
       void loadTrip()
+      void loadTripHistory()
     }, 5000)
     return () => clearInterval(id)
-  }, [activeTab, loadTrip])
+  }, [activeTab, loadTrip, loadTripHistory])
 
   const startTrip = useCallback(async () => {
     if (!saccoId || !matatuId) {
@@ -333,12 +373,13 @@ const MatatuStaffDashboard = () => {
         return
       }
       setTrip(data?.trip || null)
+      void loadTripHistory()
     } catch (err) {
       setTripError(err instanceof Error ? err.message : "Failed to start trip")
     } finally {
       setTripLoading(false)
     }
-  }, [authFetch, saccoId, matatuId, routeId])
+  }, [authFetch, saccoId, matatuId, routeId, loadTripHistory])
 
   const endTrip = useCallback(async () => {
     if (!trip?.id) return
@@ -356,12 +397,13 @@ const MatatuStaffDashboard = () => {
         return
       }
       setTrip(data?.trip || null)
+      void loadTripHistory()
     } catch (err) {
       setTripError(err instanceof Error ? err.message : "Failed to end trip")
     } finally {
       setTripLoading(false)
     }
-  }, [authFetch, trip?.id])
+  }, [authFetch, trip?.id, loadTripHistory])
 
   const filteredTx = useMemo(() => (matatuId ? txs.filter((t) => t.matatu_id === matatuId) : []), [txs, matatuId])
   const currentMatatu = useMemo(
@@ -453,6 +495,49 @@ const MatatuStaffDashboard = () => {
       setManualMsg(err instanceof Error ? err.message : "Save failed")
     }
   }
+
+  const recordTripCash = useCallback(async () => {
+    if (!saccoId || !matatuId) {
+      setTripCashMsg("Select SACCO and matatu first")
+      return
+    }
+    const amt = Number(tripCashAmount || 0)
+    if (!(amt > 0)) {
+      setTripCashMsg("Enter amount")
+      return
+    }
+    setTripCashSaving(true)
+    setTripCashMsg("Saving...")
+    try {
+      const res = await authFetch("/api/staff/cash", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          sacco_id: saccoId,
+          matatu_id: matatuId,
+          kind: "CASH",
+          amount: amt,
+          payer_name: tripCashNote.trim() || "Trip cash entry",
+          payer_phone: "",
+          notes: tripCashNote || "",
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setTripCashMsg(data?.error || res.statusText || "Save failed")
+        return
+      }
+      setTripCashMsg("Saved")
+      setTripCashAmount("")
+      setTripCashNote("")
+      await loadTrip()
+      await loadTripHistory()
+    } catch (err) {
+      setTripCashMsg(err instanceof Error ? err.message : "Save failed")
+    } finally {
+      setTripCashSaving(false)
+    }
+  }, [authFetch, saccoId, matatuId, tripCashAmount, tripCashNote, loadTrip, loadTripHistory])
 
   function refresh() {
     void loadTransactions()
@@ -632,6 +717,7 @@ const MatatuStaffDashboard = () => {
         </>
       ) : null}
 
+
       {activeTab === "trips" ? (
         <section className="card">
           <div className="topline">
@@ -674,8 +760,9 @@ const MatatuStaffDashboard = () => {
                 <div style={{ fontSize: 18, fontWeight: 700 }}>{(trip.status || "").replaceAll("_", " ")}</div>
                 <div className="muted small">
                   {trip.started_at ? new Date(trip.started_at).toLocaleString("en-KE") : ""}{" "}
-                  {trip.ended_at ? `→ ${new Date(trip.ended_at).toLocaleTimeString("en-KE")}` : "(in progress)"}
+                  {trip.ended_at ? `-> ${new Date(trip.ended_at).toLocaleTimeString("en-KE")}` : "(in progress)"}
                 </div>
+                <div className="muted small">Total: {fmtKES(Number(trip.mpesa_amount || 0) + Number(trip.cash_amount || 0))}</div>
               </div>
             </div>
           ) : (
@@ -683,9 +770,107 @@ const MatatuStaffDashboard = () => {
               No trip running. Start a trip to track collections.
             </div>
           )}
+
+          <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid #e2e8f0" }}>
+            <div className="topline" style={{ alignItems: "center" }}>
+              <div>
+                <div className="muted small">Manual cash during trip</div>
+                <div style={{ fontWeight: 600 }}>Record cash collected</div>
+              </div>
+              <span className="muted small">{tripCashMsg}</span>
+            </div>
+            <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
+              <input
+                type="number"
+                placeholder="Amount (KES)"
+                value={tripCashAmount}
+                onChange={(e) => setTripCashAmount(e.target.value)}
+                style={{ width: 180 }}
+              />
+              <input
+                placeholder="Note / payer name (optional)"
+                value={tripCashNote}
+                onChange={(e) => setTripCashNote(e.target.value)}
+                style={{ flex: "1 1 240px" }}
+              />
+              <button
+                type="button"
+                className="btn"
+                disabled={tripCashSaving || !matatuId}
+                onClick={() => void recordTripCash()}
+              >
+                {tripCashSaving ? "Saving..." : "Record Trip Cash"}
+              </button>
+            </div>
+            <div className="muted small" style={{ marginTop: 6 }}>
+              Adds a CASH entry against this matatu and counts it in the current trip totals.
+            </div>
+          </div>
+
+          <div style={{ marginTop: 18, paddingTop: 12, borderTop: "1px solid #e2e8f0" }}>
+            <div className="topline" style={{ alignItems: "center" }}>
+              <div>
+                <div className="muted small">Trip history</div>
+                <div style={{ fontWeight: 600 }}>Recent trips with M-Pesa + cash totals</div>
+              </div>
+              <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                {tripHistoryLoading ? <span className="muted small">Loading...</span> : null}
+                {tripHistoryError ? <span className="err">{tripHistoryError}</span> : null}
+                <button type="button" className="btn ghost" onClick={() => { void loadTrip(); void loadTripHistory(); }}>
+                  Refresh
+                </button>
+              </div>
+            </div>
+            <div className="table-wrap" style={{ marginTop: 10 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Start</th>
+                    <th>End</th>
+                    <th>Status</th>
+                    <th>Paybill (M-Pesa)</th>
+                    <th>Cash</th>
+                    <th>Total</th>
+                    <th>Entries</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tripHistory.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="muted">
+                        No trips yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    tripHistory.map((t) => {
+                      const total = Number(t.mpesa_amount || 0) + Number(t.cash_amount || 0)
+                      return (
+                        <tr key={t.id || t.started_at}>
+                          <td>{t.started_at ? new Date(t.started_at).toLocaleString("en-KE") : "-"}</td>
+                          <td>
+                            {t.ended_at
+                              ? new Date(t.ended_at).toLocaleString("en-KE")
+                              : t.status === "IN_PROGRESS"
+                              ? "In progress"
+                              : "-"}
+                          </td>
+                          <td>{(t.status || "").replaceAll("_", " ")}</td>
+                          <td>{fmtKES(t.mpesa_amount)}</td>
+                          <td>{fmtKES(t.cash_amount)}</td>
+                          <td>{fmtKES(total)}</td>
+                          <td className="muted small">
+                            M-Pesa: {t.mpesa_count ?? 0} / Cash: {t.cash_count ?? 0}
+                          </td>
+                        </tr>
+                      )
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </section>
       ) : null}
-
       {activeTab === "transactions" ? (
         <>
           <section className="card">
