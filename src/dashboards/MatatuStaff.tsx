@@ -93,6 +93,7 @@ const MatatuStaffDashboard = () => {
   const [timeLabel, setTimeLabel] = useState("")
   const [trip, setTrip] = useState<Trip | null>(null)
   const [tripLoading, setTripLoading] = useState(false)
+  const [tripPolling, setTripPolling] = useState(false)
   const [tripError, setTripError] = useState<string | null>(null)
   const [tripHistory, setTripHistory] = useState<Trip[]>([])
   const [tripHistoryLoading, setTripHistoryLoading] = useState(false)
@@ -278,12 +279,16 @@ const MatatuStaffDashboard = () => {
     }
   }, [matatuId])
 
-  const loadTrip = useCallback(async () => {
+  const loadTrip = useCallback(async (background = false) => {
     if (!matatuId) {
       setTrip(null)
       return
     }
-    setTripLoading(true)
+    if (background) {
+      setTripPolling(true)
+    } else {
+      setTripLoading(true)
+    }
     setTripError(null)
     try {
       const res = await authFetch(`/api/staff/trips/current?matatu_id=${encodeURIComponent(matatuId)}`, {
@@ -303,7 +308,11 @@ const MatatuStaffDashboard = () => {
     } catch (err) {
       setTripError(err instanceof Error ? err.message : "Failed to load trip")
     } finally {
-      setTripLoading(false)
+      if (background) {
+        setTripPolling(false)
+      } else {
+        setTripLoading(false)
+      }
     }
   }, [matatuId])
 
@@ -340,14 +349,14 @@ const MatatuStaffDashboard = () => {
 
   useEffect(() => {
     if (activeTab !== "trips") return
-    void loadTrip()
+    void loadTrip(true)
     void loadTripHistory()
   }, [activeTab, loadTrip, loadTripHistory])
 
   useEffect(() => {
     if (activeTab !== "trips") return
     const id = setInterval(() => {
-      void loadTrip()
+      void loadTrip(true)
       void loadTripHistory()
     }, 5000)
     return () => clearInterval(id)
@@ -530,7 +539,7 @@ const MatatuStaffDashboard = () => {
       setTripCashMsg("Saved")
       setTripCashAmount("")
       setTripCashNote("")
-      await loadTrip()
+      await loadTrip(true)
       await loadTripHistory()
     } catch (err) {
       setTripCashMsg(err instanceof Error ? err.message : "Save failed")
@@ -816,7 +825,7 @@ const MatatuStaffDashboard = () => {
               <div className="row" style={{ gap: 8, alignItems: "center" }}>
                 {tripHistoryLoading ? <span className="muted small">Loading...</span> : null}
                 {tripHistoryError ? <span className="err">{tripHistoryError}</span> : null}
-                <button type="button" className="btn ghost" onClick={() => { void loadTrip(); void loadTripHistory(); }}>
+                <button type="button" className="btn ghost" onClick={() => { void loadTrip(true); void loadTripHistory(); }}>
                   Refresh
                 </button>
               </div>
