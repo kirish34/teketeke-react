@@ -423,6 +423,8 @@ const MatatuStaffDashboard = () => {
   const transactionTotals = useMemo(() => {
     const manualLocal = manualEntries.reduce((acc, m) => acc + Number(m.amount || 0), 0)
     let manualCash = 0
+    let mpesa = 0
+    let mpesaCount = 0
     let dailyFee = 0
     let savings = 0
     let loans = 0
@@ -433,16 +435,22 @@ const MatatuStaffDashboard = () => {
       if (kind === "SACCO_FEE" || kind === "DAILY_FEE") dailyFee += amount
       if (kind === "SAVINGS") savings += amount
       if (kind === "LOAN_REPAY") loans += amount
+      if (!["CASH", "SACCO_FEE", "DAILY_FEE", "SAVINGS", "LOAN_REPAY"].includes(kind)) {
+        mpesa += amount
+        mpesaCount += 1
+      }
     })
     const manualTotal = manualCash + manualLocal
     const accountTotal = dailyFee + savings + loans
     return {
       manualCash: manualTotal,
+      mpesa,
+      mpesaCount,
       dailyFee,
       savings,
       loans,
       accountTotal,
-      collectedTotal: manualTotal + accountTotal,
+      collectedTotal: manualTotal + accountTotal + mpesa,
     }
   }, [filteredTx, manualEntries])
 
@@ -880,10 +888,18 @@ const MatatuStaffDashboard = () => {
                 Reload
               </button>
             </div>
-            <div className="grid g3" style={{ gap: 12, marginTop: 8 }}>
+            <div
+              className="grid"
+              style={{ gap: 12, marginTop: 8, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}
+            >
               <div className="card" style={{ boxShadow: "none" }}>
                 <div className="muted small">Manual cash collected</div>
                 <div style={{ fontSize: 22, fontWeight: 700 }}>{fmtKES(transactionTotals.manualCash)}</div>
+              </div>
+              <div className="card" style={{ boxShadow: "none" }}>
+                <div className="muted small">M-Pesa collected</div>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>{fmtKES(transactionTotals.mpesa)}</div>
+                <div className="muted small">Count: {transactionTotals.mpesaCount}</div>
               </div>
               <div className="card" style={{ boxShadow: "none" }}>
                 <div className="muted small">Account deductions</div>
