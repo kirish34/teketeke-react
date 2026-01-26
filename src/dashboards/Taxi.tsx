@@ -113,18 +113,20 @@ const TaxiDashboard = () => {
     const byEntity = paybillAliases.filter(
       (r) => String(r.entity_type || "").toUpperCase() === "TAXI" && String(r.entity_id || "") === String(user?.matatu_id || ""),
     )
+    const allDriverRows = paybillAliases.filter((r) => resolveWalletKind(r) === "TAXI_DRIVER")
     const driverRows = byEntity.filter((r) => resolveWalletKind(r) === "TAXI_DRIVER")
-    const anyRow = driverRows[0] || byEntity[0] || null
+    const scopedRows = driverRows.length ? driverRows : allDriverRows
+    const anyRow = scopedRows[0] || byEntity[0] || null
     const paybill =
       paybillCodes.driver ||
-      driverRows.find((r) => String(r.alias_type || "").toUpperCase() === "PAYBILL_CODE")?.alias ||
+      scopedRows.find((r) => String(r.alias_type || "").toUpperCase() === "PAYBILL_CODE")?.alias ||
       anyRow?.alias ||
       anyRow?.wallet_code ||
       anyRow?.virtual_account_code ||
       ""
     const accountAlias =
-      driverRows.find((r) => String(r.alias_type || "").toUpperCase() === "ACCOUNT_NUMBER")?.alias ||
-      driverRows.find((r) => String(r.alias_type || "").toUpperCase() === "WALLET_CODE")?.alias ||
+      scopedRows.find((r) => String(r.alias_type || "").toUpperCase() === "ACCOUNT_NUMBER")?.alias ||
+      scopedRows.find((r) => String(r.alias_type || "").toUpperCase() === "WALLET_CODE")?.alias ||
       ""
     const accountFallback = anyRow?.wallet_code || anyRow?.virtual_account_code || ""
     const account = accountAlias || accountFallback || paybill
