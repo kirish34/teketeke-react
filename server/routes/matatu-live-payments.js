@@ -25,6 +25,7 @@ function normalizeRoleName(role) {
   if (raw === 'SACCO' || raw === 'SACCO_ADMIN') return ROLES.SACCO_ADMIN;
   if (raw === 'SACCO_STAFF') return ROLES.SACCO_STAFF;
   if (raw === 'MATATU_STAFF' || raw === 'STAFF') return ROLES.MATATU_STAFF;
+  if (raw === 'TAXI') return ROLES.DRIVER;
   if (raw === 'DRIVER') return ROLES.DRIVER;
   if (raw === 'SYSTEM_ADMIN') return ROLES.SYSTEM_ADMIN;
   return raw;
