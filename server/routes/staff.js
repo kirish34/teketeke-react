@@ -379,10 +379,13 @@ router.get('/trips/current', async (req, res) => {
   }
 });
 
-router.get('/trips/history', validate(tripsHistorySchema), async (req, res) => {
+router.get('/trips/history', async (req, res) => {
   try {
     const { matatu_id, limit = 10 } = req.query;
     const matatuId = (matatu_id || '').toString().trim();
+    if (!matatuId) return res.status(400).json({ error: 'matatu_id required' });
+    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidRe.test(matatuId)) return res.status(400).json({ error: 'invalid matatu_id' });
     const access = await ensureMatatuTripAccess({ userId: req.user?.id, matatuId });
     if (!access.ok) return res.status(access.status).json({ error: access.error });
     const listRes = await pool.query(
