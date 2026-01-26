@@ -641,21 +641,43 @@ router.get('/paybill-codes', async (req, res) => {
           w.entity_type,
           w.entity_id,
           w.wallet_kind,
+          w.wallet_code,
+          w.virtual_account_code,
           wa.alias,
           wa.alias_type
         FROM wallets w
-        JOIN wallet_aliases wa
+        LEFT JOIN wallet_aliases wa
           ON wa.wallet_id = w.id
+         AND wa.is_active = true
+         AND wa.alias_type IN ('PAYBILL_CODE', 'PLATE')
         WHERE w.entity_type = ANY($1)
           AND w.entity_id = $2
-          AND wa.is_active = true
-          AND wa.alias_type IN ('PAYBILL_CODE', 'PLATE')
-        ORDER BY wa.alias_type, wa.alias
+        ORDER BY wa.alias_type NULLS LAST, wa.alias NULLS LAST
       `,
       [entityTypes, entityId]
     );
 
-    res.json({ items: rows || [] });
+    const items = rows || [];
+    // Ensure every wallet has at least one PAYBILL_CODE entry (fallback to wallet_code)
+    const byWallet = new Map();
+    items.forEach((row) => {
+      const list = byWallet.get(row.wallet_id) || [];
+      list.push(row);
+      byWallet.set(row.wallet_id, list);
+    });
+    byWallet.forEach((list, walletId) => {
+      const hasPaybill = list.some((r) => r.alias_type === 'PAYBILL_CODE' && r.alias);
+      if (!hasPaybill && list.length) {
+        const base = list[0];
+        items.push({
+          ...base,
+          alias: base.wallet_code || base.virtual_account_code || null,
+          alias_type: 'PAYBILL_CODE',
+        });
+      }
+    });
+
+    res.json({ items });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Failed to load paybill codes' });
   }
