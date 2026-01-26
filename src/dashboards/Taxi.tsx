@@ -110,15 +110,27 @@ const TaxiDashboard = () => {
   }, [])
   const paybillCodes = useMemo(() => mapPaybillCodes(paybillAliases), [paybillAliases])
   const driverCodes = useMemo(() => {
-    const driverRows = paybillAliases.filter((r) => resolveWalletKind(r) === "TAXI_DRIVER")
-    const paybill = paybillCodes.driver || driverRows.find((r) => String(r.alias_type || "").toUpperCase() === "PAYBILL_CODE")?.alias || ""
+    const byEntity = paybillAliases.filter(
+      (r) => String(r.entity_type || "").toUpperCase() === "TAXI" && String(r.entity_id || "") === String(user?.matatu_id || ""),
+    )
+    const driverRows = byEntity.filter((r) => resolveWalletKind(r) === "TAXI_DRIVER")
+    const anyRow = driverRows[0] || byEntity[0] || null
+    const paybill =
+      paybillCodes.driver ||
+      driverRows.find((r) => String(r.alias_type || "").toUpperCase() === "PAYBILL_CODE")?.alias ||
+      anyRow?.alias ||
+      anyRow?.wallet_code ||
+      anyRow?.virtual_account_code ||
+      ""
     const account =
       driverRows.find((r) => String(r.alias_type || "").toUpperCase() === "ACCOUNT_NUMBER")?.alias ||
       driverRows.find((r) => String(r.alias_type || "").toUpperCase() === "WALLET_CODE")?.alias ||
       paybill ||
+      anyRow?.wallet_code ||
+      anyRow?.virtual_account_code ||
       ""
     return { paybill, account }
-  }, [paybillAliases, paybillCodes.driver])
+  }, [paybillAliases, paybillCodes.driver, user?.matatu_id])
 
   const filterToday = (rows: Array<{ created_at?: string; time?: string; timestamp?: string }>) => {
     const today = new Date()
