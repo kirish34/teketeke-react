@@ -865,7 +865,7 @@ router.get('/paybill-codes', async (req, res) => {
   const entityType = String(req.query.entity_type || '').trim().toUpperCase();
   try {
     const params = [];
-    const where = [`wa.is_active = true`, `wa.alias_type IN ('PAYBILL_CODE', 'PLATE')`];
+    const where = [`(wa.is_active = true OR wa.id IS NULL)`, `(wa.alias_type IN ('PAYBILL_CODE', 'PLATE') OR wa.alias_type IS NULL)`];
     if (entityType) {
       params.push(entityType);
       where.push(`w.entity_type = $${params.length}`);
@@ -880,17 +880,55 @@ router.get('/paybill-codes', async (req, res) => {
           w.wallet_kind,
           w.sacco_id,
           w.matatu_id,
+          w.wallet_code,
+          w.virtual_account_code,
           wa.alias,
           wa.alias_type
         FROM wallets w
-        JOIN wallet_aliases wa
+        LEFT JOIN wallet_aliases wa
           ON wa.wallet_id = w.id
+         AND wa.is_active = true
+         AND wa.alias_type IN ('PAYBILL_CODE', 'PLATE')
         ${whereClause}
         ORDER BY w.entity_type, w.entity_id
       `,
       params
     );
-    res.json({ items: rows || [] });
+    const deriveType = (row) => {
+      const kind = String(row.wallet_kind || '').toUpperCase();
+      if (kind === 'TAXI_DRIVER') return 'TAXI';
+      if (kind === 'BODA_RIDER') return 'BODA';
+      if (kind.startsWith('SACCO_')) return 'SACCO';
+      if (kind.startsWith('MATATU_')) return 'MATATU';
+      if (row.entity_type) return String(row.entity_type).toUpperCase();
+      return null;
+    };
+
+    const items = (rows || []).map((row) => ({
+      ...row,
+      entity_type: deriveType(row),
+    }));
+
+    // Ensure every wallet has a paybill entry (fallback to wallet code)
+    const byWallet = new Map();
+    items.forEach((row) => {
+      const list = byWallet.get(row.wallet_id) || [];
+      list.push(row);
+      byWallet.set(row.wallet_id, list);
+    });
+    byWallet.forEach((list, walletId) => {
+      const hasPaybill = list.some((r) => r.alias_type === 'PAYBILL_CODE' && r.alias);
+      if (!hasPaybill && list.length) {
+        const base = list[0];
+        items.push({
+          ...base,
+          alias: base.wallet_code || base.virtual_account_code || null,
+          alias_type: 'PAYBILL_CODE',
+        });
+      }
+    });
+
+    res.json({ items });
   } catch (e) {
     res.status(500).json({ error: e.message || 'Failed to load paybill codes' });
   }

@@ -86,6 +86,8 @@ type PaybillAliasRow = {
   entity_type?: string
   entity_id?: string
   wallet_kind?: string
+  wallet_code?: string
+  virtual_account_code?: string
   alias?: string
   alias_type?: string
 }
@@ -2213,10 +2215,9 @@ const SystemDashboard = ({
     const map = new Map<string, { code?: string }>()
     paybillAliases.forEach((row) => {
       if (String(row.entity_type || '').toUpperCase() !== 'TAXI') return
-      if (String(row.alias_type || '').toUpperCase() !== 'PAYBILL_CODE') return
       const id = row.entity_id || ''
       if (!id) return
-      map.set(id, { code: row.alias || '' })
+      map.set(id, { code: row.alias || row.wallet_code || row.virtual_account_code || '' })
     })
     return map
   }, [paybillAliases])
@@ -2226,17 +2227,16 @@ const SystemDashboard = ({
     paybillAliases.forEach((row) => {
       const entityType = String(row.entity_type || '').toUpperCase()
       if (entityType !== 'BODA' && entityType !== 'BODABODA') return
-      if (String(row.alias_type || '').toUpperCase() !== 'PAYBILL_CODE') return
       const id = row.entity_id || ''
       if (!id) return
-      map.set(id, { code: row.alias || '' })
+      map.set(id, { code: row.alias || row.wallet_code || row.virtual_account_code || '' })
     })
     return map
   }, [paybillAliases])
 
   const paybillRows = useMemo(() => {
     const rows: Array<{
-      type: 'MATATU' | 'SACCO'
+      type: 'MATATU' | 'SACCO' | 'TAXI' | 'BODA'
       id: string
       label: string
       paybill_account: string
@@ -2253,13 +2253,21 @@ const SystemDashboard = ({
 
     matatus.forEach((row) => {
       if (!row.id) return
+      const vehicleType = normalizeVehicleType(row.vehicle_type || row.body_type || row.type)
+      const type: 'MATATU' | 'TAXI' | 'BODA' =
+        vehicleType === 'TAXI' ? 'TAXI' : vehicleType === 'BODABODA' ? 'BODA' : 'MATATU'
       const ussdRow = ussdByMatatuId.get(row.id)
-      const codes = paybillCodesByMatatuId.get(row.id)
+      const codes =
+        type === 'MATATU'
+          ? paybillCodesByMatatuId.get(row.id)
+          : type === 'TAXI'
+          ? paybillCodesByTaxiId.get(row.id)
+          : paybillCodesByBodaId.get(row.id)
       const sacco = row.sacco_id ? saccoById.get(row.sacco_id) : null
       const saccoName =
         row.sacco_name || sacco?.display_name || sacco?.name || sacco?.sacco_name || row.sacco || ''
       rows.push({
-        type: 'MATATU',
+        type,
         id: row.id,
         label: formatVehicleLabel(row),
         paybill_account: row.till_number || '',
@@ -2267,7 +2275,7 @@ const SystemDashboard = ({
         ussd_assigned_at: ussdRow?.allocated_at || '',
         parent: saccoName,
         owner_code: codes?.owner || '',
-        vehicle_code: codes?.vehicle || '',
+        vehicle_code: codes?.vehicle || codes?.code || '',
         plate_alias: codes?.plate || '',
       })
     })
@@ -9798,32 +9806,40 @@ const SystemDashboard = ({
                     <td>{row.ussd_code || '-'}</td>
                     <td>{row.ussd_assigned_at ? new Date(row.ussd_assigned_at).toLocaleString() : '-'}</td>
                     <td>
-                      {row.type === 'MATATU' ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                          <PaybillCodeCard variant="inline" label="OWNER Account" code={row.owner_code || ''} />
-                          <PaybillCodeCard variant="inline" label="MATATU Account" code={row.vehicle_code || ''} />
-                          <PaybillCodeCard
-                            variant="inline"
-                            label="STK/USSD Reference (Plate)"
-                            code={row.plate_alias || ''}
-                          />
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                          <PaybillCodeCard variant="inline" label="SACCO FEE Account" code={row.fee_code || ''} />
-                          <PaybillCodeCard variant="inline" label="SACCO LOAN Account" code={row.loan_code || ''} />
-                          <PaybillCodeCard
-                            variant="inline"
-                            label="SACCO SAVINGS Account"
-                            code={row.savings_code || ''}
-                          />
-                        </div>
-                      )}
-                    </td>
-                    <td className="mono">{row.id}</td>
-                  </tr>
-                ))
-              )}
+                    {row.type === 'MATATU' ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <PaybillCodeCard variant="inline" label="OWNER Account" code={row.owner_code || ''} />
+                        <PaybillCodeCard variant="inline" label="MATATU Account" code={row.vehicle_code || ''} />
+                        <PaybillCodeCard
+                          variant="inline"
+                          label="STK/USSD Reference (Plate)"
+                          code={row.plate_alias || ''}
+                        />
+                      </div>
+                    ) : row.type === 'TAXI' ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <PaybillCodeCard variant="inline" label="TAXI Account (Driver)" code={row.vehicle_code || ''} />
+                      </div>
+                    ) : row.type === 'BODA' ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <PaybillCodeCard variant="inline" label="BODA Account (Rider)" code={row.vehicle_code || ''} />
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <PaybillCodeCard variant="inline" label="SACCO FEE Account" code={row.fee_code || ''} />
+                        <PaybillCodeCard variant="inline" label="SACCO LOAN Account" code={row.loan_code || ''} />
+                        <PaybillCodeCard
+                          variant="inline"
+                          label="SACCO SAVINGS Account"
+                          code={row.savings_code || ''}
+                        />
+                      </div>
+                    )}
+                  </td>
+                  <td className="mono">{row.id}</td>
+                </tr>
+              ))
+            )}
             </tbody>
           </table>
         </div>
