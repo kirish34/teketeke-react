@@ -142,7 +142,7 @@ async function resolveMatatuStaffAccess(userId, matatuId, saccoId) {
   const grantExists = await hasMatatuStaffGrant(userId, matatuId);
   const assignRes = await pool.query(
     `
-      SELECT 1 FROM matatu_staff_assignments
+      SELECT matatu_id, sacco_id FROM matatu_staff_assignments
       WHERE staff_user_id = $1 AND matatu_id = $2 AND ($3::uuid IS NULL OR sacco_id = $3)
       LIMIT 1
     `,
@@ -154,7 +154,13 @@ async function resolveMatatuStaffAccess(userId, matatuId, saccoId) {
   return {
     allowed: staffGrant,
     rowCount: assignmentExists ? assignRes.rows.length : 0,
-    params: { grantExists, assignmentExists, profileAssign, staffGrant },
+    params: {
+      grantExists,
+      assignmentExists,
+      profileAssign,
+      staffGrant,
+      assignmentMatatuId: assignRes.rows[0]?.matatu_id || null,
+    },
   };
 }
 
@@ -204,8 +210,8 @@ router.get('/live-payments', async (req, res) => {
       String(userCtx.saccoId) === String(matatu.sacco_id);
     const matatuScoped =
       [ROLES.OWNER, ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx?.role) &&
-      userCtx?.matatuId &&
-      String(userCtx.matatuId) === String(matatu.id);
+      (userCtx?.matatuId || staffAccess.params?.assignmentMatatuId) &&
+      String(userCtx?.matatuId || staffAccess.params?.assignmentMatatuId) === String(matatu.id);
     const ownerOfMatatu = matatu.created_by && req.user?.id && String(matatu.created_by) === String(req.user.id);
     let ownerGrantScoped = false;
     if (userCtx?.role === ROLES.OWNER && !ownerOfMatatu) {
@@ -250,6 +256,8 @@ router.get('/live-payments', async (req, res) => {
           grantExists: staffAccess.params?.grantExists,
           assignmentExists: staffAccess.params?.assignmentExists,
           profileAssign: staffAccess.params?.profileAssign,
+          user_matatu_id: userCtx?.matatuId || null,
+          allowed_sacco_ids: membershipCtx.allowed_sacco_ids || [],
         },
       });
     }
