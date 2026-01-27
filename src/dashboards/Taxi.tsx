@@ -448,8 +448,8 @@ const TaxiDashboard = () => {
             <h3 style={{ marginTop: 0 }}>Today</h3>
             <div className="grid metrics">
               <div className="metric">
-                <div className="k">Till today (KSH)</div>
-                <div className="v">{formatKes(summary?.till_today)}</div>
+                <div className="k">Paybill collection (wallet)</div>
+                <div className="v">{walletLoading ? "…" : formatKes(taxiWallet?.balance ?? summary?.till_today)}</div>
               </div>
               <div className="metric">
                 <div className="k">Cash today (KSH)</div>
