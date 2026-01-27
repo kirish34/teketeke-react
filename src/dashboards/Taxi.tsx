@@ -97,7 +97,6 @@ const TaxiDashboard = () => {
   const [accessGrants, setAccessGrants] = useState<AccessGrant[]>([])
   const [activeTab, setActiveTab] = useState<"today" | "cash" | "expenses" | "insights" | "goals" | "automation" | "vehicle_care">("today")
   const [walletCodeFallback, setWalletCodeFallback] = useState("")
-  const [walletCodeFallback, setWalletCodeFallback] = useState("")
 
   const todayISO = useMemo(() => new Date().toISOString().slice(0, 10), [])
   const weekStartISO = useMemo(() => {
