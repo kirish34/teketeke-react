@@ -206,30 +206,9 @@ const TaxiDashboard = () => {
     loadPaybillCodes()
   }, [taxiId])
 
+  // Rely on paybill alias records; no matatu owner-ledger fallback
   useEffect(() => {
-    const matatuId = taxiId || ""
-    if (!matatuId) {
-      setWalletCodeFallback("")
-      return
-    }
-    void (async () => {
-      try {
-        const params = new URLSearchParams({ matatu_id: matatuId, limit: "1" })
-        const res = await authFetch(`/api/wallets/owner-ledger?${params.toString()}`, {
-          headers: { Accept: "application/json" },
-        })
-        if (!res.ok) return
-        const data = (await res.json().catch(() => ({}))) as any
-        const code =
-          data?.wallets?.[0]?.virtual_account_code ||
-          data?.wallets?.[0]?.wallet_code ||
-          data?.wallets?.[0]?.owner_virtual_account_code ||
-          ""
-        if (code) setWalletCodeFallback(code)
-      } catch {
-        /* ignore */
-      }
-    })()
+    setWalletCodeFallback("")
   }, [taxiId])
 
   useEffect(() => {
@@ -244,29 +223,7 @@ const TaxiDashboard = () => {
   }, [])
 
   useEffect(() => {
-    const matatuId = taxiId || ""
-    if (!matatuId) {
-      setWalletCodeFallback("")
-      return
-    }
-    void (async () => {
-      try {
-        const params = new URLSearchParams({ matatu_id: matatuId, limit: "1" })
-        const res = await authFetch(`/api/wallets/owner-ledger?${params.toString()}`, {
-          headers: { Accept: "application/json" },
-        })
-        if (!res.ok) return
-        const data = (await res.json().catch(() => ({}))) as any
-        const code =
-          data?.wallets?.[0]?.virtual_account_code ||
-          data?.wallets?.[0]?.wallet_code ||
-          data?.wallets?.[0]?.owner_virtual_account_code ||
-          ""
-        if (code) setWalletCodeFallback(code)
-      } catch {
-        /* ignore */
-      }
-    })()
+    setWalletCodeFallback("")
   }, [taxiId])
 
   useEffect(() => {
