@@ -112,6 +112,7 @@ const TaxiDashboard = () => {
   const paybillCodes = useMemo(() => mapPaybillCodes(paybillAliases), [paybillAliases])
   const taxiId = user?.matatu_id
   const taxiPlate = user?.matatu_plate || ""
+  const headerPlate = taxiPlate || taxiId || ""
 
   const driverCodes = useMemo(() => {
     const byEntity = paybillAliases.filter(
@@ -424,14 +425,12 @@ const TaxiDashboard = () => {
       <div className="hero-bar" style={{ marginBottom: 12 }}>
         <div className="hero-left">
           <div className="hero-chip">TAXI CONSOLE</div>
-          <h2 style={{ margin: "6px 0 4px" }}>
-            Hello, {driverName}
-            {taxiPlate ? ` — ${taxiPlate}` : ""}
-          </h2>
+          <h2 style={{ margin: "6px 0 4px" }}>Hello, {driverName}</h2>
           <div className="muted">Track cash, expenses and goals.</div>
           <div className="hero-inline">
             <span className="sys-pill-lite">{todayISO}</span>
             <span className="sys-pill-lite">Cash & expenses</span>
+            {headerPlate ? <span className="sys-pill-lite">Vehicle: {headerPlate}</span> : null}
           </div>
         </div>
         <div className="row" style={{ gap: 8, alignItems: "center" }}>
