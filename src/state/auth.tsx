@@ -152,6 +152,7 @@ async function fetchProfile(token: string): Promise<{ user: SessionUser; context
     role,
     sacco_id: ctx.sacco_id,
     matatu_id: ctx.matatu_id,
+    matatu_plate: data.matatu_plate || null,
   };
   const contextMissing = Boolean(data.context_missing ?? data.needs_setup);
   logDebug("fetch_me_success", { role, contextMissing });

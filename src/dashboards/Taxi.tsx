@@ -110,9 +110,12 @@ const TaxiDashboard = () => {
     return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10)
   }, [])
   const paybillCodes = useMemo(() => mapPaybillCodes(paybillAliases), [paybillAliases])
+  const taxiId = user?.matatu_id
+  const taxiPlate = user?.matatu_plate || ""
+
   const driverCodes = useMemo(() => {
     const byEntity = paybillAliases.filter(
-      (r) => String(r.entity_type || "").toUpperCase() === "TAXI" && String(r.entity_id || "") === String(user?.matatu_id || ""),
+      (r) => String(r.entity_type || "").toUpperCase() === "TAXI" && String(r.entity_id || "") === String(taxiId || ""),
     )
     const allDriverRows = paybillAliases.filter((r) => resolveWalletKind(r) === "TAXI_DRIVER")
     const driverRows = byEntity.filter((r) => resolveWalletKind(r) === "TAXI_DRIVER")
@@ -132,7 +135,7 @@ const TaxiDashboard = () => {
     const accountFallback = anyRow?.wallet_code || anyRow?.virtual_account_code || ""
     const account = accountAlias || accountFallback || walletCodeFallback || paybill
     return { paybill, account }
-  }, [paybillAliases, paybillCodes.driver, user?.matatu_id, walletCodeFallback])
+  }, [paybillAliases, paybillCodes.driver, taxiId, walletCodeFallback])
 
   const filterToday = (rows: Array<{ created_at?: string; time?: string; timestamp?: string }>) => {
     const start = new Date()
@@ -181,7 +184,7 @@ const TaxiDashboard = () => {
   }, [todayISO, weekStartISO, monthStartISO])
 
   useEffect(() => {
-    const entityId = user?.matatu_id || ""
+    const entityId = taxiId || ""
     if (!entityId) {
       setPaybillAliases([])
       setPaybillError(null)
@@ -200,10 +203,10 @@ const TaxiDashboard = () => {
       }
     }
     loadPaybillCodes()
-  }, [user?.matatu_id])
+  }, [taxiId])
 
   useEffect(() => {
-    const matatuId = user?.matatu_id || ""
+    const matatuId = taxiId || ""
     if (!matatuId) {
       setWalletCodeFallback("")
       return
@@ -226,7 +229,7 @@ const TaxiDashboard = () => {
         /* ignore */
       }
     })()
-  }, [user?.matatu_id])
+  }, [taxiId])
 
   useEffect(() => {
     void (async () => {
@@ -421,7 +424,10 @@ const TaxiDashboard = () => {
       <div className="hero-bar" style={{ marginBottom: 12 }}>
         <div className="hero-left">
           <div className="hero-chip">TAXI CONSOLE</div>
-          <h2 style={{ margin: "6px 0 4px" }}>Hello, {driverName}</h2>
+          <h2 style={{ margin: "6px 0 4px" }}>
+            Hello, {driverName}
+            {taxiPlate ? ` — ${taxiPlate}` : ""}
+          </h2>
           <div className="muted">Track cash, expenses and goals.</div>
           <div className="hero-inline">
             <span className="sys-pill-lite">{todayISO}</span>

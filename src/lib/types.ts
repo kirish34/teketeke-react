@@ -16,4 +16,5 @@ export type SessionUser = {
   role: Role;
   sacco_id?: string | null;
   matatu_id?: string | null;
+  matatu_plate?: string | null;
 };
