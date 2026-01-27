@@ -5,6 +5,7 @@ const {
   ensureAppUserContextFromUserRoles,
   normalizeEffectiveRole,
 } = require('../services/appUserContext.service');
+const { supabaseAdmin } = require('../supabase');
 
 const router = express.Router();
 
@@ -53,6 +54,22 @@ async function ensureUserContext(userId, email, fallbackRole) {
     sacco_id: null,
     matatu_id: null,
   });
+}
+
+async function resolveMatatuPlate(matatuId) {
+  if (!matatuId || !supabaseAdmin) return null;
+  const lookup = async (table, columns) => {
+    const { data, error } = await supabaseAdmin.from(table).select(columns).eq('id', matatuId).maybeSingle();
+    if (error && error.code !== 'PGRST116') throw error;
+    return data || null;
+  };
+  const matatu = await lookup('matatus', 'number_plate,plate,identifier');
+  if (matatu) return matatu.number_plate || matatu.plate || matatu.identifier || null;
+  const taxi = await lookup('taxis', 'plate,number_plate,identifier');
+  if (taxi) return taxi.plate || taxi.number_plate || taxi.identifier || null;
+  const boda = await lookup('boda_bikes', 'identifier,plate,number_plate');
+  if (boda) return boda.plate || boda.number_plate || boda.identifier || null;
+  return null;
 }
 
 async function handleMe(req, res) {
@@ -117,11 +134,19 @@ async function handleMe(req, res) {
       sacco_id: ctx.sacco_id,
       matatu_id: ctx.matatu_id,
     });
+    const matatuId =
+      ctx?.matatu_id ||
+      req.user?.app_metadata?.matatu_id ||
+      req.user?.user_metadata?.matatu_id ||
+      req.user?.app_metadata?.taxi_id ||
+      req.user?.user_metadata?.taxi_id ||
+      null;
     const mappedCtx = {
       effective_role: normalizeEffectiveRole(ctx.effective_role),
       sacco_id: ctx.sacco_id,
-      matatu_id: ctx.matatu_id,
+      matatu_id: matatuId,
     };
+    const matatuPlate = await resolveMatatuPlate(matatuId);
     baseUser.role = mappedCtx.effective_role ? String(mappedCtx.effective_role).toLowerCase() : req.user?.role || null;
     req.context = mappedCtx;
     req.user.role = baseUser.role;
@@ -129,6 +154,7 @@ async function handleMe(req, res) {
       ok: true,
       user: baseUser,
       context: mappedCtx,
+      matatu_plate: matatuPlate,
       context_missing: false,
       needs_setup: false,
     });
