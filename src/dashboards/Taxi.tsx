@@ -97,6 +97,7 @@ const TaxiDashboard = () => {
   const [accessGrants, setAccessGrants] = useState<AccessGrant[]>([])
   const [activeTab, setActiveTab] = useState<"today" | "cash" | "expenses" | "insights" | "goals" | "automation" | "vehicle_care">("today")
   const [walletCodeFallback, setWalletCodeFallback] = useState("")
+  const [walletCodeFallback, setWalletCodeFallback] = useState("")
 
   const todayISO = useMemo(() => new Date().toISOString().slice(0, 10), [])
   const weekStartISO = useMemo(() => {
@@ -135,14 +136,14 @@ const TaxiDashboard = () => {
   }, [paybillAliases, paybillCodes.driver, user?.matatu_id, walletCodeFallback])
 
   const filterToday = (rows: Array<{ created_at?: string; time?: string; timestamp?: string }>) => {
-    const today = new Date()
-    const start = new Date(today.toISOString().slice(0, 10) + "T00:00:00.000Z").getTime()
-    const end = start + 24 * 3600 * 1000
+    const start = new Date()
+    start.setHours(0, 0, 0, 0)
+    const end = new Date(start.getTime() + 24 * 3600 * 1000)
     return rows.filter((r) => {
       const t = r.created_at || r.time || r.timestamp
       if (!t) return false
       const x = new Date(t).getTime()
-      return x >= start && x < end
+      return x >= start.getTime() && x < end.getTime()
     })
   }
 
@@ -200,6 +201,32 @@ const TaxiDashboard = () => {
       }
     }
     loadPaybillCodes()
+  }, [user?.matatu_id])
+
+  useEffect(() => {
+    const matatuId = user?.matatu_id || ""
+    if (!matatuId) {
+      setWalletCodeFallback("")
+      return
+    }
+    void (async () => {
+      try {
+        const params = new URLSearchParams({ matatu_id: matatuId, limit: "1" })
+        const res = await authFetch(`/api/wallets/owner-ledger?${params.toString()}`, {
+          headers: { Accept: "application/json" },
+        })
+        if (!res.ok) return
+        const data = (await res.json().catch(() => ({}))) as any
+        const code =
+          data?.wallets?.[0]?.virtual_account_code ||
+          data?.wallets?.[0]?.wallet_code ||
+          data?.wallets?.[0]?.owner_virtual_account_code ||
+          ""
+        if (code) setWalletCodeFallback(code)
+      } catch {
+        /* ignore */
+      }
+    })()
   }, [user?.matatu_id])
 
   useEffect(() => {
