@@ -4,8 +4,9 @@ import PaybillCodeCard from "../components/PaybillCodeCard"
 import PaybillHeader from "../components/PaybillHeader"
 import StickerPrintModal from "../components/StickerPrintModal"
 import { authFetch } from "../lib/auth"
-import { mapPaybillCodes, type PaybillAliasRow } from "../lib/paybill"
+import { mapPaybillCodes, PAYBILL_NUMBER, type PaybillAliasRow } from "../lib/paybill"
 import { useAuth } from "../state/auth"
+import { useEntityWallet } from "../hooks/useEntityWallet"
 import VehicleCarePage from "../modules/vehicleCare/VehicleCarePage"
 import { fetchAccessGrants, type AccessGrant } from "../modules/vehicleCare/vehicleCare.api"
 
@@ -109,6 +110,9 @@ const BodaDashboard = () => {
     return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10)
   }, [])
   const paybillCodes = useMemo(() => mapPaybillCodes(paybillAliases), [paybillAliases])
+  const { wallet: bodaWallet, loading: walletLoading, error: walletError } = useEntityWallet("boda")
+  const paybillNumber = bodaWallet?.paybill || PAYBILL_NUMBER
+  const accountNumber = bodaWallet?.account_number || bodaWallet?.wallet_code || paybillCodes.rider || ""
   const bodaId = user?.boda_id || user?.matatu_id
 
   const filterToday = (rows: Array<{ created_at?: string; time?: string; timestamp?: string }>) => {
@@ -381,7 +385,7 @@ const BodaDashboard = () => {
         <>
           <section className="card">
             <PaybillHeader
-              title="Boda PayBill Account (4814003)"
+              title={`Boda PayBill Account (${paybillNumber || "—"})`}
               actions={
                 <button className="btn ghost" type="button" onClick={() => setShowPaybillSticker(true)}>
                   Print Sticker
@@ -389,8 +393,13 @@ const BodaDashboard = () => {
               }
             />
             {paybillError ? <div className="err">PayBill load error: {paybillError}</div> : null}
-            <div style={{ marginTop: 12 }}>
-              <PaybillCodeCard title="Boda Rider Account" label="BODA Account (Rider)" code={paybillCodes.rider} />
+            {walletError ? <div className="err">Wallet: {walletError}</div> : null}
+            <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
+              <PaybillCodeCard title="PayBill Number" label="PAYBILL" code={paybillNumber || "—"} />
+              <PaybillCodeCard title="Boda Rider Account" label="BODA Account (Rider)" code={accountNumber || "—"} />
+              <div className="muted small" style={{ marginTop: -4 }}>
+                {walletLoading ? "Loading wallet..." : `PayBill code: ${paybillNumber || "—"} · Account number: ${accountNumber || "—"}`}
+              </div>
             </div>
           </section>
 
@@ -417,9 +426,9 @@ const BodaDashboard = () => {
           </section>
           <StickerPrintModal
             open={showPaybillSticker}
-            title="Boda PayBill Account (4814003)"
+            title={`Boda PayBill Account (${paybillNumber || "—"})`}
             onClose={() => setShowPaybillSticker(false)}
-            lines={[{ label: "Boda Rider Account - BODA Account (Rider)", value: paybillCodes.rider }]}
+            lines={[{ label: "Boda Rider Account - BODA Account (Rider)", value: accountNumber || paybillNumber }]}
           />
         </>
       ) : null}

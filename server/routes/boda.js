@@ -1,6 +1,45 @@
 const express = require('express');
 const { requireUser } = require('../middleware/auth');
+const { getSaccoContextUnified } = require('../services/saccoContext.service');
+const { resolveEntityWallet } = require('../services/entityWallet.service');
 const router = express.Router();
+
+const BODA_FORBIDDEN = {
+  ok: false,
+  error: 'forbidden',
+  code: 'BODA_ACCESS_DENIED',
+};
+
+router.get('/wallet', requireUser, async (req, res) => {
+  const requestId = req.requestId || null;
+  try {
+    const ctx = await getSaccoContextUnified(req.user.id);
+    const role = ctx?.role || null;
+    const entityId = ctx?.matatuId || null;
+    if (role !== 'BODA' || !entityId) {
+      return res.status(403).json({
+        ...BODA_FORBIDDEN,
+        request_id: requestId,
+        details: { user_id: req.user.id, role, entity_id: entityId },
+      });
+    }
+    const wallet = await resolveEntityWallet({ entityType: 'BODA', entityId });
+    if (!wallet) {
+      return res.status(404).json({
+        ok: false,
+        error: 'wallet_not_found',
+        code: 'BODA_WALLET_NOT_FOUND',
+        request_id: requestId,
+        details: { entity_id: entityId },
+      });
+    }
+    console.info('[wallet] boda_resolve', { request_id: requestId, user_id: req.user.id, entity_id: entityId, wallet_id: wallet.wallet_id });
+    return res.json({ ok: true, wallet, request_id: requestId });
+  } catch (err) {
+    console.error('[wallet] boda_resolve_failed', { request_id: requestId, user_id: req.user.id, error: err?.message });
+    return res.status(500).json({ ok: false, error: err?.message || 'Failed to load wallet', request_id: requestId });
+  }
+});
 
 // Summary for a given date (per-user)
 router.get('/summary', requireUser, async (req, res) => {

@@ -4,8 +4,9 @@ import PaybillCodeCard from "../components/PaybillCodeCard"
 import PaybillHeader from "../components/PaybillHeader"
 import StickerPrintModal from "../components/StickerPrintModal"
 import { authFetch } from "../lib/auth"
-import { mapPaybillCodes, resolveWalletKind, type PaybillAliasRow } from "../lib/paybill"
+import { mapPaybillCodes, resolveWalletKind, PAYBILL_NUMBER, type PaybillAliasRow } from "../lib/paybill"
 import { useAuth } from "../state/auth"
+import { useEntityWallet } from "../hooks/useEntityWallet"
 import VehicleCarePage from "../modules/vehicleCare/VehicleCarePage"
 import { fetchAccessGrants, type AccessGrant } from "../modules/vehicleCare/vehicleCare.api"
 
@@ -113,6 +114,7 @@ const TaxiDashboard = () => {
   const taxiId = user?.taxi_id || user?.matatu_id
   const taxiPlate = user?.matatu_plate || ""
   const headerPlate = taxiPlate || taxiId || ""
+  const { wallet: taxiWallet, loading: walletLoading, error: walletError } = useEntityWallet("taxi")
 
   const driverCodes = useMemo(() => {
     const byEntity = paybillAliases.filter(
@@ -137,6 +139,8 @@ const TaxiDashboard = () => {
     const account = accountAlias || accountFallback || walletCodeFallback || paybill
     return { paybill, account }
   }, [paybillAliases, paybillCodes.driver, taxiId, walletCodeFallback])
+  const paybillNumber = taxiWallet?.paybill || driverCodes.paybill || PAYBILL_NUMBER
+  const accountNumber = taxiWallet?.account_number || taxiWallet?.wallet_code || driverCodes.account || ""
 
   const filterToday = (rows: Array<{ created_at?: string; time?: string; timestamp?: string }>) => {
     const start = new Date()
@@ -422,7 +426,7 @@ const TaxiDashboard = () => {
         <>
           <section className="card">
             <PaybillHeader
-              title="Taxi PayBill Account (4814003)"
+              title={`Taxi PayBill Account (${paybillNumber || "—"})`}
               actions={
                 <button className="btn ghost" type="button" onClick={() => setShowPaybillSticker(true)}>
                   Print Sticker
@@ -430,14 +434,12 @@ const TaxiDashboard = () => {
               }
             />
             {paybillError ? <div className="err">PayBill load error: {paybillError}</div> : null}
-            <div style={{ marginTop: 12 }}>
-              <PaybillCodeCard
-                title="Taxi Driver Account"
-                label="TAXI Account (Driver)"
-                code={driverCodes.account || driverCodes.paybill || ''}
-              />
-              <div className="muted small" style={{ marginTop: 4 }}>
-                PayBill code: {driverCodes.paybill || "—"}
+            {walletError ? <div className="err">Wallet: {walletError}</div> : null}
+            <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
+              <PaybillCodeCard title="PayBill Number" label="PAYBILL" code={paybillNumber || "—"} />
+              <PaybillCodeCard title="Taxi Driver Account" label="TAXI Account (Driver)" code={accountNumber || "—"} />
+              <div className="muted small" style={{ marginTop: -4 }}>
+                {walletLoading ? "Loading wallet..." : `PayBill code: ${paybillNumber || "—"} · Account number: ${accountNumber || "—"}`}
               </div>
             </div>
           </section>
@@ -465,9 +467,9 @@ const TaxiDashboard = () => {
           </section>
           <StickerPrintModal
             open={showPaybillSticker}
-            title="Taxi PayBill Account (4814003)"
+            title={`Taxi PayBill Account (${paybillNumber || "—"})`}
             onClose={() => setShowPaybillSticker(false)}
-            lines={[{ label: "Taxi Driver Account - TAXI Account (Driver)", value: driverCodes.account || driverCodes.paybill }]}
+            lines={[{ label: "Taxi Driver Account - TAXI Account (Driver)", value: accountNumber || paybillNumber }]}
           />
         </>
       ) : null}

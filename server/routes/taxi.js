@@ -1,6 +1,45 @@
 const express = require('express');
 const { requireUser } = require('../middleware/auth');
+const { getSaccoContextUnified } = require('../services/saccoContext.service');
+const { resolveEntityWallet } = require('../services/entityWallet.service');
 const router = express.Router();
+
+const PAYBILL_FORBIDDEN = {
+  ok: false,
+  error: 'forbidden',
+  code: 'TAXI_ACCESS_DENIED',
+};
+
+router.get('/wallet', requireUser, async (req, res) => {
+  const requestId = req.requestId || null;
+  try {
+    const ctx = await getSaccoContextUnified(req.user.id);
+    const role = ctx?.role || null;
+    const entityId = ctx?.matatuId || null;
+    if (role !== 'TAXI' || !entityId) {
+      return res.status(403).json({
+        ...PAYBILL_FORBIDDEN,
+        request_id: requestId,
+        details: { user_id: req.user.id, role, entity_id: entityId },
+      });
+    }
+    const wallet = await resolveEntityWallet({ entityType: 'TAXI', entityId });
+    if (!wallet) {
+      return res.status(404).json({
+        ok: false,
+        error: 'wallet_not_found',
+        code: 'TAXI_WALLET_NOT_FOUND',
+        request_id: requestId,
+        details: { entity_id: entityId },
+      });
+    }
+    console.info('[wallet] taxi_resolve', { request_id: requestId, user_id: req.user.id, entity_id: entityId, wallet_id: wallet.wallet_id });
+    return res.json({ ok: true, wallet, request_id: requestId });
+  } catch (err) {
+    console.error('[wallet] taxi_resolve_failed', { request_id: requestId, user_id: req.user.id, error: err?.message });
+    return res.status(500).json({ ok: false, error: err?.message || 'Failed to load wallet', request_id: requestId });
+  }
+});
 
 // Summary for a given date (per-user, today card)
 router.get('/summary', requireUser, async (req, res) => {
