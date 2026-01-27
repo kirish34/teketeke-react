@@ -114,7 +114,7 @@ const TaxiDashboard = () => {
   const taxiId = user?.taxi_id || user?.matatu_id
   const taxiPlate = user?.matatu_plate || ""
   const headerPlate = taxiPlate || taxiId || ""
-  const { wallet: taxiWallet, loading: walletLoading, error: walletError } = useEntityWallet("taxi")
+  const { wallet: taxiWallet, loading: walletLoading, error: walletError, refresh: reloadWallet } = useEntityWallet("taxi")
 
   const driverCodes = useMemo(() => {
     const byEntity = paybillAliases.filter(
@@ -141,6 +141,7 @@ const TaxiDashboard = () => {
   }, [paybillAliases, paybillCodes.driver, taxiId, walletCodeFallback])
   const paybillNumber = taxiWallet?.paybill || driverCodes.paybill || PAYBILL_NUMBER
   const accountNumber = taxiWallet?.account_number || taxiWallet?.wallet_code || driverCodes.account || ""
+  const todayNet = Number(summary?.cash_today || 0) - Number(summary?.expenses_today || 0)
 
   const filterToday = (rows: Array<{ created_at?: string; time?: string; timestamp?: string }>) => {
     const start = new Date()
@@ -463,6 +464,20 @@ const TaxiDashboard = () => {
                 <div className="k">Net today</div>
                 <div className="v">{formatKes(summary?.net_today)}</div>
               </div>
+            </div>
+            <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+              <button className="btn" type="button" onClick={() => setActiveTab("cash")}>
+                Record cash
+              </button>
+              <button className="btn ghost" type="button" onClick={() => setActiveTab("expenses")}>
+                Record expense
+              </button>
+              <button className="btn ghost" type="button" onClick={() => void reloadWallet()}>
+                Refresh wallet
+              </button>
+              <span className="muted small">
+                {walletLoading ? "Refreshing wallet..." : `Net today: ${formatKes(todayNet)} (cash minus expenses)`}
+              </span>
             </div>
           </section>
           <StickerPrintModal
