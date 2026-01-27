@@ -70,6 +70,17 @@ async function getSaccoDetails(saccoId) {
   return data || null;
 }
 
+async function getTaxi(taxiId) {
+  if (!taxiId) return null;
+  const { data, error } = await supabaseAdmin
+    .from('taxis')
+    .select('id, plate, operator_id, till_number, category, seat_capacity')
+    .eq('id', taxiId)
+    .maybeSingle();
+  if (error && error.code !== PG_ROW_NOT_FOUND) throw error;
+  return data || null;
+}
+
 async function attachOperatorNames(items) {
   if (!Array.isArray(items) || items.length === 0) return items || [];
   const saccoIds = Array.from(new Set(items.map((item) => item?.sacco_id).filter(Boolean)));
@@ -169,7 +180,14 @@ async function getSaccoContext(userId) {
 
   if (mapped.role?.matatu_id) {
     const matatu = await getMatatu(mapped.role.matatu_id);
-    mapped.matatu = matatu || null;
+    if (matatu) {
+      mapped.matatu = matatu;
+    } else if (mapped.role?.role === 'TAXI') {
+      const taxi = await getTaxi(mapped.role.matatu_id);
+      if (taxi) {
+        mapped.matatu = { id: taxi.id, number_plate: taxi.plate, plate: taxi.plate, sacco_id: taxi.operator_id, till_number: taxi.till_number };
+      }
+    }
   }
 
   return mapped;
@@ -536,7 +554,7 @@ router.get('/me', async (req, res) => {
       role: effectiveRole,
       sacco_id: saccoId,
       matatu_id: ctx.matatu?.id || roleRow?.matatu_id || null,
-      matatu_plate: ctx.matatu?.number_plate || null,
+      matatu_plate: ctx.matatu?.number_plate || ctx.matatu?.plate || ctx.matatu?.identifier || null,
       email: req.user?.email || null,
     });
   } catch (e) {
