@@ -109,6 +109,7 @@ const BodaDashboard = () => {
     return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10)
   }, [])
   const paybillCodes = useMemo(() => mapPaybillCodes(paybillAliases), [paybillAliases])
+  const bodaId = user?.boda_id || user?.matatu_id
 
   const filterToday = (rows: Array<{ created_at?: string; time?: string; timestamp?: string }>) => {
     const today = new Date()
@@ -157,7 +158,7 @@ const BodaDashboard = () => {
   }, [todayISO, weekStartISO, monthStartISO])
 
   useEffect(() => {
-    const entityId = user?.matatu_id || ""
+    const entityId = bodaId || ""
     if (!entityId) {
       setPaybillAliases([])
       setPaybillError(null)
@@ -176,7 +177,7 @@ const BodaDashboard = () => {
       }
     }
     loadPaybillCodes()
-  }, [user?.matatu_id])
+  }, [bodaId])
 
   useEffect(() => {
     void (async () => {
@@ -194,7 +195,7 @@ const BodaDashboard = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [monthTotals?.net])
 
-  const ownerScopeId = user?.matatu_id || ""
+  const ownerScopeId = bodaId || ""
   const operatorGrant = useMemo(
     () => accessGrants.find((grant) => grant.scope_type === "OPERATOR" && grant.is_active !== false) || null,
     [accessGrants],

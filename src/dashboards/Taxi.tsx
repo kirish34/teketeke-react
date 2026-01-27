@@ -110,7 +110,7 @@ const TaxiDashboard = () => {
     return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10)
   }, [])
   const paybillCodes = useMemo(() => mapPaybillCodes(paybillAliases), [paybillAliases])
-  const taxiId = user?.matatu_id
+  const taxiId = user?.taxi_id || user?.matatu_id
   const taxiPlate = user?.matatu_plate || ""
   const headerPlate = taxiPlate || taxiId || ""
 
@@ -244,7 +244,7 @@ const TaxiDashboard = () => {
   }, [])
 
   useEffect(() => {
-    const matatuId = user?.matatu_id || ""
+    const matatuId = taxiId || ""
     if (!matatuId) {
       setWalletCodeFallback("")
       return
@@ -267,14 +267,14 @@ const TaxiDashboard = () => {
         /* ignore */
       }
     })()
-  }, [user?.matatu_id])
+  }, [taxiId])
 
   useEffect(() => {
     updateTargetSummary(target ? Number(target) : 0, monthTotals?.net)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [monthTotals?.net])
 
-  const ownerScopeId = user?.matatu_id || ""
+  const ownerScopeId = taxiId || ""
   const operatorGrant = useMemo(
     () => accessGrants.find((grant) => grant.scope_type === "OPERATOR" && grant.is_active !== false) || null,
     [accessGrants],

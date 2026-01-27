@@ -141,6 +141,8 @@ async function fetchProfile(token: string): Promise<{ user: SessionUser; context
   const data = (await res.json()) as any;
   const role = mapRole(data.context?.effective_role || data.role || "USER");
   if (!role) throw new Error("No role assigned to this account");
+  const assetId = data.asset_id || data.taxi_id || data.boda_id || data.matatu_id || null;
+  const assetType = (data.asset_type || data.role || role || "").toString().toLowerCase();
   const ctx: UserContext = {
     effective_role: role,
     sacco_id: data.context?.sacco_id ?? data.sacco_id ?? null,
@@ -152,6 +154,10 @@ async function fetchProfile(token: string): Promise<{ user: SessionUser; context
     role,
     sacco_id: ctx.sacco_id,
     matatu_id: ctx.matatu_id,
+    taxi_id: data.taxi_id || null,
+    boda_id: data.boda_id || null,
+    asset_id: assetId,
+    asset_type: (assetType as SessionUser["asset_type"]) || null,
     matatu_plate: data.matatu_plate || null,
   };
   const contextMissing = Boolean(data.context_missing ?? data.needs_setup);

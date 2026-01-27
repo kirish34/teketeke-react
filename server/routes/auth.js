@@ -146,7 +146,22 @@ async function handleMe(req, res) {
       sacco_id: ctx.sacco_id,
       matatu_id: matatuId,
     };
-    const matatuPlate = await resolveMatatuPlate(matatuId);
+    const mappedRole = mappedCtx.effective_role ? String(mappedCtx.effective_role).toUpperCase() : null;
+    const taxiId =
+      req.user?.app_metadata?.taxi_id ||
+      req.user?.user_metadata?.taxi_id ||
+      (mappedRole === 'TAXI' ? mappedCtx.matatu_id : null) ||
+      null;
+    const bodaId =
+      req.user?.app_metadata?.boda_id ||
+      req.user?.user_metadata?.boda_id ||
+      (mappedRole === 'BODA' ? mappedCtx.matatu_id : null) ||
+      null;
+    const assetId = taxiId || bodaId || mappedCtx.matatu_id || null;
+    const assetType =
+      (mappedRole === 'TAXI' && 'taxi') || (mappedRole === 'BODA' && 'boda') || (mappedRole && mappedRole.startsWith('MATATU') && 'matatu') || null;
+
+    const matatuPlate = await resolveMatatuPlate(assetId);
     baseUser.role = mappedCtx.effective_role ? String(mappedCtx.effective_role).toLowerCase() : req.user?.role || null;
     req.context = mappedCtx;
     req.user.role = baseUser.role;
@@ -155,6 +170,11 @@ async function handleMe(req, res) {
       user: baseUser,
       context: mappedCtx,
       matatu_plate: matatuPlate,
+      matatu_id: mappedCtx.matatu_id || null,
+      taxi_id: taxiId,
+      boda_id: bodaId,
+      asset_id: assetId,
+      asset_type: assetType,
       context_missing: false,
       needs_setup: false,
     });
