@@ -63,8 +63,8 @@ async function resolveMatatuPlate(matatuId) {
     if (error && error.code !== 'PGRST116') throw error;
     return data || null;
   };
-  const matatu = await lookup('matatus', 'number_plate,plate,identifier');
-  if (matatu) return matatu.number_plate || matatu.plate || matatu.identifier || null;
+  const matatu = await lookup('matatus', 'number_plate,identifier');
+  if (matatu) return matatu.number_plate || matatu.identifier || null;
   const taxi = await lookup('taxis', 'plate,number_plate,identifier');
   if (taxi) return taxi.plate || taxi.number_plate || taxi.identifier || null;
   const boda = await lookup('boda_bikes', 'identifier,plate,number_plate');
