@@ -106,6 +106,7 @@ const MatatuStaffDashboard = () => {
   const [shiftLoading, setShiftLoading] = useState(false)
   const [shiftError, setShiftError] = useState<string | null>(null)
   const [shiftLoaded, setShiftLoaded] = useState(false)
+  const [isMobile, setIsMobile] = useState<boolean>(() => typeof window !== "undefined" && window.innerWidth <= 768)
 
   const fetchJson = useCallback(<T,>(path: string) => api<T>(path, { token }), [token])
 
@@ -236,6 +237,13 @@ const MatatuStaffDashboard = () => {
         setAccessGrants([])
       }
     })()
+  }, [])
+
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth <= 768)
+    handler()
+    window.addEventListener("resize", handler)
+    return () => window.removeEventListener("resize", handler)
   }, [])
 
   useEffect(() => {
@@ -827,7 +835,7 @@ const MatatuStaffDashboard = () => {
   if (shiftLoaded && !activeShift) {
     return (
       <DashboardShell title="Matatu Staff" subtitle="Staff Dashboard" navLabel="Matatu navigation" hideShellChrome>
-        {heroSection}
+        <div className="app-header sticky">{heroSection}</div>
         <section className="card">
           <div className="topline">
             <h3 style={{ margin: 0 }}>Start Shift</h3>
@@ -845,7 +853,19 @@ const MatatuStaffDashboard = () => {
 
   return (
     <DashboardShell title="Matatu Staff" subtitle="Staff Dashboard" navLabel="Matatu navigation" hideShellChrome>
-      {heroSection}
+      <div className="app-header sticky">
+        {heroSection}
+        <div className="app-header-meta">
+          <div className="meta-line">
+            <span className="pill">{assignedMatatuLabel}</span>
+            <span className={`pill ${livePaysLoading ? "pill-live pulse" : "pill-live"}`}>Sync {livePaysLoading ? "…" : "OK"}</span>
+          </div>
+          <div className="meta-line">
+            <span className="pill ghost">{trip?.status ? `Trip: ${trip.status}` : "No active trip"}</span>
+            {activeShift ? <span className="pill ghost">Shift on</span> : <span className="pill ghost">Shift off</span>}
+          </div>
+        </div>
+      </div>
 
       <section className="card" style={{ paddingBottom: 10 }}>
         <div className="row" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -900,6 +920,26 @@ const MatatuStaffDashboard = () => {
         ))}
       </nav>
 
+      {isMobile ? (
+        <nav className="bottom-nav" aria-label="Matatu staff mobile nav">
+          {[
+            { id: "live_payments", label: "Live" },
+            { id: "trips", label: "Trips" },
+            { id: "transactions", label: "Txns" },
+            { id: "vehicle_care", label: "Care" },
+          ].map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className={`bottom-nav-btn${activeTab === t.id ? " active" : ""}`}
+              onClick={() => setActiveTab(t.id as typeof activeTab)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </nav>
+      ) : null}
+
       {activeTab === "live_payments" ? (
         <section className="card">
           <div className="topline" style={{ alignItems: "center", flexWrap: "wrap", gap: 8 }}>
@@ -932,45 +972,80 @@ const MatatuStaffDashboard = () => {
               No active trip. Start a trip in Trips tab.
             </div>
           ) : (
-            <div className="table-wrap" style={{ marginTop: 12 }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Time</th>
-                    <th>Payer</th>
-                    <th>Amount</th>
-                    <th>Ref</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {livePays.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="muted">
-                        {livePaysLoading ? "Loading..." : "No payments yet."}
-                      </td>
-                    </tr>
-                  ) : (
-                    livePays.map((p) => (
-                      <tr key={p.id || p.created_at}>
-                        <td>{p.created_at ? new Date(p.created_at).toLocaleTimeString("en-KE") : "-"}</td>
-                        <td>
-                          {(p as any)?.sender_name ||
-                            (p as any)?.payer_name ||
-                            (p as any)?.payer_msisdn ||
-                            p.msisdn ||
-                            p.passenger_msisdn ||
-                            "-"}
-                        </td>
-                        <td>{fmtKES((p as any)?.amount || p.fare_amount_kes)}</td>
-                        <td>{(p as any)?.account_ref || (p as any)?.reference || p.notes || "-"}</td>
-                        <td>{(p as any)?.status || p.status || ""}</td>
+            <>
+              {!isMobile ? (
+                <div className="table-wrap" style={{ marginTop: 12 }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Time</th>
+                        <th>Payer</th>
+                        <th>Amount</th>
+                        <th>Ref</th>
+                        <th>Status</th>
                       </tr>
-                    ))
+                    </thead>
+                    <tbody>
+                      {livePays.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="muted">
+                            {livePaysLoading ? "Loading..." : "No payments yet."}
+                          </td>
+                        </tr>
+                      ) : (
+                        livePays.map((p) => (
+                          <tr key={p.id || p.created_at}>
+                            <td>{p.created_at ? new Date(p.created_at).toLocaleTimeString("en-KE") : "-"}</td>
+                            <td>
+                              {(p as any)?.sender_name ||
+                                (p as any)?.payer_name ||
+                                (p as any)?.payer_msisdn ||
+                                p.msisdn ||
+                                p.passenger_msisdn ||
+                                "-"}
+                            </td>
+                            <td>{fmtKES((p as any)?.amount || p.fare_amount_kes)}</td>
+                            <td>{(p as any)?.account_ref || (p as any)?.reference || p.notes || "-"}</td>
+                            <td>{(p as any)?.status || p.status || ""}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="live-cards">
+                  {livePays.length === 0 ? (
+                    <div className="muted small">{livePaysLoading ? "Loading..." : "No payments yet."}</div>
+                  ) : (
+                    livePays.map((p) => {
+                      const payer =
+                        (p as any)?.sender_name ||
+                        (p as any)?.payer_name ||
+                        (p as any)?.payer_msisdn ||
+                        p.msisdn ||
+                        p.passenger_msisdn ||
+                        "-"
+                      const ref = (p as any)?.account_ref || (p as any)?.reference || p.notes || "-"
+                      const status = (p as any)?.status || p.status || ""
+                      const t = p.created_at ? new Date(p.created_at).toLocaleTimeString("en-KE") : "-"
+                      const amt = fmtKES((p as any)?.amount || p.fare_amount_kes)
+                      return (
+                        <div key={p.id || p.created_at} className="live-card">
+                          <div className="live-card-amount">{amt}</div>
+                          <div className="live-card-line">
+                            <span className="mono">{t}</span>
+                            <span className={`status-chip ${status.toLowerCase()}`}>{status || " "}</span>
+                          </div>
+                          <div className="live-card-line mono">{payer}</div>
+                          <div className="live-card-line mono muted small">Ref: {ref}</div>
+                        </div>
+                      )
+                    })
                   )}
-                </tbody>
-              </table>
-            </div>
+                </div>
+              )}
+            </>
           )}
         </section>
       ) : null}
