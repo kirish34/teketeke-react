@@ -362,7 +362,7 @@ const MatatuStaffDashboard = () => {
       if (activeShift?.opened_at) {
         const startMs = new Date(activeShift.opened_at).getTime()
         const endMs = activeShift.closed_at ? new Date(activeShift.closed_at).getTime() : Date.now()
-        trips = trips.filter((t) => {
+        trips = trips.filter((t: Trip) => {
           const ts = t.started_at ? new Date(t.started_at).getTime() : null
           return ts !== null && ts >= startMs && ts <= endMs
         })
