@@ -8,6 +8,7 @@ const {
   debitWalletWithLedger,
   newReferenceId,
 } = require('../services/walletLedger.service');
+const { resolveActiveTripIdForMatatu } = require('../services/trip.service');
 
 function mapEntryTypeFromSource(source) {
   const normalized = String(source || '').trim().toUpperCase();
@@ -326,7 +327,7 @@ async function creditFareWithFeesByWalletId({
     // Lock matatu wallet
     const matatuRes = await useClient.query(
       `
-        SELECT id, virtual_account_code
+        SELECT id, virtual_account_code, matatu_id
         FROM wallets
         WHERE id = $1
       `,
@@ -339,6 +340,7 @@ async function creditFareWithFeesByWalletId({
 
     const matatuWallet = matatuRes.rows[0];
     const virtualAccountCode = matatuWallet.virtual_account_code;
+    const tripId = await resolveActiveTripIdForMatatu(matatuWallet.matatu_id);
 
     // Active fees for matatu fare
     const feesRes = await useClient.query(
@@ -399,6 +401,7 @@ async function creditFareWithFeesByWalletId({
       providerRef: sourceRef || null,
       source,
       sourceRef: sourceRef || null,
+      tripId: tripId || null,
       client: useClient,
     });
 
@@ -439,6 +442,7 @@ async function creditFareWithFeesByWalletId({
       matatuWalletId: matatuWallet.id,
       matatuBalanceBefore: matatuResult.balanceBefore,
       matatuBalanceAfter: matatuResult.balanceAfter,
+      tripId: tripId || null,
     };
   } catch (err) {
     if (ownTx) await useClient.query('ROLLBACK');

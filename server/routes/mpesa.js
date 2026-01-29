@@ -5,6 +5,7 @@ const router = express.Router();
 const pool = require('../db/pool');
 const { creditFareWithFeesByWalletId, debitWallet } = require('../wallet/wallet.service');
 const { creditWalletWithLedger } = require('../services/walletLedger.service');
+const { resolveActiveTripIdForMatatu } = require('../services/trip.service');
 const { normalizeRef, resolveWalletByRef } = require('../wallet/wallet.aliases');
 const { validatePaybillCode } = require('../wallet/paybillCode.util');
 const { applyRiskRules } = require('../mpesa/c2bRisk');
@@ -333,6 +334,10 @@ router.post('/stk/callback', async (req, res) => {
       return safeAck(res, { ok: true, quarantined: true });
     }
 
+    const walletMeta = await client.query(`SELECT matatu_id FROM wallets WHERE id = $1 LIMIT 1`, [walletId]);
+    const matatuIdForTrip = walletMeta.rows[0]?.matatu_id || null;
+    const tripId = await resolveActiveTripIdForMatatu(matatuIdForTrip);
+
     const ledgerResult = await creditWalletWithLedger({
       walletId,
       amount: amount || stkRow.amount || 0,
@@ -344,6 +349,7 @@ router.post('/stk/callback', async (req, res) => {
       providerRef,
       source: 'MPESA_STK',
       sourceRef: checkoutRequestId,
+      tripId: tripId || null,
       client,
     });
 
@@ -355,7 +361,8 @@ router.post('/stk/callback', async (req, res) => {
             provider_receipt = coalesce($3, provider_receipt),
             wallet_id = $4,
             wallet_code = coalesce(wallet_code, $5),
-            account_reference = coalesce(account_reference, $6)
+            account_reference = coalesce(account_reference, $6),
+            trip_id = coalesce(trip_id, $7)
         where checkout_request_id = $1
       `,
       [
@@ -365,6 +372,7 @@ router.post('/stk/callback', async (req, res) => {
         walletId,
         stkRow.wallet_code || null,
         stkRow.account_reference || null,
+        tripId || null,
       ],
     );
 
@@ -1490,6 +1498,9 @@ async function handleC2BCallback(req, res) {
     }
 
     const sourceRef = mpesa_receipt || String(paymentId);
+    const walletMetaRes = await pool.query(`SELECT matatu_id FROM wallets WHERE id = $1 LIMIT 1`, [walletId]);
+    const matatuIdForTrip = walletMetaRes.rows[0]?.matatu_id || null;
+    const tripId = await resolveActiveTripIdForMatatu(matatuIdForTrip);
     const existingTx = await pool.query(
       `
         SELECT id
@@ -1501,8 +1512,8 @@ async function handleC2BCallback(req, res) {
     );
     if (existingTx.rows.length) {
       await pool.query(
-        `UPDATE mpesa_c2b_payments SET status = 'CREDITED' WHERE id = $1 AND status = 'RECEIVED'`,
-        [paymentId]
+        `UPDATE mpesa_c2b_payments SET status = 'CREDITED', trip_id = COALESCE(trip_id, $2) WHERE id = $1 AND status = 'RECEIVED'`,
+        [paymentId, tripId || null]
       );
       try {
         await applyRiskRules({ paymentId, reasonCodes: ['IDEMPOTENT_REPLAY'] });
@@ -1542,8 +1553,8 @@ async function handleC2BCallback(req, res) {
         client,
       });
       const updated = await client.query(
-        `UPDATE mpesa_c2b_payments SET status = 'CREDITED' WHERE id = $1 AND status = 'RECEIVED'`,
-        [paymentId]
+        `UPDATE mpesa_c2b_payments SET status = 'CREDITED', trip_id = COALESCE(trip_id, $2) WHERE id = $1 AND status = 'RECEIVED'`,
+        [paymentId, result.tripId || tripId || null]
       );
       if (!updated.rowCount) {
         await client.query('ROLLBACK');

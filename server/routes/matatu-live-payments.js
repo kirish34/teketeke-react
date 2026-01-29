@@ -180,6 +180,7 @@ function normalizeLimit(value) {
 
 router.get('/live-payments', async (req, res) => {
   const matatuId = (req.query.matatu_id || '').toString().trim();
+  const tripId = (req.query.trip_id || '').toString().trim() || null;
   const limit = normalizeLimit(req.query.limit);
   const from = normalizeFrom(req.query.from) || new Date(Date.now() - 15 * 60 * 1000);
 
@@ -269,7 +270,10 @@ router.get('/live-payments', async (req, res) => {
       });
     }
 
-    const params = [matatuId, from.toISOString(), limit];
+    const params = [matatuId, from.toISOString()];
+    const tripFilter = tripId ? ' AND p.trip_id = $3' : '';
+    if (tripId) params.push(tripId);
+    params.push(limit);
     const { rows } = await pool.query(
       `
         SELECT
@@ -283,6 +287,7 @@ router.get('/live-payments', async (req, res) => {
           p.receipt,
           p.status,
           p.match_status,
+          p.trip_id,
           COALESCE(w_alias.wallet_kind, w_match.wallet_kind) AS wallet_kind,
           p.raw,
           p.raw_payload,
@@ -299,8 +304,9 @@ router.get('/live-payments', async (req, res) => {
           ON w_match.id = p.matched_wallet_id
         WHERE (w_alias.matatu_id = $1 OR w_match.matatu_id = $1)
           AND COALESCE(p.trans_time, p.created_at) >= $2
+          ${tripFilter}
         ORDER BY COALESCE(p.trans_time, p.created_at) DESC
-        LIMIT $3
+        LIMIT $${params.length}
       `,
       params,
     );

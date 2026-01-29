@@ -55,6 +55,7 @@ async function creditWalletWithLedger({
   source = null,
   sourceRef = null,
   meta = null,
+  tripId = null,
   client = null,
 }) {
   if (!walletId) throw new Error('walletId is required');
@@ -89,9 +90,9 @@ async function creditWalletWithLedger({
     const ledgerRes = await useClient.query(
       `
         INSERT INTO wallet_ledger
-          (wallet_id, direction, amount, balance_before, balance_after, entry_type, reference_type, reference_id, description, provider, provider_ref, source, source_ref, meta)
+          (wallet_id, direction, amount, balance_before, balance_after, entry_type, reference_type, reference_id, description, provider, provider_ref, source, source_ref, meta, trip_id)
         VALUES
-          ($1, 'CREDIT', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          ($1, 'CREDIT', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         ON CONFLICT DO NOTHING
         RETURNING id
       `,
@@ -109,6 +110,7 @@ async function creditWalletWithLedger({
         source || null,
         sourceRef || null,
         meta || null,
+        tripId || null,
       ],
     );
     const ledgerId = ledgerRes.rows[0]?.id || null;

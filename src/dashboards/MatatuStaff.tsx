@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { NavLink } from "react-router-dom"
 import DashboardShell from "../components/DashboardShell"
 import { authFetch } from "../lib/auth"
 import { api } from "../services/api"
@@ -78,8 +77,8 @@ const MatatuStaffDashboard = () => {
   const [wallets, setWallets] = useState<LedgerWallet[]>([])
   const [walletError, setWalletError] = useState<string | null>(null)
   const [walletLoading, setWalletLoading] = useState(false)
-  const [ledgerFrom, setLedgerFrom] = useState(ledgerStart)
-  const [ledgerTo, setLedgerTo] = useState(ledgerEnd)
+  const [ledgerFrom] = useState(ledgerStart)
+  const [ledgerTo] = useState(ledgerEnd)
 
   const [manualAmount, setManualAmount] = useState("")
   const [manualNote, setManualNote] = useState("")
@@ -99,7 +98,10 @@ const MatatuStaffDashboard = () => {
   const [tripHistoryError, setTripHistoryError] = useState<string | null>(null)
 
   const [accessGrants, setAccessGrants] = useState<AccessGrant[]>([])
-  const [activeTab, setActiveTab] = useState<"overview" | "trips" | "transactions" | "vehicle_care">("overview")
+  const [activeTab, setActiveTab] = useState<"live_payments" | "trips" | "transactions" | "vehicle_care">("live_payments")
+  const [livePays, setLivePays] = useState<Tx[]>([])
+  const [livePaysLoading, setLivePaysLoading] = useState(false)
+  const [livePaysError, setLivePaysError] = useState<string | null>(null)
 
   const fetchJson = useCallback(<T,>(path: string) => api<T>(path, { token }), [token])
 
@@ -205,8 +207,8 @@ const MatatuStaffDashboard = () => {
 
   useEffect(() => {
     if (!saccoId) return
-    void loadTransactions()
-    if (activeTab === "overview" || activeTab === "transactions") {
+    if (activeTab === "transactions") {
+      void loadTransactions()
       void loadWallets()
     }
   }, [activeTab, loadTransactions, loadWallets, saccoId])
@@ -338,10 +340,68 @@ const MatatuStaffDashboard = () => {
     }
   }, [matatuId])
 
+  const loadLivePayments = useCallback(async () => {
+    if (!matatuId) {
+      setLivePays([])
+      setLivePaysError("No matatu assigned found for this account. Contact SACCO admin.")
+      return
+    }
+    setLivePaysLoading(true)
+    setLivePaysError(null)
+    try {
+      const res = await authFetch(`/api/matatu/live-payments?matatu_id=${encodeURIComponent(matatuId)}&limit=50`, {
+        headers: { Accept: "application/json" },
+      })
+      if (!res.ok) {
+        let msg = "Failed to load live payments"
+        try {
+          const body = await res.json().catch(() => ({}))
+          if (res.status === 403 && (body?.code === "MATATU_ACCESS_DENIED" || body?.error === "forbidden")) {
+            msg = "No matatu assigned found for this account. Contact SACCO admin."
+          } else if (body?.error) {
+            msg = body.error
+          }
+        } catch {
+          const text = await res.text().catch(() => "")
+          msg = text || msg
+        }
+        setLivePaysError(msg)
+        setLivePays([])
+        return
+      }
+      const data = await res.json().catch(() => ({}))
+      const payments: Tx[] = data?.items || data?.payments || []
+      let filtered = payments
+      if (trip) {
+        const startMs = trip.started_at ? new Date(trip.started_at).getTime() : null
+        const endMs = (trip.ended_at ? new Date(trip.ended_at) : new Date()).getTime()
+        filtered = payments.filter((p) => {
+          const tripId = (p as any)?.trip_id
+          if (tripId && trip?.id) {
+            return String(tripId) === String(trip.id)
+          }
+          const t = p.created_at ? new Date(p.created_at).getTime() : null
+          if (!startMs || !t) return false
+          return t >= startMs && t <= endMs
+        })
+      } else {
+        filtered = []
+      }
+      setLivePays(filtered)
+    } catch (err) {
+      setLivePaysError(err instanceof Error ? err.message : "Failed to load live payments")
+      setLivePays([])
+    } finally {
+      setLivePaysLoading(false)
+    }
+  }, [authFetch, matatuId, trip])
+
   useEffect(() => {
-    if (activeTab !== "trips") return
+    if (activeTab !== "trips" && activeTab !== "live_payments") return
     void loadTrip(true)
-    void loadTripHistory()
+    if (activeTab === "trips") {
+      void loadTripHistory()
+    }
   }, [activeTab, loadTrip, loadTripHistory])
 
   useEffect(() => {
@@ -352,6 +412,25 @@ const MatatuStaffDashboard = () => {
     }, 5000)
     return () => clearInterval(id)
   }, [activeTab, loadTrip, loadTripHistory])
+
+  useEffect(() => {
+    if (activeTab !== "live_payments") return
+    const id = setInterval(() => {
+      void loadTrip(true)
+    }, 5000)
+    return () => clearInterval(id)
+  }, [activeTab, loadTrip])
+
+  useEffect(() => {
+    let id: number | null = null
+    if (activeTab === "live_payments") {
+      void loadLivePayments()
+      id = window.setInterval(() => void loadLivePayments(), 3000)
+    }
+    return () => {
+      if (id) window.clearInterval(id)
+    }
+  }, [activeTab, loadLivePayments])
 
   const startTrip = useCallback(async () => {
     if (!saccoId || !matatuId) {
@@ -569,9 +648,16 @@ const MatatuStaffDashboard = () => {
   }, [authFetch, saccoId, matatuId, tripCashAmount, tripCashNote, loadTrip, loadTripHistory])
 
   function refresh() {
-    void loadTransactions()
-    if (activeTab === "transactions" || activeTab === "overview") {
+    if (activeTab === "transactions") {
+      void loadTransactions()
       void loadWallets()
+    }
+    if (activeTab === "trips") {
+      void loadTrip(true)
+      void loadTripHistory()
+    }
+    if (activeTab === "live_payments") {
+      void loadLivePayments()
     }
   }
 
@@ -636,7 +722,7 @@ const MatatuStaffDashboard = () => {
 
       <nav className="sys-nav" aria-label="Matatu staff sections">
         {[
-          { id: "overview", label: "Overview" },
+          { id: "live_payments", label: "Live Payments" },
           { id: "trips", label: "Trips" },
           { id: "transactions", label: "Transactions" },
           { id: "vehicle_care", label: "Vehicle Care" },
@@ -652,101 +738,64 @@ const MatatuStaffDashboard = () => {
         ))}
       </nav>
 
-      {activeTab === "overview" ? (
-        <>
-          <section className="card">
-              <div className="topline" style={{ flexWrap: "wrap", gap: 8 }}>
-              <div>
-                <h3 style={{ margin: 0 }}>Wallets</h3>
-                <div className="muted small">Owner + vehicle wallets</div>
-              </div>
-              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-                <label className="muted small">
-                  From
-                  <input type="date" value={ledgerFrom} onChange={(e) => setLedgerFrom(e.target.value)} />
-                </label>
-                <label className="muted small">
-                  To
-                  <input type="date" value={ledgerTo} onChange={(e) => setLedgerTo(e.target.value)} />
-                </label>
-                <button className="btn" type="button" onClick={() => loadWallets()}>
-                  Refresh
-                </button>
-                {walletLoading ? <span className="muted small">Loading...</span> : null}
-                {walletError ? <span className="err">{walletError}</span> : null}
-              </div>
+      {activeTab === "live_payments" ? (
+        <section className="card">
+          <div className="topline" style={{ alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+            <div>
+              <h3 style={{ margin: 0 }}>Live Payments (Current Trip)</h3>
+              <div className="muted small">Shows payments only for the active trip.</div>
             </div>
-            <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12, marginTop: 12 }}>
-              {wallets.length === 0 ? (
-                <div className="muted small">No wallet entries yet.</div>
-              ) : (
-                wallets.map((wallet) => {
-                  const rows = (wallet.items || []).slice(0, 10)
-                  return (
-                    <div
-                      key={wallet.wallet_id || wallet.wallet_kind}
-                      className="table-wrap"
-                      style={{ border: "1px solid #e2e8f0", borderRadius: 8 }}
-                    >
-                      <div className="topline" style={{ padding: "8px 12px" }}>
-                        <div>
-                          <div className="muted small">{wallet.wallet_kind || "Wallet"}</div>
-                          <strong>{fmtKES(wallet.balance)}</strong>
-                          <div className="muted small">Account: {wallet.virtual_account_code || "-"}</div>
-                        </div>
-                        <span className="muted small">Entries: {wallet.total || rows.length}</span>
-                      </div>
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Time</th>
-                            <th>Type</th>
-                            <th>Amount</th>
-                            <th>Balance</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {rows.length === 0 ? (
-                            <tr>
-                              <td colSpan={4} className="muted">
-                                No ledger rows.
-                              </td>
-                            </tr>
-                          ) : (
-                            rows.map((row) => (
-                              <tr key={row.id || row.created_at}>
-                                <td className="muted small">
-                                  {row.created_at ? new Date(row.created_at).toLocaleTimeString() : "-"}
-                                </td>
-                                <td>{row.entry_type || row.direction || ""}</td>
-                                <td style={{ color: (row.direction || "").toUpperCase() === "CREDIT" ? "#15803d" : "#b91c1c" }}>
-                                  {fmtKES(row.amount)}
-                                </td>
-                                <td>{fmtKES(row.balance_after)}</td>
-                              </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  )
-                })
-              )}
+            <div className="row" style={{ gap: 8, alignItems: "center" }}>
+              <button className="btn" type="button" onClick={() => void loadLivePayments()}>
+                Refresh
+              </button>
+              {livePaysLoading ? <span className="muted small">Loading...</span> : null}
+              {livePaysError ? <span className="err">{livePaysError}</span> : null}
             </div>
-          </section>
-
-          <section className="card">
-            <div className="topline" style={{ alignItems: "center" }}>
-              <div>
-                <h3 style={{ margin: 0 }}>Live payments</h3>
-                <div className="muted small">View real-time C2B payments for this matatu.</div>
-              </div>
-              <NavLink className="btn" to="/matatu/live-payments">
-                Open live feed
-              </NavLink>
+          </div>
+          {!matatuId ? (
+            <div className="muted small" style={{ marginTop: 8 }}>
+              No matatu assigned found for this account. Contact SACCO admin.
             </div>
-          </section>
-        </>
+          ) : !trip ? (
+            <div className="muted small" style={{ marginTop: 8 }}>
+              No active trip. Start a trip in Trips tab.
+            </div>
+          ) : (
+            <div className="table-wrap" style={{ marginTop: 12 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Phone</th>
+                    <th>Amount</th>
+                    <th>Ref</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {livePays.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="muted">
+                        {livePaysLoading ? "Loading..." : "No payments yet."}
+                      </td>
+                    </tr>
+                  ) : (
+                    livePays.map((p) => (
+                      <tr key={p.id || p.created_at}>
+                        <td>{p.created_at ? new Date(p.created_at).toLocaleTimeString("en-KE") : "-"}</td>
+                        <td>{(p as any)?.payer_msisdn || p.msisdn || p.passenger_msisdn || "-"}</td>
+                        <td>{fmtKES((p as any)?.amount || p.fare_amount_kes)}</td>
+                        <td>{(p as any)?.account_ref || (p as any)?.reference || p.notes || "-"}</td>
+                        <td>{(p as any)?.status || p.status || ""}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       ) : null}
 
 
@@ -912,6 +961,8 @@ const MatatuStaffDashboard = () => {
                 Reload
               </button>
             </div>
+            {walletLoading ? <div className="muted small">Loading wallet balances...</div> : null}
+            {walletError ? <div className="err">{walletError}</div> : null}
             <div
               className="grid"
               style={{ gap: 12, marginTop: 8, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}
