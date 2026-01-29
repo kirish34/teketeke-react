@@ -320,14 +320,15 @@ body {
   .ms-live-card {
     padding: 12px !important;
     margin-top: 10px !important;
-  }
-  .ms-live-card .topline {
-    margin-bottom: 6px;
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 260px);
+    min-height: 360px;
   }
   .ms-live-head {
     display: flex;
     align-items: flex-start;
-    justifyContent: space-between;
+    justify-content: space-between;
     gap: 10px;
   }
   .ms-live-head h3 {
@@ -350,6 +351,20 @@ body {
   }
   .ms-content {
     padding-bottom: 90px !important;
+  }
+  .ms-live-stickyhead {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(8px);
+    padding-bottom: 10px;
+  }
+  .ms-live-scroll {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-top: 8px;
+    padding-bottom: 100px;
   }
 }
 

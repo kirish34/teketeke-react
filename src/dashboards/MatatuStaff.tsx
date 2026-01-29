@@ -1051,106 +1051,110 @@ const MatatuStaffDashboard = () => {
 
       {activeTab === "live_payments" ? (
         <section className="card ms-live-card">
-          <div className="ms-live-head">
-            <div>
-              <h3 style={{ margin: 0 }}>Live Payments (Current Trip)</h3>
-              <div className="muted small ms-live-sub">
-                Shows payments only for the active trip.{activeShift?.opened_at ? ` Shift opened at ${new Date(activeShift.opened_at).toLocaleTimeString("en-KE")}.` : ""}
+          <div className="ms-live-stickyhead">
+            <div className="ms-live-head">
+              <div>
+                <h3 style={{ margin: 0 }}>Live Payments (Current Trip)</h3>
+                <div className="muted small ms-live-sub">
+                  Shows payments only for the active trip.{activeShift?.opened_at ? ` Shift opened at ${new Date(activeShift.opened_at).toLocaleTimeString("en-KE")}.` : ""}
+                </div>
+              </div>
+              <div className="ms-live-head-actions">
+                <button className="btn" type="button" onClick={() => void loadLivePayments()}>
+                  Refresh
+                </button>
+                {livePaysLoading ? <span className="ms-mini muted">Loading...</span> : null}
+                {livePaysError ? <span className="err small">{livePaysError}</span> : null}
+                {shiftError && !livePaysError ? <span className="err small">{shiftError}</span> : null}
               </div>
             </div>
-            <div className="ms-live-head-actions">
-              <button className="btn" type="button" onClick={() => void loadLivePayments()}>
-                Refresh
-              </button>
-              {livePaysLoading ? <span className="ms-mini muted">Loading...</span> : null}
-              {livePaysError ? <span className="err small">{livePaysError}</span> : null}
-              {shiftError && !livePaysError ? <span className="err small">{shiftError}</span> : null}
-            </div>
           </div>
-          {!matatuId ? (
-            <div className="muted small" style={{ marginTop: 8 }}>
-              No matatu assigned found for this account. Contact SACCO admin.
-            </div>
-          ) : !trip ? (
-            <div className="muted small" style={{ marginTop: 8 }}>
-              No active trip. Start a trip in Trips tab.
-            </div>
-          ) : (
-            <>
-              {!isMobile ? (
-                <div className="table-wrap" style={{ marginTop: 12 }}>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Time</th>
-                        <th>Payer</th>
-                        <th>Amount</th>
-                        <th>Ref</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {livePays.length === 0 ? (
+          <div className="ms-live-scroll">
+            {!matatuId ? (
+              <div className="muted small" style={{ marginTop: 8 }}>
+                No matatu assigned found for this account. Contact SACCO admin.
+              </div>
+            ) : !trip ? (
+              <div className="muted small" style={{ marginTop: 8 }}>
+                No active trip. Start a trip in Trips tab.
+              </div>
+            ) : (
+              <>
+                {!isMobile ? (
+                  <div className="table-wrap" style={{ marginTop: 12 }}>
+                    <table>
+                      <thead>
                         <tr>
-                          <td colSpan={5} className="muted">
-                            {livePaysLoading ? "Loading..." : "No payments yet."}
-                          </td>
+                          <th>Time</th>
+                          <th>Payer</th>
+                          <th>Amount</th>
+                          <th>Ref</th>
+                          <th>Status</th>
                         </tr>
-                      ) : (
-                        livePays.map((p) => (
-                          <tr key={p.id || p.created_at}>
-                            <td>{p.created_at ? new Date(p.created_at).toLocaleTimeString("en-KE") : "-"}</td>
-                            <td>
-                              {(p as any)?.sender_name ||
-                                (p as any)?.payer_name ||
-                                (p as any)?.payer_msisdn ||
-                                p.msisdn ||
-                                p.passenger_msisdn ||
-                                "-"}
+                      </thead>
+                      <tbody>
+                        {livePays.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="muted">
+                              {livePaysLoading ? "Loading..." : "No payments yet."}
                             </td>
-                            <td>{fmtKES((p as any)?.amount || p.fare_amount_kes)}</td>
-                            <td>{(p as any)?.account_ref || (p as any)?.reference || p.notes || "-"}</td>
-                            <td>{(p as any)?.status || p.status || ""}</td>
                           </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="live-cards">
-                  {livePays.length === 0 ? (
-                    <div className="muted small">{livePaysLoading ? "Loading..." : "No payments yet."}</div>
-                  ) : (
-                    livePays.map((p) => {
-                      const payer =
-                        (p as any)?.sender_name ||
-                        (p as any)?.payer_name ||
-                        (p as any)?.payer_msisdn ||
-                        p.msisdn ||
-                        p.passenger_msisdn ||
-                        "-"
-                      const ref = (p as any)?.account_ref || (p as any)?.reference || p.notes || "-"
-                      const status = (p as any)?.status || p.status || ""
-                      const t = p.created_at ? new Date(p.created_at).toLocaleTimeString("en-KE") : "-"
-                      const amt = fmtKES((p as any)?.amount || p.fare_amount_kes)
-                      return (
-                        <div key={p.id || p.created_at} className="live-card">
-                          <div className="live-card-amount">{amt}</div>
-                          <div className="live-card-line">
-                            <span className="mono">{t}</span>
-                            <span className={`status-chip ${status.toLowerCase()}`}>{status || " "}</span>
+                        ) : (
+                          livePays.map((p) => (
+                            <tr key={p.id || p.created_at}>
+                              <td>{p.created_at ? new Date(p.created_at).toLocaleTimeString("en-KE") : "-"}</td>
+                              <td>
+                                {(p as any)?.sender_name ||
+                                  (p as any)?.payer_name ||
+                                  (p as any)?.payer_msisdn ||
+                                  p.msisdn ||
+                                  p.passenger_msisdn ||
+                                  "-"}
+                              </td>
+                              <td>{fmtKES((p as any)?.amount || p.fare_amount_kes)}</td>
+                              <td>{(p as any)?.account_ref || (p as any)?.reference || p.notes || "-"}</td>
+                              <td>{(p as any)?.status || p.status || ""}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="live-cards">
+                    {livePays.length === 0 ? (
+                      <div className="muted small">{livePaysLoading ? "Loading..." : "No payments yet."}</div>
+                    ) : (
+                      livePays.map((p) => {
+                        const payer =
+                          (p as any)?.sender_name ||
+                          (p as any)?.payer_name ||
+                          (p as any)?.payer_msisdn ||
+                          p.msisdn ||
+                          p.passenger_msisdn ||
+                          "-"
+                        const ref = (p as any)?.account_ref || (p as any)?.reference || p.notes || "-"
+                        const status = (p as any)?.status || p.status || ""
+                        const t = p.created_at ? new Date(p.created_at).toLocaleTimeString("en-KE") : "-"
+                        const amt = fmtKES((p as any)?.amount || p.fare_amount_kes)
+                        return (
+                          <div key={p.id || p.created_at} className="live-card">
+                            <div className="live-card-amount">{amt}</div>
+                            <div className="live-card-line">
+                              <span className="mono">{t}</span>
+                              <span className={`status-chip ${status.toLowerCase()}`}>{status || " "}</span>
+                            </div>
+                            <div className="live-card-line mono">{payer}</div>
+                            <div className="live-card-line mono muted small">Ref: {ref}</div>
                           </div>
-                          <div className="live-card-line mono">{payer}</div>
-                          <div className="live-card-line mono muted small">Ref: {ref}</div>
-                        </div>
-                      )
-                    })
-                  )}
-                </div>
-              )}
-            </>
-          )}
+                        )
+                      })
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </section>
       ) : null}
 
