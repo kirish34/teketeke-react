@@ -883,7 +883,7 @@ const MatatuStaffDashboard = () => {
       </div>
       {isMobile ? appbar : null}
 
-      <section className="card" style={{ paddingBottom: 10 }}>
+      <section className="card ms-context-panel" style={{ paddingBottom: 10 }}>
         <div className="row" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label>
             <div className="muted small">Route</div>

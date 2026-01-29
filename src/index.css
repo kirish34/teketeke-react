@@ -289,6 +289,13 @@ body {
   }
 }
 
+/* Hide context selector panel on mobile */
+@media (max-width: 640px) {
+  .ms-context-panel {
+    display: none !important;
+  }
+}
+
 @media (max-width: 640px) {
   .ms-header-hero {
     display: none;
