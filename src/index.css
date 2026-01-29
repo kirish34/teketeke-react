@@ -314,6 +314,46 @@ body {
 }
 
 @media (max-width: 640px) {
+  .ms-top-tabs {
+    display: none !important;
+  }
+  .ms-live-card {
+    padding: 12px !important;
+    margin-top: 10px !important;
+  }
+  .ms-live-card .topline {
+    margin-bottom: 6px;
+  }
+  .ms-live-head {
+    display: flex;
+    align-items: flex-start;
+    justifyContent: space-between;
+    gap: 10px;
+  }
+  .ms-live-head h3 {
+    margin: 0;
+    font-size: 22px;
+  }
+  .ms-live-head-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .ms-live-sub {
+    display: none;
+  }
+  .ms-mini {
+    font-size: 12px;
+    opacity: 0.7;
+    white-space: nowrap;
+  }
+  .ms-content {
+    padding-bottom: 90px !important;
+  }
+}
+
+@media (max-width: 640px) {
   .ms-live-card {
     padding: 12px !important;
     margin-top: 10px !important;

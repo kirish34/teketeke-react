@@ -1011,7 +1011,7 @@ const MatatuStaffDashboard = () => {
         </div>
       </section>
 
-      <nav className="sys-nav" aria-label="Matatu staff sections">
+      <nav className="sys-nav ms-top-tabs" aria-label="Matatu staff sections">
         {[
           { id: "live_payments", label: "Live Payments" },
           { id: "trips", label: "Trips" },
@@ -1051,20 +1051,20 @@ const MatatuStaffDashboard = () => {
 
       {activeTab === "live_payments" ? (
         <section className="card ms-live-card">
-          <div className="topline" style={{ alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+          <div className="ms-live-head">
             <div>
               <h3 style={{ margin: 0 }}>Live Payments (Current Trip)</h3>
               <div className="muted small ms-live-sub">
                 Shows payments only for the active trip.{activeShift?.opened_at ? ` Shift opened at ${new Date(activeShift.opened_at).toLocaleTimeString("en-KE")}.` : ""}
               </div>
             </div>
-            <div className="row" style={{ gap: 8, alignItems: "center" }}>
+            <div className="ms-live-head-actions">
               <button className="btn" type="button" onClick={() => void loadLivePayments()}>
                 Refresh
               </button>
-              {livePaysLoading ? <span className="muted small">Loading...</span> : null}
-              {livePaysError ? <span className="err">{livePaysError}</span> : null}
-              {shiftError && !livePaysError ? <span className="err">{shiftError}</span> : null}
+              {livePaysLoading ? <span className="ms-mini muted">Loading...</span> : null}
+              {livePaysError ? <span className="err small">{livePaysError}</span> : null}
+              {shiftError && !livePaysError ? <span className="err small">{shiftError}</span> : null}
             </div>
           </div>
           {!matatuId ? (
