@@ -391,7 +391,7 @@ const MatatuStaffDashboard = () => {
     }
   }, [activeShift, authFetch, matatuId])
 
-  const loadLivePayments = useCallback(async () => {
+  const loadLivePayments = useCallback(async (silent?: boolean) => {
     if (!matatuId) {
       setLivePays([])
       setLivePaysError("No matatu assigned found for this account. Contact SACCO admin.")
@@ -402,7 +402,7 @@ const MatatuStaffDashboard = () => {
       setLivePaysError("No active shift. Start a shift to view live payments.")
       return
     }
-    setLivePaysLoading(true)
+    if (!silent) setLivePaysLoading(true)
     setLivePaysError(null)
     try {
       const params = new URLSearchParams()
@@ -454,7 +454,7 @@ const MatatuStaffDashboard = () => {
       setLivePaysError(err instanceof Error ? err.message : "Failed to load live payments")
       setLivePays([])
     } finally {
-      setLivePaysLoading(false)
+      if (!silent) setLivePaysLoading(false)
     }
   }, [activeShift, authFetch, matatuId, shiftLoaded, trip])
 
@@ -570,7 +570,7 @@ const MatatuStaffDashboard = () => {
     let id: number | null = null
     if (activeTab === "live_payments" && activeShift) {
       void loadLivePayments()
-      id = window.setInterval(() => void loadLivePayments(), 3000)
+      id = window.setInterval(() => void loadLivePayments(true), 3000)
     }
     return () => {
       if (id) window.clearInterval(id)
