@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import DashboardShell from '../components/DashboardShell'
 import PaybillCodeCard from '../components/PaybillCodeCard'
 import PaybillHeader from '../components/PaybillHeader'
-import StickerPrintModal from '../components/StickerPrintModal'
 import { useAuth } from '../state/auth'
 import { authFetch } from '../lib/auth'
 import { mapPaybillCodes, type PaybillAliasRow } from '../lib/paybill'
@@ -111,7 +110,6 @@ const MatatuOwnerDashboard = () => {
   const [txs, setTxs] = useState<Tx[]>([])
   const [paybillAliases, setPaybillAliases] = useState<PaybillAliasRow[]>([])
   const [paybillError, setPaybillError] = useState<string | null>(null)
-  const [showPaybillSticker, setShowPaybillSticker] = useState(false)
   const [staff, setStaff] = useState<Staff[]>([])
   const [loanReqs, setLoanReqs] = useState<LoanRequest[]>([])
   const [loanDue, setLoanDue] = useState<LoanDue[]>([])
@@ -1000,14 +998,7 @@ const MatatuOwnerDashboard = () => {
           </section>
 
           <section className="card">
-            <PaybillHeader
-              title="Matatu PayBill Accounts (4814003)"
-              actions={
-                <button className="btn ghost" type="button" onClick={() => setShowPaybillSticker(true)}>
-                  Print Sticker
-                </button>
-              }
-            />
+            <PaybillHeader title="Matatu PayBill Accounts (4814003)" />
             {paybillError ? <div className="err">PayBill load error: {paybillError}</div> : null}
             <div
               className="grid"
@@ -1069,17 +1060,6 @@ const MatatuOwnerDashboard = () => {
               </div>
             ) : null}
           </section>
-          <StickerPrintModal
-            open={showPaybillSticker}
-            title="Matatu PayBill Accounts (4814003)"
-            onClose={() => setShowPaybillSticker(false)}
-            note="For PayBill manual payments use the 7-digit Account Number. For STK/USSD use the plate reference."
-            lines={[
-              { label: 'Matatu Owner Account - OWNER Account', value: paybillCodes.owner },
-              { label: 'Matatu Vehicle Account - MATATU Account', value: paybillCodes.vehicle },
-              { label: 'STK/USSD Reference (Plate)', value: plateReference },
-            ]}
-          />
         </>
       ) : null}
 

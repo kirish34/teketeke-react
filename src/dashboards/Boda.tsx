@@ -2,7 +2,6 @@
 import DashboardShell from "../components/DashboardShell"
 import PaybillCodeCard from "../components/PaybillCodeCard"
 import PaybillHeader from "../components/PaybillHeader"
-import StickerPrintModal from "../components/StickerPrintModal"
 import { authFetch } from "../lib/auth"
 import { mapPaybillCodes, PAYBILL_NUMBER, type PaybillAliasRow } from "../lib/paybill"
 import { useAuth } from "../state/auth"
@@ -70,7 +69,6 @@ const BodaDashboard = () => {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [paybillAliases, setPaybillAliases] = useState<PaybillAliasRow[]>([])
   const [paybillError, setPaybillError] = useState<string | null>(null)
-  const [showPaybillSticker, setShowPaybillSticker] = useState(false)
   const [weekTotals, setWeekTotals] = useState<InsightTotals | null>(null)
   const [monthTotals, setMonthTotals] = useState<InsightTotals | null>(null)
   const [trend, setTrend] = useState<InsightRow[]>([])
@@ -384,14 +382,7 @@ const BodaDashboard = () => {
       {activeTab === "today" ? (
         <>
           <section className="card">
-            <PaybillHeader
-              title={`Boda PayBill Account (${paybillNumber || "—"})`}
-              actions={
-                <button className="btn ghost" type="button" onClick={() => setShowPaybillSticker(true)}>
-                  Print Sticker
-                </button>
-              }
-            />
+            <PaybillHeader title={`Boda PayBill Account (${paybillNumber || "—"})`} />
             {paybillError ? <div className="err">PayBill load error: {paybillError}</div> : null}
             {walletError ? <div className="err">Wallet: {walletError}</div> : null}
             <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
@@ -424,12 +415,6 @@ const BodaDashboard = () => {
               </div>
             </div>
           </section>
-          <StickerPrintModal
-            open={showPaybillSticker}
-            title={`Boda PayBill Account (${paybillNumber || "—"})`}
-            onClose={() => setShowPaybillSticker(false)}
-            lines={[{ label: "Boda Rider Account - BODA Account (Rider)", value: accountNumber || paybillNumber }]}
-          />
         </>
       ) : null}
 

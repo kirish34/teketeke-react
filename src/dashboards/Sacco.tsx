@@ -2,7 +2,6 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import DashboardShell from '../components/DashboardShell'
 import PaybillCodeCard from '../components/PaybillCodeCard'
 import PaybillHeader from '../components/PaybillHeader'
-import StickerPrintModal from '../components/StickerPrintModal'
 import { authFetch } from '../lib/auth'
 import { saccoFetch } from '../services/saccoApi'
 import { mapPaybillCodes, type PaybillAliasRow } from '../lib/paybill'
@@ -332,7 +331,6 @@ export default function SaccoDashboard() {
   const [matatuFilter, setMatatuFilter] = useState('')
   const [paybillAliases, setPaybillAliases] = useState<PaybillAliasRow[]>([])
   const [paybillError, setPaybillError] = useState<string | null>(null)
-  const [showPaybillSticker, setShowPaybillSticker] = useState(false)
   const [memberMsg, setMemberMsg] = useState('')
   const [tlbEdits, setTlbEdits] = useState<Record<string, string>>({})
   const [txs, setTxs] = useState<Tx[]>([])
@@ -2411,14 +2409,7 @@ export default function SaccoDashboard() {
       {activeTab === 'overview' ? (
         <>
           <section className="card">
-            <PaybillHeader
-              title="SACCO PayBill Accounts (4814003)"
-              actions={
-                <button className="btn ghost" type="button" onClick={() => setShowPaybillSticker(true)}>
-                  Print Sticker
-                </button>
-              }
-            />
+            <PaybillHeader title="SACCO PayBill Accounts (4814003)" />
             {paybillError ? <div className="err">PayBill load error: {paybillError}</div> : null}
             <div
               className="grid"
@@ -2673,16 +2664,6 @@ export default function SaccoDashboard() {
               </table>
             </div>
           </section>
-          <StickerPrintModal
-            open={showPaybillSticker}
-            title="SACCO PayBill Accounts (4814003)"
-            onClose={() => setShowPaybillSticker(false)}
-            lines={[
-              { label: 'Daily Fee Collection Account - SACCO FEE Account', value: paybillCodes.fee },
-              { label: 'Loan Repayment Account - SACCO LOAN Account', value: paybillCodes.loan },
-              { label: 'Savings Deposit Account - SACCO SAVINGS Account', value: paybillCodes.savings },
-            ]}
-          />
 
           <section className="card">
             <div className="topline">
