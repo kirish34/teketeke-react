@@ -810,22 +810,7 @@ const MatatuStaffDashboard = () => {
     : user?.role
       ? `Role: ${user.role}`
       : "Matatu Staff"
-  const heroSection = isMobile ? (
-    <div className="hero-bar hero-compact" style={{ marginBottom: 10 }}>
-      <div className="hero-left">
-        <div className="hero-chip">MATATU STAFF</div>
-        <h2 style={{ margin: "4px 0 2px" }}>Hello, {staffLabel}</h2>
-        <div className="muted small">Matatu {assignedMatatuLabel || "—"}</div>
-        <div className="hero-inline">
-          <span className="sys-pill-lite">{todayKey()}</span>
-          <span className="sys-pill-lite">{timeLabel}</span>
-        </div>
-      </div>
-      <div className="row" style={{ gap: 8, alignItems: "center" }}>
-        <div className="badge-ghost">{heroRight}</div>
-      </div>
-    </div>
-  ) : (
+  const heroSection = (
     <div className="hero-bar" style={{ marginBottom: 16 }}>
       <div className="hero-left">
         <div className="hero-chip">MATATU STAFF</div>
@@ -847,10 +832,35 @@ const MatatuStaffDashboard = () => {
     </div>
   )
 
+  const appbar = (
+    <div className="ms-appbar">
+      <div className="ms-appbar-row">
+        <div className="ms-appbar-left">
+          <div className="ms-appbar-title">MATATU STAFF</div>
+          <div className="ms-appbar-name">{staffLabel}</div>
+        </div>
+        <div className="ms-appbar-right">
+          <span className={`ms-pill ${activeShift ? "on" : "off"}`}>{activeShift ? "Shift on" : "Shift off"}</span>
+          <button type="button" className="btn ghost" onClick={logout}>
+            Logout
+          </button>
+        </div>
+      </div>
+      <div className="ms-appbar-row ms-appbar-chips">
+        <span className="ms-chip">{operatorLabel}</span>
+        <span className="ms-chip">{assignedMatatuLabel}</span>
+        <span className="ms-chip">{trip?.status ? `Trip: ${trip.status}` : "Trip: none"}</span>
+      </div>
+    </div>
+  )
+
   if (shiftLoaded && !activeShift) {
     return (
       <DashboardShell title="Matatu Staff" subtitle="Staff Dashboard" navLabel="Matatu navigation" hideShellChrome>
-        <div className="app-header sticky">{heroSection}</div>
+        <div className="app-header sticky">
+          <div className="ms-header-hero">{heroSection}</div>
+        </div>
+        {isMobile ? appbar : null}
         <section className="card">
           <div className="topline">
             <h3 style={{ margin: 0 }}>Start Shift</h3>
@@ -869,18 +879,9 @@ const MatatuStaffDashboard = () => {
   return (
     <DashboardShell title="Matatu Staff" subtitle="Staff Dashboard" navLabel="Matatu navigation" hideShellChrome>
       <div className="app-header sticky">
-        {heroSection}
-        <div className="app-header-meta">
-          <div className="meta-line">
-            <span className="pill">{assignedMatatuLabel}</span>
-            <span className={`pill ${livePaysLoading ? "pill-live pulse" : "pill-live"}`}>Sync {livePaysLoading ? "…" : "OK"}</span>
-          </div>
-          <div className="meta-line">
-            <span className="pill ghost">{trip?.status ? `Trip: ${trip.status}` : "No active trip"}</span>
-            {activeShift ? <span className="pill ghost">Shift on</span> : <span className="pill ghost">Shift off</span>}
-          </div>
-        </div>
+        <div className="ms-header-hero">{heroSection}</div>
       </div>
+      {isMobile ? appbar : null}
 
       <section className="card" style={{ paddingBottom: 10 }}>
         <div className="row" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
