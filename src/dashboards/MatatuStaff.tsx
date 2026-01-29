@@ -117,11 +117,20 @@ const MatatuStaffDashboard = () => {
     try {
       const tRes = await fetchJson<{ items?: Tx[] }>(`/u/sacco/${encodeURIComponent(saccoId)}/transactions?limit=500`)
       const items = tRes.items || []
-      setTxs(items.filter((t) => t.matatu_id === matatuId))
+      let scoped = items.filter((t) => t.matatu_id === matatuId)
+      if (activeShift?.opened_at) {
+        const startMs = new Date(activeShift.opened_at).getTime()
+        const endMs = activeShift.closed_at ? new Date(activeShift.closed_at).getTime() : Date.now()
+        scoped = scoped.filter((t) => {
+          const ts = t.created_at ? new Date(t.created_at).getTime() : null
+          return ts !== null && ts >= startMs && ts <= endMs
+        })
+      }
+      setTxs(scoped)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load transactions")
     }
-  }, [fetchJson, matatuId, saccoId])
+  }, [activeShift?.closed_at, activeShift?.opened_at, fetchJson, matatuId, saccoId])
 
   const loadWallets = useCallback(async () => {
     if (!matatuId) {
@@ -134,7 +143,8 @@ const MatatuStaffDashboard = () => {
     try {
       const params = new URLSearchParams()
       params.set("limit", "100")
-      if (ledgerFrom) params.set("from", ledgerFrom)
+      const fromVal = activeShift?.opened_at ? new Date(activeShift.opened_at).toISOString() : ledgerFrom
+      if (fromVal) params.set("from", fromVal)
       if (ledgerTo) params.set("to", ledgerTo)
       params.set("matatu_id", matatuId)
       const res = await authFetch(`/api/wallets/owner-ledger?${params.toString()}`, {
@@ -163,7 +173,7 @@ const MatatuStaffDashboard = () => {
     } finally {
       setWalletLoading(false)
     }
-  }, [fetchJson, ledgerFrom, ledgerTo, matatuId])
+  }, [activeShift?.opened_at, authFetch, ledgerFrom, ledgerTo, matatuId])
 
   useEffect(() => {
     async function loadSaccos() {
