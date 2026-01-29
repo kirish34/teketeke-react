@@ -106,8 +106,13 @@ const MatatuStaffDashboard = () => {
   const [shiftLoading, setShiftLoading] = useState(false)
   const [shiftError, setShiftError] = useState<string | null>(null)
   const [shiftLoaded, setShiftLoaded] = useState(false)
-  const [isMobile, setIsMobile] = useState<boolean>(() => typeof window !== "undefined" && window.innerWidth <= 768)
+  const [isMobile, setIsMobile] = useState<boolean>(() => (typeof window !== "undefined" ? window.matchMedia("(max-width: 640px)").matches : false))
   const [showEndShiftConfirm, setShowEndShiftConfirm] = useState(false)
+  const [isHoldingEndShift, setIsHoldingEndShift] = useState(false)
+  const [holdProgress, setHoldProgress] = useState(0)
+  const [endShiftBusy, setEndShiftBusy] = useState(false)
+  const holdIntervalRef = useRef<number | null>(null)
+  const holdStartRef = useRef<number | null>(null)
 
   const fetchJson = useCallback(<T,>(path: string) => api<T>(path, { token }), [token])
 
@@ -241,10 +246,11 @@ const MatatuStaffDashboard = () => {
   }, [])
 
   useEffect(() => {
-    const handler = () => setIsMobile(window.innerWidth <= 768)
+    const mq = typeof window !== "undefined" ? window.matchMedia("(max-width: 640px)") : null
+    const handler = () => setIsMobile(Boolean(mq?.matches))
     handler()
-    window.addEventListener("resize", handler)
-    return () => window.removeEventListener("resize", handler)
+    mq?.addEventListener("change", handler)
+    return () => mq?.removeEventListener("change", handler)
   }, [])
 
   useEffect(() => {
@@ -508,7 +514,7 @@ const MatatuStaffDashboard = () => {
 
   const confirmEndShift = useCallback(async () => {
     if (!activeShift) return
-    setShiftLoading(true)
+    setEndShiftBusy(true)
     setShiftError(null)
     try {
       const res = await authFetch("/api/matatu/shifts/close", {
@@ -530,7 +536,7 @@ const MatatuStaffDashboard = () => {
     } catch (err) {
       setShiftError(err instanceof Error ? err.message : "Failed to close shift")
     } finally {
-      setShiftLoading(false)
+      setEndShiftBusy(false)
       setShowEndShiftConfirm(false)
     }
   }, [activeShift, authFetch])
@@ -845,11 +851,70 @@ const MatatuStaffDashboard = () => {
           {activeShift ? (
             <button
               type="button"
-              className="ms-endshift-btn"
-              disabled={shiftLoading}
-              onClick={() => setShowEndShiftConfirm(true)}
+              className={`ms-endshift-btn${isHoldingEndShift ? " holding" : ""}`}
+              disabled={endShiftBusy}
+              onPointerDown={
+                isMobile
+                  ? () => {
+                      if (endShiftBusy || !activeShift) return
+                      setIsHoldingEndShift(true)
+                      holdStartRef.current = Date.now()
+                      holdIntervalRef.current = window.setInterval(() => {
+                        if (!holdStartRef.current) return
+                        const elapsed = Date.now() - holdStartRef.current
+                        const pct = Math.min(100, (elapsed / 3000) * 100)
+                        setHoldProgress(pct)
+                        if (elapsed >= 3000) {
+                          if (holdIntervalRef.current) window.clearInterval(holdIntervalRef.current)
+                          holdIntervalRef.current = null
+                          holdStartRef.current = null
+                          setIsHoldingEndShift(false)
+                          setHoldProgress(100)
+                          setShowEndShiftConfirm(true)
+                        }
+                      }, 50)
+                    }
+                  : undefined
+              }
+              onPointerUp={
+                isMobile
+                  ? () => {
+                      if (holdIntervalRef.current) window.clearInterval(holdIntervalRef.current)
+                      holdIntervalRef.current = null
+                      holdStartRef.current = null
+                      setIsHoldingEndShift(false)
+                      setHoldProgress(0)
+                    }
+                  : undefined
+              }
+              onPointerLeave={
+                isMobile
+                  ? () => {
+                      if (holdIntervalRef.current) window.clearInterval(holdIntervalRef.current)
+                      holdIntervalRef.current = null
+                      holdStartRef.current = null
+                      setIsHoldingEndShift(false)
+                      setHoldProgress(0)
+                    }
+                  : undefined
+              }
+              onClick={
+                isMobile
+                  ? undefined
+                  : () => {
+                      if (endShiftBusy) return
+                      setShowEndShiftConfirm(true)
+                    }
+              }
+              style={
+                isMobile
+                  ? {
+                      background: `linear-gradient(90deg, rgba(255,77,79,0.9) ${holdProgress}%, rgba(255,77,79,0.25) ${holdProgress}%)`,
+                    }
+                  : undefined
+              }
             >
-              End shift
+              {isMobile ? (isHoldingEndShift ? "Hold 3s…" : "End shift") : "End shift"}
             </button>
           ) : null}
           <button type="button" className="btn ghost" onClick={logout}>
@@ -897,14 +962,14 @@ const MatatuStaffDashboard = () => {
       {showEndShiftConfirm && (
         <div className="ms-confirm-backdrop">
           <div className="ms-confirm-modal">
-            <h4>End shift now?</h4>
-            <p className="muted small">This will close the shift and process end-of-day steps.</p>
+            <h4>End shift?</h4>
+            <p className="muted small">This will close the day and deposit today’s collections. Continue?</p>
             <div className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
               <button type="button" className="btn ghost" onClick={() => setShowEndShiftConfirm(false)}>
                 Cancel
               </button>
               <button type="button" className="btn danger" disabled={shiftLoading} onClick={() => void confirmEndShift()}>
-                {shiftLoading ? "Closing..." : "End shift"}
+                {shiftLoading || endShiftBusy ? "Closing..." : "End shift"}
               </button>
             </div>
           </div>
