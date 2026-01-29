@@ -493,6 +493,10 @@ const MatatuStaffDashboard = () => {
       }
       setActiveShift(null)
       setLivePays([])
+      setTrip(null)
+      setTripHistory([])
+      setTxs([])
+      setWallets([])
     } catch (err) {
       setShiftError(err instanceof Error ? err.message : "Failed to close shift")
     } finally {
