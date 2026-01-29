@@ -102,6 +102,10 @@ const MatatuStaffDashboard = () => {
   const [livePays, setLivePays] = useState<Tx[]>([])
   const [livePaysLoading, setLivePaysLoading] = useState(false)
   const [livePaysError, setLivePaysError] = useState<string | null>(null)
+  const [activeShift, setActiveShift] = useState<any | null>(null)
+  const [shiftLoading, setShiftLoading] = useState(false)
+  const [shiftError, setShiftError] = useState<string | null>(null)
+  const [shiftLoaded, setShiftLoaded] = useState(false)
 
   const fetchJson = useCallback(<T,>(path: string) => api<T>(path, { token }), [token])
 
@@ -346,10 +350,19 @@ const MatatuStaffDashboard = () => {
       setLivePaysError("No matatu assigned found for this account. Contact SACCO admin.")
       return
     }
+    if (shiftLoaded && !activeShift) {
+      setLivePays([])
+      setLivePaysError("No active shift. Start a shift to view live payments.")
+      return
+    }
     setLivePaysLoading(true)
     setLivePaysError(null)
     try {
-      const res = await authFetch(`/api/matatu/live-payments?matatu_id=${encodeURIComponent(matatuId)}&limit=50`, {
+      const params = new URLSearchParams()
+      params.set("matatu_id", matatuId)
+      params.set("limit", "50")
+      if (trip?.id) params.set("trip_id", trip.id)
+      const res = await authFetch(`/api/matatu/live-payments?${params.toString()}`, {
         headers: { Accept: "application/json" },
       })
       if (!res.ok) {
@@ -358,6 +371,8 @@ const MatatuStaffDashboard = () => {
           const body = await res.json().catch(() => ({}))
           if (res.status === 403 && (body?.code === "MATATU_ACCESS_DENIED" || body?.error === "forbidden")) {
             msg = "No matatu assigned found for this account. Contact SACCO admin."
+          } else if (body?.code === "SHIFT_REQUIRED") {
+            msg = "No active shift. Start a shift to view live payments."
           } else if (body?.error) {
             msg = body.error
           }
@@ -394,7 +409,85 @@ const MatatuStaffDashboard = () => {
     } finally {
       setLivePaysLoading(false)
     }
-  }, [authFetch, matatuId, trip])
+  }, [activeShift, authFetch, matatuId, shiftLoaded, trip])
+
+  const loadActiveShift = useCallback(async () => {
+    if (!matatuId) {
+      setActiveShift(null)
+      setShiftLoaded(true)
+      return
+    }
+    setShiftLoading(true)
+    setShiftError(null)
+    try {
+      const res = await authFetch("/api/matatu/shifts/active", { headers: { Accept: "application/json" } })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setShiftError(data?.error || res.statusText || "Failed to load shift")
+        setActiveShift(null)
+      } else {
+        setActiveShift(data?.shift || null)
+      }
+    } catch (err) {
+      setShiftError(err instanceof Error ? err.message : "Failed to load shift")
+      setActiveShift(null)
+    } finally {
+      setShiftLoading(false)
+      setShiftLoaded(true)
+    }
+  }, [authFetch, matatuId])
+
+  const startShiftSession = useCallback(async () => {
+    if (!matatuId) {
+      setShiftError("No matatu assigned found for this account. Contact SACCO admin.")
+      return
+    }
+    setShiftLoading(true)
+    setShiftError(null)
+    try {
+      const res = await authFetch("/api/matatu/shifts/open", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setShiftError(data?.error || res.statusText || "Failed to start shift")
+        setActiveShift(data?.shift || null)
+        return
+      }
+      setActiveShift(data?.shift || null)
+      setShiftLoaded(true)
+    } catch (err) {
+      setShiftError(err instanceof Error ? err.message : "Failed to start shift")
+    } finally {
+      setShiftLoading(false)
+    }
+  }, [authFetch, matatuId])
+
+  const closeShiftSession = useCallback(async () => {
+    if (!activeShift) return
+    if (!window.confirm("Close current shift?")) return
+    setShiftLoading(true)
+    setShiftError(null)
+    try {
+      const res = await authFetch("/api/matatu/shifts/close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ shift_id: activeShift.id }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setShiftError(data?.error || res.statusText || "Failed to close shift")
+        return
+      }
+      setActiveShift(null)
+      setLivePays([])
+    } catch (err) {
+      setShiftError(err instanceof Error ? err.message : "Failed to close shift")
+    } finally {
+      setShiftLoading(false)
+    }
+  }, [activeShift, authFetch])
 
   useEffect(() => {
     if (activeTab !== "trips" && activeTab !== "live_payments") return
@@ -423,14 +516,18 @@ const MatatuStaffDashboard = () => {
 
   useEffect(() => {
     let id: number | null = null
-    if (activeTab === "live_payments") {
+    if (activeTab === "live_payments" && activeShift) {
       void loadLivePayments()
       id = window.setInterval(() => void loadLivePayments(), 3000)
     }
     return () => {
       if (id) window.clearInterval(id)
     }
-  }, [activeTab, loadLivePayments])
+  }, [activeShift, activeTab, loadLivePayments])
+
+  useEffect(() => {
+    void loadActiveShift()
+  }, [loadActiveShift])
 
   const startTrip = useCallback(async () => {
     if (!saccoId || !matatuId) {
@@ -657,33 +754,61 @@ const MatatuStaffDashboard = () => {
       void loadTripHistory()
     }
     if (activeTab === "live_payments") {
+      void loadActiveShift()
       void loadLivePayments()
     }
   }
 
   const staffLabel = staffName || user?.name || (user?.email ? user.email.split("@")[0] : "") || "Staff"
-  const heroRight = user?.role ? `Role: ${user.role}` : "Matatu Staff"
-  return (
-    <DashboardShell title="Matatu Staff" subtitle="Staff Dashboard" navLabel="Matatu navigation" hideShellChrome>
-      <div className="hero-bar" style={{ marginBottom: 16 }}>
-        <div className="hero-left">
-          <div className="hero-chip">MATATU STAFF</div>
-          <h2 style={{ margin: "6px 0 4px" }}>Hello, {staffLabel}</h2>
-          <div className="muted">Staff dashboard overview</div>
-          <div className="hero-inline">
-            <span className="sys-pill-lite">Operate Under: {operatorLabel}</span>
-            <span className="sys-pill-lite">{todayKey()}</span>
-            <span className="sys-pill-lite">{timeLabel}</span>
-            <span className="sys-pill-lite">{assignedMatatuCount} matatu(s)</span>
-          </div>
-        </div>
-        <div className="row" style={{ gap: 8, alignItems: "center" }}>
-          <div className="badge-ghost">{heroRight}</div>
-          <button type="button" className="btn ghost" onClick={logout}>
-            Logout
-          </button>
+  const heroRight = activeShift?.opened_at
+    ? `On shift • opened ${new Date(activeShift.opened_at).toLocaleTimeString("en-KE")}`
+    : user?.role
+      ? `Role: ${user.role}`
+      : "Matatu Staff"
+  const heroSection = (
+    <div className="hero-bar" style={{ marginBottom: 16 }}>
+      <div className="hero-left">
+        <div className="hero-chip">MATATU STAFF</div>
+        <h2 style={{ margin: "6px 0 4px" }}>Hello, {staffLabel}</h2>
+        <div className="muted">Staff dashboard overview</div>
+        <div className="hero-inline">
+          <span className="sys-pill-lite">Operate Under: {operatorLabel}</span>
+          <span className="sys-pill-lite">{todayKey()}</span>
+          <span className="sys-pill-lite">{timeLabel}</span>
+          <span className="sys-pill-lite">{assignedMatatuCount} matatu(s)</span>
         </div>
       </div>
+      <div className="row" style={{ gap: 8, alignItems: "center" }}>
+        <div className="badge-ghost">{heroRight}</div>
+        <button type="button" className="btn ghost" onClick={logout}>
+          Logout
+        </button>
+      </div>
+    </div>
+  )
+
+  if (shiftLoaded && !activeShift) {
+    return (
+      <DashboardShell title="Matatu Staff" subtitle="Staff Dashboard" navLabel="Matatu navigation" hideShellChrome>
+        {heroSection}
+        <section className="card">
+          <div className="topline">
+            <h3 style={{ margin: 0 }}>Start Shift</h3>
+            {shiftLoading ? <span className="muted small">Loading shift...</span> : null}
+          </div>
+          <p className="muted">Start your shift to view live payments and record cash.</p>
+          {shiftError ? <div className="err">{shiftError}</div> : null}
+          <button type="button" className="btn primary" disabled={shiftLoading || !matatuId} onClick={startShiftSession}>
+            {shiftLoading ? "Starting..." : "Start Shift"}
+          </button>
+        </section>
+      </DashboardShell>
+    )
+  }
+
+  return (
+    <DashboardShell title="Matatu Staff" subtitle="Staff Dashboard" navLabel="Matatu navigation" hideShellChrome>
+      {heroSection}
 
       <section className="card" style={{ paddingBottom: 10 }}>
         <div className="row" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -743,14 +868,22 @@ const MatatuStaffDashboard = () => {
           <div className="topline" style={{ alignItems: "center", flexWrap: "wrap", gap: 8 }}>
             <div>
               <h3 style={{ margin: 0 }}>Live Payments (Current Trip)</h3>
-              <div className="muted small">Shows payments only for the active trip.</div>
+              <div className="muted small">
+                Shows payments only for the active trip.{activeShift?.opened_at ? ` Shift opened at ${new Date(activeShift.opened_at).toLocaleTimeString("en-KE")}.` : ""}
+              </div>
             </div>
             <div className="row" style={{ gap: 8, alignItems: "center" }}>
+              {activeShift ? (
+                <button className="btn ghost" type="button" onClick={() => void closeShiftSession()} disabled={shiftLoading}>
+                  {shiftLoading ? "Closing..." : "Close Shift"}
+                </button>
+              ) : null}
               <button className="btn" type="button" onClick={() => void loadLivePayments()}>
                 Refresh
               </button>
               {livePaysLoading ? <span className="muted small">Loading...</span> : null}
               {livePaysError ? <span className="err">{livePaysError}</span> : null}
+              {shiftError && !livePaysError ? <span className="err">{shiftError}</span> : null}
             </div>
           </div>
           {!matatuId ? (

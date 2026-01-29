@@ -9,6 +9,7 @@ const {
   newReferenceId,
 } = require('../services/walletLedger.service');
 const { resolveActiveTripIdForMatatu } = require('../services/trip.service');
+const { resolveActiveShiftIdForMatatu } = require('../services/shift.service');
 
 function mapEntryTypeFromSource(source) {
   const normalized = String(source || '').trim().toUpperCase();
@@ -341,6 +342,7 @@ async function creditFareWithFeesByWalletId({
     const matatuWallet = matatuRes.rows[0];
     const virtualAccountCode = matatuWallet.virtual_account_code;
     const tripId = await resolveActiveTripIdForMatatu(matatuWallet.matatu_id);
+    const shiftId = await resolveActiveShiftIdForMatatu(matatuWallet.matatu_id);
 
     // Active fees for matatu fare
     const feesRes = await useClient.query(
@@ -402,6 +404,7 @@ async function creditFareWithFeesByWalletId({
       source,
       sourceRef: sourceRef || null,
       tripId: tripId || null,
+      shiftId: shiftId || null,
       client: useClient,
     });
 
@@ -443,6 +446,7 @@ async function creditFareWithFeesByWalletId({
       matatuBalanceBefore: matatuResult.balanceBefore,
       matatuBalanceAfter: matatuResult.balanceAfter,
       tripId: tripId || null,
+      shiftId: shiftId || null,
     };
   } catch (err) {
     if (ownTx) await useClient.query('ROLLBACK');

@@ -4,6 +4,7 @@ const { requireUser } = require('../middleware/auth');
 const { resolveSaccoAuthContext } = require('../services/saccoAuth.service');
 const { ensureAppUserContextFromUserRoles } = require('../services/appUserContext.service');
 const { extractSenderNameFromRaw } = require('../utils/msisdn');
+const { resolveActiveShiftIdForMatatu, getActiveShift, openShift, closeShift } = require('../services/shift.service');
 
 const router = express.Router();
 
@@ -178,9 +179,88 @@ function normalizeLimit(value) {
   return Math.min(Math.max(Math.floor(num), 1), 200);
 }
 
+async function resolveUserMatatuAssignment(userId) {
+  if (!userId) return { matatuId: null, saccoId: null };
+
+  const staffAssign = await pool.query(
+    `
+      SELECT matatu_id, sacco_id
+      FROM matatu_staff_assignments
+      WHERE staff_user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 1
+    `,
+    [userId],
+  );
+  const assignRow = staffAssign.rows[0] || null;
+
+  let matatuId = assignRow?.matatu_id || null;
+  let saccoId = assignRow?.sacco_id || null;
+
+  if (!matatuId) {
+    const prof = await pool.query(
+      `SELECT matatu_id, sacco_id FROM staff_profiles WHERE user_id = $1 LIMIT 1`,
+      [userId],
+    );
+    if (prof.rows.length) {
+      matatuId = prof.rows[0].matatu_id || matatuId;
+      saccoId = saccoId || prof.rows[0].sacco_id || null;
+    }
+  }
+
+  if (!matatuId) {
+    const ctxRes = await pool.query(
+      `SELECT matatu_id, sacco_id FROM public.app_user_context WHERE user_id = $1 LIMIT 1`,
+      [userId],
+    );
+    if (ctxRes.rows.length) {
+      matatuId = ctxRes.rows[0].matatu_id || matatuId;
+      saccoId = saccoId || ctxRes.rows[0].sacco_id || null;
+    }
+  }
+
+  if (!matatuId) {
+    const roleRes = await pool.query(
+      `
+        SELECT matatu_id, sacco_id
+        FROM public.user_roles
+        WHERE user_id = $1
+        ORDER BY created_at DESC NULLS LAST, updated_at DESC NULLS LAST
+        LIMIT 1
+      `,
+      [userId],
+    );
+    if (roleRes.rows.length) {
+      matatuId = roleRes.rows[0].matatu_id || matatuId;
+      saccoId = saccoId || roleRes.rows[0].sacco_id || null;
+    }
+  }
+
+  if (!matatuId) {
+    const grant = await pool.query(
+      `
+        SELECT scope_id AS matatu_id
+        FROM access_grants
+        WHERE user_id = $1
+          AND scope_type IN ('OWNER','MATATU')
+          AND is_active = true
+        ORDER BY created_at DESC
+        LIMIT 1
+      `,
+      [userId],
+    );
+    if (grant.rows.length) {
+      matatuId = grant.rows[0].matatu_id || matatuId;
+    }
+  }
+
+  return { matatuId: matatuId || null, saccoId: saccoId || null };
+}
+
 router.get('/live-payments', async (req, res) => {
   const matatuId = (req.query.matatu_id || '').toString().trim();
   const tripId = (req.query.trip_id || '').toString().trim() || null;
+  const shiftIdQuery = (req.query.shift_id || '').toString().trim() || null;
   const limit = normalizeLimit(req.query.limit);
   const from = normalizeFrom(req.query.from) || new Date(Date.now() - 15 * 60 * 1000);
 
@@ -203,7 +283,9 @@ router.get('/live-payments', async (req, res) => {
     const ctxFromDb = await resolveUserContext(req.user?.id);
     const normalizedRole = normalizeRoleName(ctxFromDb?.role || req.user?.role);
     const userCtx = ctxFromDb || { role: normalizedRole, saccoId: null, matatuId: null };
-    const membershipCtx = await resolveSaccoAuthContext({ userId: req.user?.id });
+    const membershipCtx = (await resolveSaccoAuthContext({ userId: req.user?.id })) || { allowed_sacco_ids: [] };
+    const staffAccess = await resolveMatatuStaffAccess(req.user?.id, matatu.id, matatu.sacco_id);
+
     const superUser = userCtx?.role === ROLES.SYSTEM_ADMIN;
     const saccoScoped =
       [ROLES.SACCO_ADMIN].includes(userCtx?.role) &&
@@ -224,7 +306,6 @@ router.get('/live-payments', async (req, res) => {
     if (userCtx?.role === ROLES.OWNER && !ownerOfMatatu) {
       ownerGrantScoped = await hasOwnerAccessGrant(req.user?.id, matatu.id);
     }
-    const staffAccess = await resolveMatatuStaffAccess(req.user?.id, matatu.id, matatu.sacco_id);
     const staffGrant = [ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx?.role) && staffAccess.allowed;
     const ownerGrant = ownerOfMatatu || ownerGrantScoped;
     const allowed =
@@ -291,8 +372,53 @@ router.get('/live-payments', async (req, res) => {
         });
       }
     }
-    const tripFilter = tripId ? ' AND p.trip_id = $3' : '';
-    if (tripId) params.push(tripId);
+
+    let shiftFilterId = null;
+    if ([ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx?.role)) {
+      shiftFilterId = await resolveActiveShiftIdForMatatu(matatu.id, req.user?.id);
+      if (!shiftFilterId) {
+        return res.status(403).json({
+          ok: false,
+          error: 'shift required',
+          code: 'SHIFT_REQUIRED',
+          request_id: req.requestId || null,
+          details: { matatu_id: matatu.id, user_id: req.user?.id || null },
+        });
+      }
+    } else if (shiftIdQuery) {
+      const shiftRes = await pool.query(`SELECT id, matatu_id FROM matatu_shifts WHERE id = $1 LIMIT 1`, [shiftIdQuery]);
+      const shiftRow = shiftRes.rows[0] || null;
+      if (!shiftRow) {
+        return res.status(404).json({
+          ok: false,
+          error: 'shift not found',
+          code: 'SHIFT_NOT_FOUND',
+          request_id: req.requestId || null,
+        });
+      }
+      if (String(shiftRow.matatu_id) !== String(matatu.id)) {
+        return res.status(403).json({
+          ok: false,
+          error: 'shift does not belong to matatu',
+          code: 'SHIFT_MISMATCH',
+          request_id: req.requestId || null,
+        });
+      }
+      shiftFilterId = shiftRow.id;
+    }
+
+    const where = [
+      '(w_alias.matatu_id = $1 OR w_match.matatu_id = $1)',
+      'COALESCE(p.trans_time, p.created_at) >= $2',
+    ];
+    if (tripId) {
+      params.push(tripId);
+      where.push(`p.trip_id = $${params.length}`);
+    }
+    if (shiftFilterId) {
+      params.push(shiftFilterId);
+      where.push(`p.shift_id = $${params.length}`);
+    }
     params.push(limit);
     const { rows } = await pool.query(
       `
@@ -308,6 +434,7 @@ router.get('/live-payments', async (req, res) => {
           p.status,
           p.match_status,
           p.trip_id,
+          p.shift_id,
           COALESCE(w_alias.wallet_kind, w_match.wallet_kind) AS wallet_kind,
           p.raw,
           p.raw_payload,
@@ -322,9 +449,7 @@ router.get('/live-payments', async (req, res) => {
           ON w_alias.id = wa.wallet_id
         LEFT JOIN wallets w_match
           ON w_match.id = p.matched_wallet_id
-        WHERE (w_alias.matatu_id = $1 OR w_match.matatu_id = $1)
-          AND COALESCE(p.trans_time, p.created_at) >= $2
-          ${tripFilter}
+        WHERE ${where.join('\n          AND ')}
         ORDER BY COALESCE(p.trans_time, p.created_at) DESC
         LIMIT $${params.length}
       `,
@@ -367,77 +492,7 @@ router.get('/my-assignment', async (req, res) => {
       return res.status(401).json({ ok: false, error: 'unauthorized', request_id: req.requestId || null });
     }
 
-    const staffAssign = await pool.query(
-      `
-        SELECT matatu_id, sacco_id
-        FROM matatu_staff_assignments
-        WHERE staff_user_id = $1
-        ORDER BY created_at DESC
-        LIMIT 1
-      `,
-      [userId],
-    );
-    const assignRow = staffAssign.rows[0] || null;
-
-    let matatuId = assignRow?.matatu_id || null;
-    let saccoId = assignRow?.sacco_id || null;
-
-    if (!matatuId) {
-      const prof = await pool.query(
-        `SELECT matatu_id, sacco_id FROM staff_profiles WHERE user_id = $1 LIMIT 1`,
-        [userId],
-      );
-      if (prof.rows.length) {
-        matatuId = prof.rows[0].matatu_id || matatuId;
-        saccoId = saccoId || prof.rows[0].sacco_id || null;
-      }
-    }
-
-    if (!matatuId) {
-      const ctxRes = await pool.query(
-        `SELECT matatu_id, sacco_id FROM public.app_user_context WHERE user_id = $1 LIMIT 1`,
-        [userId],
-      );
-      if (ctxRes.rows.length) {
-        matatuId = ctxRes.rows[0].matatu_id || matatuId;
-        saccoId = saccoId || ctxRes.rows[0].sacco_id || null;
-      }
-    }
-
-    if (!matatuId) {
-      const roleRes = await pool.query(
-        `
-          SELECT matatu_id, sacco_id
-          FROM public.user_roles
-          WHERE user_id = $1
-          ORDER BY created_at DESC NULLS LAST, updated_at DESC NULLS LAST
-          LIMIT 1
-        `,
-        [userId],
-      );
-      if (roleRes.rows.length) {
-        matatuId = roleRes.rows[0].matatu_id || matatuId;
-        saccoId = saccoId || roleRes.rows[0].sacco_id || null;
-      }
-    }
-
-    if (!matatuId) {
-      const grant = await pool.query(
-        `
-          SELECT scope_id AS matatu_id
-          FROM access_grants
-          WHERE user_id = $1
-            AND scope_type IN ('OWNER','MATATU')
-            AND is_active = true
-          ORDER BY created_at DESC
-          LIMIT 1
-        `,
-        [userId],
-      );
-      if (grant.rows.length) {
-        matatuId = grant.rows[0].matatu_id || matatuId;
-      }
-    }
+    const { matatuId, saccoId } = await resolveUserMatatuAssignment(userId);
 
     return res.json({
       ok: true,
@@ -451,6 +506,140 @@ router.get('/my-assignment', async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: err.message || 'Failed to resolve assignment',
+      request_id: req.requestId || null,
+    });
+  }
+});
+
+router.get('/shifts/active', async (req, res) => {
+  try {
+    const userId = req.user?.id || null;
+    if (!userId) {
+      return res.status(401).json({ ok: false, error: 'unauthorized', request_id: req.requestId || null });
+    }
+    const { matatuId } = await resolveUserMatatuAssignment(userId);
+    if (!matatuId) {
+      return res.json({
+        ok: true,
+        shift: null,
+        matatu_id: null,
+        request_id: req.requestId || null,
+      });
+    }
+    const shift = await getActiveShift(matatuId, userId);
+    return res.json({
+      ok: true,
+      shift: shift || null,
+      matatu_id: matatuId,
+      request_id: req.requestId || null,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err.message || 'Failed to load active shift',
+      request_id: req.requestId || null,
+    });
+  }
+});
+
+router.post('/shifts/open', async (req, res) => {
+  try {
+    const userId = req.user?.id || null;
+    if (!userId) {
+      return res.status(401).json({ ok: false, error: 'unauthorized', request_id: req.requestId || null });
+    }
+    const role = normalizeRoleName(req.user?.role);
+    if (![ROLES.MATATU_STAFF, ROLES.DRIVER].includes(role)) {
+      return res.status(403).json({
+        ok: false,
+        error: 'forbidden',
+        code: 'SHIFT_ROLE_REQUIRED',
+        request_id: req.requestId || null,
+      });
+    }
+
+    const { matatuId, saccoId } = await resolveUserMatatuAssignment(userId);
+    if (!matatuId) {
+      return res.status(403).json({
+        ok: false,
+        error: 'No matatu assignment found',
+        code: 'MATATU_ACCESS_DENIED',
+        request_id: req.requestId || null,
+      });
+    }
+    const staffAccess = await resolveMatatuStaffAccess(userId, matatuId, saccoId);
+    if (!staffAccess.allowed) {
+      return res.status(403).json({
+        ok: false,
+        error: 'forbidden',
+        code: 'MATATU_ACCESS_DENIED',
+        request_id: req.requestId || null,
+        details: staffAccess.params,
+      });
+    }
+
+    const shift = await openShift(matatuId, userId);
+    return res.json({ ok: true, shift, matatu_id: matatuId, request_id: req.requestId || null });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err.message || 'Failed to open shift',
+      request_id: req.requestId || null,
+    });
+  }
+});
+
+router.post('/shifts/close', async (req, res) => {
+  try {
+    const userId = req.user?.id || null;
+    if (!userId) {
+      return res.status(401).json({ ok: false, error: 'unauthorized', request_id: req.requestId || null });
+    }
+    const role = normalizeRoleName(req.user?.role);
+    const superUser = role === ROLES.SYSTEM_ADMIN;
+    const shiftIdFromBody = (req.body?.shift_id || '').toString().trim() || null;
+
+    const { matatuId, saccoId } = await resolveUserMatatuAssignment(userId);
+    const staffAccess = matatuId ? await resolveMatatuStaffAccess(userId, matatuId, saccoId) : { allowed: false, params: {} };
+
+    let targetShift = null;
+    if (shiftIdFromBody) {
+      const shiftRes = await pool.query(`SELECT * FROM matatu_shifts WHERE id = $1 LIMIT 1`, [shiftIdFromBody]);
+      targetShift = shiftRes.rows[0] || null;
+    } else if (matatuId) {
+      targetShift = await getActiveShift(matatuId, userId);
+    }
+
+    if (!targetShift) {
+      return res.status(404).json({
+        ok: false,
+        error: 'shift not found',
+        code: 'SHIFT_NOT_FOUND',
+        request_id: req.requestId || null,
+      });
+    }
+
+    const ownerGrant = await hasOwnerAccessGrant(userId, targetShift.matatu_id);
+    const allowed =
+      superUser ||
+      targetShift.staff_user_id === userId ||
+      ownerGrant ||
+      ([ROLES.MATATU_STAFF, ROLES.DRIVER].includes(role) && staffAccess.allowed);
+    if (!allowed) {
+      return res.status(403).json({
+        ok: false,
+        error: 'forbidden',
+        code: 'MATATU_ACCESS_DENIED',
+        request_id: req.requestId || null,
+      });
+    }
+
+    const closed = await closeShift(targetShift.id, userId);
+    return res.json({ ok: true, shift: closed, request_id: req.requestId || null });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err.message || 'Failed to close shift',
       request_id: req.requestId || null,
     });
   }
