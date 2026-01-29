@@ -294,37 +294,50 @@ const MatatuStaffDashboard = () => {
     }
   }, [matatuId])
 
-  const loadTrip = useCallback(async (background = false) => {
-    if (!matatuId) {
-      setTrip(null)
-      return
-    }
-    if (!background) setTripLoading(true)
-    setTripError(null)
-    try {
-      const res = await authFetch(`/api/staff/trips/current?matatu_id=${encodeURIComponent(matatuId)}`, {
-        headers: { Accept: "application/json" },
-      })
-      if (!res.ok) {
-        if (res.status === 404) {
-          setTrip(null)
-        } else {
-          const data = await res.json().catch(() => ({}))
-          setTripError(data?.error || res.statusText || "Failed to load trip")
-        }
+  const loadTrip = useCallback(
+    async (background = false) => {
+      if (!matatuId) {
+        setTrip(null)
         return
       }
-      const data = await res.json().catch(() => ({}))
-      setTrip(data?.trip || null)
-    } catch (err) {
-      setTripError(err instanceof Error ? err.message : "Failed to load trip")
-    } finally {
-      if (!background) setTripLoading(false)
-    }
-  }, [matatuId])
+      if (!activeShift) {
+        setTrip(null)
+        return
+      }
+      if (!background) setTripLoading(true)
+      setTripError(null)
+      try {
+        const res = await authFetch(`/api/staff/trips/current?matatu_id=${encodeURIComponent(matatuId)}`, {
+          headers: { Accept: "application/json" },
+        })
+        if (!res.ok) {
+          if (res.status === 404) {
+            setTrip(null)
+          } else {
+            const data = await res.json().catch(() => ({}))
+            setTripError(data?.error || res.statusText || "Failed to load trip")
+          }
+          return
+        }
+        const data = await res.json().catch(() => ({}))
+        setTrip(data?.trip || null)
+      } catch (err) {
+        setTripError(err instanceof Error ? err.message : "Failed to load trip")
+      } finally {
+        if (!background) setTripLoading(false)
+      }
+    },
+    [activeShift, authFetch, matatuId],
+  )
 
   const loadTripHistory = useCallback(async () => {
     if (!matatuId) {
+      setTripHistory([])
+      setTripHistoryError(null)
+      setTripHistoryLoading(false)
+      return
+    }
+    if (!activeShift) {
       setTripHistory([])
       setTripHistoryError(null)
       setTripHistoryLoading(false)
@@ -345,14 +358,23 @@ const MatatuStaffDashboard = () => {
         setTripHistory([])
         return
       }
-      setTripHistory(Array.isArray(data?.trips) ? data.trips : [])
+      let trips = Array.isArray(data?.trips) ? data.trips : []
+      if (activeShift?.opened_at) {
+        const startMs = new Date(activeShift.opened_at).getTime()
+        const endMs = activeShift.closed_at ? new Date(activeShift.closed_at).getTime() : Date.now()
+        trips = trips.filter((t) => {
+          const ts = t.started_at ? new Date(t.started_at).getTime() : null
+          return ts !== null && ts >= startMs && ts <= endMs
+        })
+      }
+      setTripHistory(trips)
     } catch (err) {
       setTripHistoryError(err instanceof Error ? err.message : "Failed to load trips")
       setTripHistory([])
     } finally {
       setTripHistoryLoading(false)
     }
-  }, [matatuId])
+  }, [activeShift, authFetch, matatuId])
 
   const loadLivePayments = useCallback(async () => {
     if (!matatuId) {
