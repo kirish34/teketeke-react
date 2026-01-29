@@ -107,6 +107,7 @@ const MatatuStaffDashboard = () => {
   const [shiftError, setShiftError] = useState<string | null>(null)
   const [shiftLoaded, setShiftLoaded] = useState(false)
   const [isMobile, setIsMobile] = useState<boolean>(() => typeof window !== "undefined" && window.innerWidth <= 768)
+  const [showEndShiftConfirm, setShowEndShiftConfirm] = useState(false)
 
   const fetchJson = useCallback(<T,>(path: string) => api<T>(path, { token }), [token])
 
@@ -507,7 +508,11 @@ const MatatuStaffDashboard = () => {
 
   const closeShiftSession = useCallback(async () => {
     if (!activeShift) return
-    if (!window.confirm("Close current shift?")) return
+    setShowEndShiftConfirm(true)
+  }, [activeShift])
+
+  const confirmEndShift = useCallback(async () => {
+    if (!activeShift) return
     setShiftLoading(true)
     setShiftError(null)
     try {
@@ -531,6 +536,7 @@ const MatatuStaffDashboard = () => {
       setShiftError(err instanceof Error ? err.message : "Failed to close shift")
     } finally {
       setShiftLoading(false)
+      setShowEndShiftConfirm(false)
     }
   }, [activeShift, authFetch])
 
@@ -841,6 +847,16 @@ const MatatuStaffDashboard = () => {
         </div>
         <div className="ms-appbar-right">
           <span className={`ms-pill ${activeShift ? "on" : "off"}`}>{activeShift ? "Shift on" : "Shift off"}</span>
+          {activeShift ? (
+            <button
+              type="button"
+              className="ms-endshift-btn"
+              disabled={shiftLoading}
+              onClick={() => setShowEndShiftConfirm(true)}
+            >
+              End shift
+            </button>
+          ) : null}
           <button type="button" className="btn ghost" onClick={logout}>
             Logout
           </button>
@@ -882,6 +898,23 @@ const MatatuStaffDashboard = () => {
         <div className="ms-header-hero">{heroSection}</div>
       </div>
       {isMobile ? appbar : null}
+
+      {showEndShiftConfirm && (
+        <div className="ms-confirm-backdrop">
+          <div className="ms-confirm-modal">
+            <h4>End shift now?</h4>
+            <p className="muted small">This will close the shift and process end-of-day steps.</p>
+            <div className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" className="btn ghost" onClick={() => setShowEndShiftConfirm(false)}>
+                Cancel
+              </button>
+              <button type="button" className="btn danger" disabled={shiftLoading} onClick={() => void confirmEndShift()}>
+                {shiftLoading ? "Closing..." : "End shift"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="card ms-context-panel" style={{ paddingBottom: 10 }}>
         <div className="row" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -957,20 +990,15 @@ const MatatuStaffDashboard = () => {
       ) : null}
 
       {activeTab === "live_payments" ? (
-        <section className="card">
+        <section className="card ms-live-card">
           <div className="topline" style={{ alignItems: "center", flexWrap: "wrap", gap: 8 }}>
             <div>
               <h3 style={{ margin: 0 }}>Live Payments (Current Trip)</h3>
-              <div className="muted small">
+              <div className="muted small ms-live-sub">
                 Shows payments only for the active trip.{activeShift?.opened_at ? ` Shift opened at ${new Date(activeShift.opened_at).toLocaleTimeString("en-KE")}.` : ""}
               </div>
             </div>
             <div className="row" style={{ gap: 8, alignItems: "center" }}>
-              {activeShift ? (
-                <button className="btn ghost" type="button" onClick={() => void closeShiftSession()} disabled={shiftLoading}>
-                  {shiftLoading ? "Closing..." : "Close Shift"}
-                </button>
-              ) : null}
               <button className="btn" type="button" onClick={() => void loadLivePayments()}>
                 Refresh
               </button>

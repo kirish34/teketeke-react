@@ -313,6 +313,51 @@ body {
   }
 }
 
+@media (max-width: 640px) {
+  .ms-live-card {
+    padding: 12px !important;
+    margin-top: 10px !important;
+  }
+  .ms-live-card .topline {
+    margin-bottom: 6px;
+  }
+  .ms-live-title {
+    font-size: 22px;
+  }
+  .ms-live-sub {
+    display: none;
+  }
+  .ms-content {
+    padding-bottom: 90px !important;
+  }
+  .ms-endshift-btn {
+    background: #ff4d4f;
+    color: #fff;
+    border: none;
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  .ms-confirm-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 90;
+    padding: 16px;
+  }
+  .ms-confirm-modal {
+    background: #fff;
+    border-radius: 14px;
+    padding: 16px;
+    width: min(420px, 100%);
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.25);
+  }
+}
+
 html {
   scroll-behavior: smooth;
 }
