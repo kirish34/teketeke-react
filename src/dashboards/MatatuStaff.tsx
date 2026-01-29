@@ -506,11 +506,6 @@ const MatatuStaffDashboard = () => {
     }
   }, [authFetch, matatuId])
 
-  const closeShiftSession = useCallback(async () => {
-    if (!activeShift) return
-    setShowEndShiftConfirm(true)
-  }, [activeShift])
-
   const confirmEndShift = useCallback(async () => {
     if (!activeShift) return
     setShiftLoading(true)
