@@ -448,6 +448,7 @@ const MatatuStaffDashboard = () => {
       const res = await authFetch("/api/matatu/shifts/open", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ matatu_id: matatuId || null }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
