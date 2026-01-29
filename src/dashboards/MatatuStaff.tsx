@@ -767,7 +767,7 @@ const MatatuStaffDashboard = () => {
                 <thead>
                   <tr>
                     <th>Time</th>
-                    <th>Phone</th>
+                    <th>Payer</th>
                     <th>Amount</th>
                     <th>Ref</th>
                     <th>Status</th>
@@ -784,7 +784,14 @@ const MatatuStaffDashboard = () => {
                     livePays.map((p) => (
                       <tr key={p.id || p.created_at}>
                         <td>{p.created_at ? new Date(p.created_at).toLocaleTimeString("en-KE") : "-"}</td>
-                        <td>{(p as any)?.payer_msisdn || p.msisdn || p.passenger_msisdn || "-"}</td>
+                        <td>
+                          {(p as any)?.sender_name ||
+                            (p as any)?.payer_name ||
+                            (p as any)?.payer_msisdn ||
+                            p.msisdn ||
+                            p.passenger_msisdn ||
+                            "-"}
+                        </td>
                         <td>{fmtKES((p as any)?.amount || p.fare_amount_kes)}</td>
                         <td>{(p as any)?.account_ref || (p as any)?.reference || p.notes || "-"}</td>
                         <td>{(p as any)?.status || p.status || ""}</td>
