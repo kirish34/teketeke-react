@@ -548,16 +548,6 @@ router.post('/shifts/open', async (req, res) => {
     if (!userId) {
       return res.status(401).json({ ok: false, error: 'unauthorized', request_id: req.requestId || null });
     }
-    const role = normalizeRoleName(req.user?.role);
-    if (![ROLES.MATATU_STAFF, ROLES.DRIVER].includes(role)) {
-      return res.status(403).json({
-        ok: false,
-        error: 'forbidden',
-        code: 'SHIFT_ROLE_REQUIRED',
-        request_id: req.requestId || null,
-      });
-    }
-
     const matatuIdFromBody = (req.body?.matatu_id || '').toString().trim() || null;
     const { matatuId: resolvedMatatuId, saccoId } = await resolveUserMatatuAssignment(userId);
     const matatuId = matatuIdFromBody || resolvedMatatuId;
@@ -570,6 +560,7 @@ router.post('/shifts/open', async (req, res) => {
       });
     }
     const staffAccess = await resolveMatatuStaffAccess(userId, matatuId, saccoId);
+    // allow opening shift if the user has a matatu resolved; still record staff access for diagnostics
     const allowed = staffAccess.allowed || !!matatuId;
     if (!allowed) {
       return res.status(403).json({
