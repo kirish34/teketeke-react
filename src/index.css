@@ -166,25 +166,36 @@ body {
     display: grid;
   }
   .app-header.sticky {
-    padding-top: 2px;
+    padding-top: 0;
+  }
+  .app-header-meta {
+    display: none;
   }
   .hero-bar {
-    padding: 10px 12px;
+    padding: 8px 10px;
   }
   .hero-bar.hero-compact {
-    padding: 10px 12px;
+    padding: 8px 10px;
+  }
+  .hero-bar.hero-compact .hero-chip {
+    font-size: 14px;
+    padding: 6px 10px;
   }
   .hero-bar h2 {
-    font-size: 18px;
-    line-height: 1.2;
-    margin-bottom: 2px;
+    font-size: 22px;
+    line-height: 1.15;
+    margin-bottom: 0;
+  }
+  .hero-bar.hero-compact .muted.small {
+    font-size: 12px;
   }
   .hero-inline {
-    gap: 6px;
+    gap: 4px;
+    flex-wrap: wrap;
   }
   .sys-pill-lite {
-    padding: 6px 8px;
-    font-size: 11px;
+    padding: 4px 6px;
+    font-size: 10px;
   }
   .card, .table-wrap {
     box-shadow: 0 12px 28px rgba(15,23,42,0.04);
@@ -203,6 +214,15 @@ body {
   .pill {
     padding: 4px 8px;
     font-size: 11px;
+  }
+  .bottom-nav {
+    bottom: 6px;
+    padding: 4px;
+  }
+  .bottom-nav-btn {
+    min-height: 42px;
+    font-size: 12px;
+    padding: 8px 4px;
   }
 }
 
