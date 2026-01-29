@@ -271,6 +271,26 @@ router.get('/live-payments', async (req, res) => {
     }
 
     const params = [matatuId, from.toISOString()];
+    if (tripId) {
+      const tripRes = await pool.query(`SELECT id, matatu_id FROM matatu_trips WHERE id = $1 LIMIT 1`, [tripId]);
+      const tripRow = tripRes.rows[0] || null;
+      if (!tripRow) {
+        return res.status(404).json({
+          ok: false,
+          error: 'trip not found',
+          code: 'TRIP_NOT_FOUND',
+          request_id: req.requestId || null,
+        });
+      }
+      if (String(tripRow.matatu_id) !== String(matatu.id)) {
+        return res.status(403).json({
+          ok: false,
+          error: 'trip does not belong to matatu',
+          code: 'TRIP_MISMATCH',
+          request_id: req.requestId || null,
+        });
+      }
+    }
     const tripFilter = tripId ? ' AND p.trip_id = $3' : '';
     if (tripId) params.push(tripId);
     params.push(limit);
