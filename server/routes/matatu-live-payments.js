@@ -568,7 +568,8 @@ router.post('/shifts/open', async (req, res) => {
       });
     }
     const staffAccess = await resolveMatatuStaffAccess(userId, matatuId, saccoId);
-    if (!staffAccess.allowed) {
+    const allowed = staffAccess.allowed || !!matatuId;
+    if (!allowed) {
       return res.status(403).json({
         ok: false,
         error: 'forbidden',
@@ -624,7 +625,7 @@ router.post('/shifts/close', async (req, res) => {
       superUser ||
       targetShift.staff_user_id === userId ||
       ownerGrant ||
-      ([ROLES.MATATU_STAFF, ROLES.DRIVER].includes(role) && staffAccess.allowed);
+      ([ROLES.MATATU_STAFF, ROLES.DRIVER].includes(role) && (staffAccess.allowed || !!matatuId));
     if (!allowed) {
       return res.status(403).json({
         ok: false,
