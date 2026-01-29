@@ -166,10 +166,13 @@ body {
     display: grid;
   }
   .app-header.sticky {
-    padding-top: 4px;
+    padding-top: 2px;
   }
   .hero-bar {
-    padding: 12px 14px;
+    padding: 10px 12px;
+  }
+  .hero-bar.hero-compact {
+    padding: 10px 12px;
   }
   .hero-bar h2 {
     font-size: 18px;
@@ -189,6 +192,17 @@ body {
   }
   table {
     font-size: 13px;
+  }
+  .app-header-meta {
+    margin-top: 2px;
+    gap: 4px;
+  }
+  .meta-line {
+    gap: 4px;
+  }
+  .pill {
+    padding: 4px 8px;
+    font-size: 11px;
   }
 }
 

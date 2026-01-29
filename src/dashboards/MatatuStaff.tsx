@@ -810,7 +810,22 @@ const MatatuStaffDashboard = () => {
     : user?.role
       ? `Role: ${user.role}`
       : "Matatu Staff"
-  const heroSection = (
+  const heroSection = isMobile ? (
+    <div className="hero-bar hero-compact" style={{ marginBottom: 10 }}>
+      <div className="hero-left">
+        <div className="hero-chip">MATATU STAFF</div>
+        <h2 style={{ margin: "4px 0 2px" }}>Hello, {staffLabel}</h2>
+        <div className="muted small">Matatu {assignedMatatuLabel || "—"}</div>
+        <div className="hero-inline">
+          <span className="sys-pill-lite">{todayKey()}</span>
+          <span className="sys-pill-lite">{timeLabel}</span>
+        </div>
+      </div>
+      <div className="row" style={{ gap: 8, alignItems: "center" }}>
+        <div className="badge-ghost">{heroRight}</div>
+      </div>
+    </div>
+  ) : (
     <div className="hero-bar" style={{ marginBottom: 16 }}>
       <div className="hero-left">
         <div className="hero-chip">MATATU STAFF</div>
