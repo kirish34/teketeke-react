@@ -558,7 +558,9 @@ router.post('/shifts/open', async (req, res) => {
       });
     }
 
-    const { matatuId, saccoId } = await resolveUserMatatuAssignment(userId);
+    const matatuIdFromBody = (req.body?.matatu_id || '').toString().trim() || null;
+    const { matatuId: resolvedMatatuId, saccoId } = await resolveUserMatatuAssignment(userId);
+    const matatuId = matatuIdFromBody || resolvedMatatuId;
     if (!matatuId) {
       return res.status(403).json({
         ok: false,
@@ -600,7 +602,9 @@ router.post('/shifts/close', async (req, res) => {
     const superUser = role === ROLES.SYSTEM_ADMIN;
     const shiftIdFromBody = (req.body?.shift_id || '').toString().trim() || null;
 
-    const { matatuId, saccoId } = await resolveUserMatatuAssignment(userId);
+    const matatuIdFromBody = (req.body?.matatu_id || '').toString().trim() || null;
+    const { matatuId: resolvedMatatuId, saccoId } = await resolveUserMatatuAssignment(userId);
+    const matatuId = matatuIdFromBody || resolvedMatatuId;
     const staffAccess = matatuId ? await resolveMatatuStaffAccess(userId, matatuId, saccoId) : { allowed: false, params: {} };
 
     let targetShift = null;
