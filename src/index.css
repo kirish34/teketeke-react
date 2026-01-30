@@ -252,6 +252,11 @@ body {
   font-weight: 700;
   color: #0ea5e9;
 }
+.ms-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 
 /* touch-friendly buttons */
 .btn, button {
@@ -446,6 +451,9 @@ body {
     min-width: 110px;
   }
   .ms-pay-badge {
+    display: none !important;
+  }
+  .ms-loading-text {
     display: none !important;
   }
   .ms-bottom-actions {

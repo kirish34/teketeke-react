@@ -1220,10 +1220,10 @@ useEffect(() => {
                 </div>
               </div>
               <div className="ms-live-head-actions">
-                <button className="btn" type="button" onClick={() => void loadLivePayments()}>
-                  Refresh
+                <button className="btn ms-refresh-btn" type="button" onClick={() => void loadLivePayments()}>
+                  {livePaysLoading ? <span className="spinner small" aria-hidden /> : null}
+                  <span>Refresh</span>
                 </button>
-                {livePaysLoading ? <span className="ms-mini muted">Loading...</span> : null}
                 {livePaysError ? <span className="err small">{livePaysError}</span> : null}
                 {shiftError && !livePaysError ? <span className="err small">{shiftError}</span> : null}
               </div>
@@ -1270,13 +1270,13 @@ useEffect(() => {
                         {visiblePayments.length === 0 ? (
                           <tr>
                             <td colSpan={4} className="muted">
-                              {isLiveView
-                                ? livePaysLoading
-                                  ? "Loading..."
-                                  : "No payments yet."
-                                : confirmedLoading
-                                  ? "Loading..."
-                                  : "No confirmed payments."}
+                              {(isLiveView ? livePaysLoading : confirmedLoading) ? (
+                                <span className="spinner small" aria-label="Loading payments" />
+                              ) : isLiveView ? (
+                                "No payments yet."
+                              ) : (
+                                "No confirmed payments."
+                              )}
                             </td>
                           </tr>
                         ) : (
@@ -1328,13 +1328,13 @@ useEffect(() => {
                   <div className="live-cards">
                     {visiblePayments.length === 0 ? (
                       <div className="muted small">
-                        {isLiveView
-                          ? livePaysLoading
-                            ? "Loading..."
-                            : "No payments yet."
-                          : confirmedLoading
-                            ? "Loading..."
-                            : confirmedError || "No confirmed payments."}
+                        {(isLiveView ? livePaysLoading : confirmedLoading) ? (
+                          <span className="spinner small" aria-label="Loading payments" />
+                        ) : isLiveView ? (
+                          "No payments yet."
+                        ) : (
+                          confirmedError || "No confirmed payments."
+                        )}
                       </div>
                     ) : (
                       visiblePayments.map((p) => {
