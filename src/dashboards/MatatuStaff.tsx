@@ -119,7 +119,6 @@ const MatatuStaffDashboard = () => {
   const [liveSubTab, setLiveSubTab] = useState<"live" | "confirmed">("live")
   const [confirmedPays, setConfirmedPays] = useState<Tx[]>([])
   const [confirmedLoading, setConfirmedLoading] = useState(false)
-  const [confirmedError, setConfirmedError] = useState<string | null>(null)
   const [dragX, setDragX] = useState<Record<string, number>>({})
 
   const fetchJson = useCallback(<T,>(path: string) => api<T>(path, { token }), [token])
@@ -280,31 +279,22 @@ const MatatuStaffDashboard = () => {
     setLiveHeight(h)
   }, [isMobile])
 
-  useEffect(() => {
-    recomputeLiveHeight()
-  }, [recomputeLiveHeight, activeTab, livePays.length, confirmedPays.length, isMobile])
+useEffect(() => {
+  recomputeLiveHeight()
+}, [recomputeLiveHeight, activeTab, livePays.length, confirmedPays.length, isMobile])
 
-  useEffect(() => {
-    const resizeHandler = () => recomputeLiveHeight()
-    window.addEventListener("resize", resizeHandler)
-    window.addEventListener("orientationchange", resizeHandler)
-    const vv = window.visualViewport
-    vv?.addEventListener("resize", resizeHandler)
-    return () => {
-      window.removeEventListener("resize", resizeHandler)
-      window.removeEventListener("orientationchange", resizeHandler)
-      vv?.removeEventListener("resize", resizeHandler)
-    }
-  }, [recomputeLiveHeight])
-
-  useEffect(() => {
-    if (activeTab !== "live_payments" || !activeShift) return
-    if (liveSubTab === "confirmed") {
-      void loadLivePayments(false, true)
-    } else {
-      void loadLivePayments()
-    }
-  }, [activeTab, activeShift, liveSubTab, loadLivePayments])
+useEffect(() => {
+  const resizeHandler = () => recomputeLiveHeight()
+  window.addEventListener("resize", resizeHandler)
+  window.addEventListener("orientationchange", resizeHandler)
+  const vv = window.visualViewport
+  vv?.addEventListener("resize", resizeHandler)
+  return () => {
+    window.removeEventListener("resize", resizeHandler)
+    window.removeEventListener("orientationchange", resizeHandler)
+    vv?.removeEventListener("resize", resizeHandler)
+  }
+}, [recomputeLiveHeight])
 
   useEffect(() => {
     if (!matatuId || !user?.id) {
@@ -533,6 +523,15 @@ const MatatuStaffDashboard = () => {
     },
     [activeShift, authFetch, matatuId, shiftLoaded, trip],
   )
+
+  useEffect(() => {
+    if (activeTab !== "live_payments" || !activeShift) return
+    if (liveSubTab === "confirmed") {
+      void loadLivePayments(false, true)
+    } else {
+      void loadLivePayments()
+    }
+  }, [activeTab, activeShift, liveSubTab, loadLivePayments])
 
   const confirmPayment = useCallback(
     async (paymentId: string) => {
