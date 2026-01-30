@@ -1053,7 +1053,7 @@ useEffect(() => {
           </div>
           <p className="muted">Start your shift to view live payments and record cash.</p>
           {shiftError ? <div className="err">{shiftError}</div> : null}
-          <button type="button" className="btn primary" disabled={shiftLoading || !matatuId} onClick={startShiftSession}>
+          <button type="button" className="btn btn-start" disabled={shiftLoading || !matatuId} onClick={startShiftSession}>
             {shiftLoading ? "Starting..." : "Start Shift"}
           </button>
         </section>
@@ -1406,7 +1406,7 @@ useEffect(() => {
                 {tripLoading ? "Starting..." : "Start Trip"}
               </button>
             ) : (
-              <button type="button" className="btn ghost" disabled={tripLoading} onClick={endTrip}>
+              <button type="button" className="btn btn-danger" disabled={tripLoading} onClick={endTrip}>
                 {tripLoading ? "Ending..." : "End Trip"}
               </button>
             )}
