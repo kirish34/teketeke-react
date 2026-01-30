@@ -661,14 +661,17 @@ router.post('/payments/:paymentId/confirm', async (req, res) => {
     // resolve payment and matatu
     const payRes = await pool.query(
       `
-        SELECT p.id, p.account_reference, p.matched_wallet_id, p.matatu_id,
+        SELECT p.id, p.account_reference, p.matched_wallet_id,
                p.trip_id, p.shift_id,
                p.confirmed_at, p.confirmed_by, p.confirmed_shift_id,
-               wa.matatu_id AS alias_matatu_id,
+               wa.wallet_id AS alias_wallet_id,
+               w_alias.matatu_id AS alias_matatu_id,
                w_match.matatu_id AS matched_matatu_id
         FROM mpesa_c2b_payments p
         LEFT JOIN wallet_aliases wa
           ON wa.alias = p.account_reference AND wa.is_active = true
+        LEFT JOIN wallets w_alias
+          ON w_alias.id = wa.wallet_id
         LEFT JOIN wallets w_match
           ON w_match.id = p.matched_wallet_id
         WHERE p.id = $1
@@ -679,11 +682,7 @@ router.post('/payments/:paymentId/confirm', async (req, res) => {
     const pay = payRes.rows[0] || null;
     if (!pay) return res.status(404).json({ ok: false, error: 'payment not found', request_id: req.requestId || null });
 
-    const matatuIdResolved =
-      pay.matatu_id ||
-      pay.alias_matatu_id ||
-      pay.matched_matatu_id ||
-      null;
+    const matatuIdResolved = pay.alias_matatu_id || pay.matched_matatu_id || null;
 
     if (!matatuIdResolved) {
       return res.status(400).json({ ok: false, error: 'payment not linked to matatu', request_id: req.requestId || null });
