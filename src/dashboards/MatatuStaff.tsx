@@ -58,6 +58,10 @@ type Trip = {
 const fmtKES = (val?: number | null) => `KES ${(Number(val || 0)).toLocaleString("en-KE")}`
 const todayKey = () => new Date().toISOString().slice(0, 10)
 const manualKey = (matatuId: string) => `tt_staff_manual_${matatuId || "na"}`
+const paymentKey = (p: Tx) =>
+  (p.id ||
+    p.created_at ||
+    `${(p as any)?.msisdn || (p as any)?.payer_msisdn || (p as any)?.passenger_msisdn || "payer"}-${(p as any)?.amount || p.fare_amount_kes || "amt"}`) as string
 
 const MatatuStaffDashboard = () => {
   const { token, user, logout } = useAuth()
@@ -115,11 +119,14 @@ const MatatuStaffDashboard = () => {
   const holdStartRef = useRef<number | null>(null)
   const appbarRef = useRef<HTMLDivElement | null>(null)
   const bottomNavRef = useRef<HTMLDivElement | null>(null)
+  const bottomActionsRef = useRef<HTMLDivElement | null>(null)
   const [liveHeight, setLiveHeight] = useState<number | null>(null)
   const [liveSubTab, setLiveSubTab] = useState<"live" | "confirmed">("live")
   const [confirmedPays, setConfirmedPays] = useState<Tx[]>([])
   const [confirmedLoading, setConfirmedLoading] = useState(false)
   const [confirmedError, setConfirmedError] = useState<string | null>(null)
+  const visiblePayments = liveSubTab === "live" ? livePays : confirmedPays
+  const isLiveView = liveSubTab === "live"
 
   const fetchJson = useCallback(<T,>(path: string) => api<T>(path, { token }), [token])
 
@@ -536,9 +543,9 @@ useEffect(() => {
   const confirmPayment = useCallback(
     async (paymentId: string) => {
       if (!paymentId) return
-      const target = livePays.find((p) => (p.id || p.created_at) === paymentId)
+      const target = livePays.find((p) => paymentKey(p) === paymentId)
       if (!target) return
-      setLivePays((prev) => prev.filter((p) => (p.id || p.created_at) !== paymentId))
+      setLivePays((prev) => prev.filter((p) => paymentKey(p) !== paymentId))
       setConfirmedPays((prev) => [target, ...prev])
       try {
         const res = await authFetch(`/api/matatu/payments/${encodeURIComponent(paymentId)}/confirm`, {
@@ -550,7 +557,7 @@ useEffect(() => {
           throw new Error(data?.error || res.statusText || "Confirm failed")
         }
       } catch (err) {
-        setConfirmedPays((prev) => prev.filter((p) => (p.id || p.created_at) !== paymentId))
+        setConfirmedPays((prev) => prev.filter((p) => paymentKey(p) !== paymentId))
         setLivePays((prev) => [target, ...prev])
         setLivePaysError(err instanceof Error ? err.message : "Confirm failed")
       }
@@ -944,21 +951,21 @@ useEffect(() => {
   const appbar = (
     <div className="ms-appbar" ref={appbarRef}>
       <div className="ms-appbar-row">
-        <div className="ms-appbar-left">
-          <div className="ms-appbar-title">MATATU STAFF</div>
-          <div className="ms-appbar-name">{staffLabel}</div>
-        </div>
-        <div className="ms-appbar-right">
-          <span className={`ms-pill ${activeShift ? "on" : "off"}`}>{activeShift ? "Shift on" : "Shift off"}</span>
-          {activeShift ? (
-            <button
-              type="button"
-              className={`ms-endshift-btn${isHoldingEndShift ? " holding" : ""}`}
-              disabled={endShiftBusy}
-              onPointerDown={
-                isMobile
-                  ? () => {
-                      if (endShiftBusy || !activeShift) return
+          <div className="ms-appbar-left">
+            <div className="ms-appbar-title">MATATU STAFF</div>
+            <div className="ms-appbar-name">{staffLabel}</div>
+          </div>
+          <div className="ms-appbar-right">
+            <span className={`ms-pill ${activeShift ? "on" : "off"}`}>{activeShift ? "Shift on" : "Shift off"}</span>
+            {activeShift ? (
+              <button
+                type="button"
+                className={`ms-endshift-btn ms-endshift-header${isHoldingEndShift ? " holding" : ""}`}
+                disabled={endShiftBusy}
+                onPointerDown={
+                  isMobile
+                    ? () => {
+                        if (endShiftBusy || !activeShift) return
                       setIsHoldingEndShift(true)
                       holdStartRef.current = Date.now()
                       holdIntervalRef.current = window.setInterval(() => {
@@ -1060,6 +1067,54 @@ useEffect(() => {
         <div className="ms-header-hero">{heroSection}</div>
       </div>
       {isMobile ? appbar : null}
+      {isMobile && activeShift ? (
+        <div className="ms-bottom-actions" ref={bottomActionsRef}>
+          <span className="ms-chip">Shift on</span>
+          <button
+            type="button"
+            className={`ms-endshift-btn${isHoldingEndShift ? " holding" : ""}`}
+            disabled={endShiftBusy}
+            onPointerDown={() => {
+              if (endShiftBusy || !activeShift) return
+              setIsHoldingEndShift(true)
+              holdStartRef.current = Date.now()
+              holdIntervalRef.current = window.setInterval(() => {
+                if (!holdStartRef.current) return
+                const elapsed = Date.now() - holdStartRef.current
+                const pct = Math.min(100, (elapsed / 3000) * 100)
+                setHoldProgress(pct)
+                if (elapsed >= 3000) {
+                  if (holdIntervalRef.current) window.clearInterval(holdIntervalRef.current)
+                  holdIntervalRef.current = null
+                  holdStartRef.current = null
+                  setIsHoldingEndShift(false)
+                  setHoldProgress(100)
+                  setShowEndShiftConfirm(true)
+                }
+              }, 50)
+            }}
+            onPointerUp={() => {
+              if (holdIntervalRef.current) window.clearInterval(holdIntervalRef.current)
+              holdIntervalRef.current = null
+              holdStartRef.current = null
+              setIsHoldingEndShift(false)
+              setHoldProgress(0)
+            }}
+            onPointerLeave={() => {
+              if (holdIntervalRef.current) window.clearInterval(holdIntervalRef.current)
+              holdIntervalRef.current = null
+              holdStartRef.current = null
+              setIsHoldingEndShift(false)
+              setHoldProgress(0)
+            }}
+            style={{
+              background: `linear-gradient(90deg, rgba(255,77,79,0.9) ${holdProgress}%, rgba(255,77,79,0.25) ${holdProgress}%)`,
+            }}
+          >
+            {isHoldingEndShift ? "Hold 3s…" : "End shift"}
+          </button>
+        </div>
+      ) : null}
 
       {showEndShiftConfirm && (
         <div className="ms-confirm-backdrop">
@@ -1203,20 +1258,19 @@ useEffect(() => {
                 {!isMobile ? (
                   <div className="table-wrap" style={{ marginTop: 12 }}>
                     <table>
-                    <thead>
-                      <tr>
-                        <th>Time</th>
-                        <th>Payer</th>
-                        <th>Amount</th>
-                        <th>Status</th>
-                        {liveSubTab === "live" ? <th>Action</th> : null}
-                      </tr>
-                    </thead>
+                      <thead>
+                        <tr>
+                          <th>Time</th>
+                          <th>Payer</th>
+                          <th>Amount</th>
+                          {isLiveView ? <th>Action</th> : <th>Status</th>}
+                        </tr>
+                      </thead>
                       <tbody>
-                        {(liveSubTab === "live" ? livePays : confirmedPays).length === 0 ? (
+                        {visiblePayments.length === 0 ? (
                           <tr>
-                            <td colSpan={liveSubTab === "live" ? 6 : 5} className="muted">
-                              {liveSubTab === "live"
+                            <td colSpan={4} className="muted">
+                              {isLiveView
                                 ? livePaysLoading
                                   ? "Loading..."
                                   : "No payments yet."
@@ -1226,51 +1280,55 @@ useEffect(() => {
                             </td>
                           </tr>
                         ) : (
-                          (liveSubTab === "live" ? livePays : confirmedPays).map((p) => (
-                            <tr key={p.id || p.created_at}>
-                              <td>
-                                {p.created_at
-                                  ? new Date(p.created_at).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" })
-                                  : "-"}
-                              </td>
-                              <td>
-                                {[
-                                  (p as any)?.sender_name,
-                                  (p as any)?.payer_name,
-                                  (p as any)?.created_by_name,
-                                ]
-                                  .filter(Boolean)
-                                  .filter((v, i, arr) => arr.indexOf(v) === i)
-                                  .join(" • ") ||
-                                  (p as any)?.payer_msisdn ||
-                                  p.msisdn ||
-                                  p.passenger_msisdn ||
-                                  "-"}
-                              </td>
-                              <td>{fmtKES((p as any)?.amount || p.fare_amount_kes)}</td>
-                              <td>{(p as any)?.status || p.status || ""}</td>
-                              {liveSubTab === "live" ? (
-                                <td>
-                                  <button
-                                    type="button"
-                                    className="btn ghost small ms-credit-btn"
-                                    onClick={() => void confirmPayment((p.id || p.created_at) as string)}
-                                  >
-                                    Confirm
-                                  </button>
-                                </td>
-                              ) : null}
-                            </tr>
-                          ))
+                          visiblePayments.map((p) => {
+                            const key = paymentKey(p)
+                            const t = p.created_at
+                              ? new Date(p.created_at).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" })
+                              : "-"
+                            const names =
+                              [
+                                (p as any)?.sender_name,
+                                (p as any)?.payer_name,
+                                (p as any)?.created_by_name,
+                              ]
+                                .filter(Boolean)
+                                .filter((v, i, arr) => arr.indexOf(v) === i)
+                                .join(" • ") ||
+                              (p as any)?.payer_msisdn ||
+                              p.msisdn ||
+                              p.passenger_msisdn ||
+                              "-"
+                            const amt = fmtKES((p as any)?.amount || p.fare_amount_kes)
+                            return (
+                              <tr key={key}>
+                                <td>{t}</td>
+                                <td>{names}</td>
+                                <td>{amt}</td>
+                                {isLiveView ? (
+                                  <td>
+                                    <button
+                                      type="button"
+                                      className="btn ghost small ms-credit-btn"
+                                      onClick={() => void confirmPayment(key)}
+                                    >
+                                      Confirm
+                                    </button>
+                                  </td>
+                                ) : (
+                                  <td className="ms-pay-confirmed">Confirmed ✓</td>
+                                )}
+                              </tr>
+                            )
+                          })
                         )}
                       </tbody>
                     </table>
                   </div>
                 ) : (
                   <div className="live-cards">
-                    {(liveSubTab === "live" ? livePays : confirmedPays).length === 0 ? (
+                    {visiblePayments.length === 0 ? (
                       <div className="muted small">
-                        {liveSubTab === "live"
+                        {isLiveView
                           ? livePaysLoading
                             ? "Loading..."
                             : "No payments yet."
@@ -1279,13 +1337,12 @@ useEffect(() => {
                             : confirmedError || "No confirmed payments."}
                       </div>
                     ) : (
-                      (liveSubTab === "live" ? livePays : confirmedPays).map((p) => {
-                        const status = (p as any)?.status || p.status || ""
+                      visiblePayments.map((p) => {
                         const t = p.created_at
                           ? new Date(p.created_at).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" })
                           : "-"
                         const amt = fmtKES((p as any)?.amount || p.fare_amount_kes)
-                        const key = (p.id || p.created_at) as string
+                        const key = paymentKey(p)
                         const names =
                           [
                             (p as any)?.sender_name,
@@ -1299,35 +1356,27 @@ useEffect(() => {
                           p.msisdn ||
                           p.passenger_msisdn ||
                           "-"
-                        if (liveSubTab === "live") {
-                          return (
-                            <div key={key} className="live-card">
-                              <div className="live-card-amount">{amt}</div>
-                              <div className="live-card-line">
-                                <span className="mono">{t}</span>
-                                <span className={`status-chip ${status.toLowerCase()}`}>{status || " "}</span>
-                              </div>
-                              <div className="live-card-line mono">{names}</div>
-                              <div className="live-card-actions">
-                                <button
-                                  type="button"
-                                  className="btn ghost small ms-credit-btn"
-                                  onClick={() => void confirmPayment(key)}
-                                >
-                                  Confirm
-                                </button>
-                              </div>
-                            </div>
-                          )
-                        }
                         return (
-                          <div key={key} className="live-card">
-                            <div className="live-card-amount">{amt}</div>
-                            <div className="live-card-line">
-                              <span className="mono">{t}</span>
-                              <span className={`status-chip ${status.toLowerCase()}`}>{status || " "}</span>
+                          <div key={key} className="live-card ms-pay-card">
+                            <div className="ms-pay-main">
+                              <div className="live-card-amount ms-pay-amount">{amt}</div>
+                              <div className="ms-pay-meta">
+                                <span>{names}</span>
+                                <span className="ms-pay-sep">•</span>
+                                <span className="mono">{t}</span>
+                              </div>
                             </div>
-                            <div className="live-card-line mono">{names}</div>
+                            {isLiveView ? (
+                              <button
+                                type="button"
+                                className="btn ghost small ms-credit-btn ms-pay-action"
+                                onClick={() => void confirmPayment(key)}
+                              >
+                                Confirm
+                              </button>
+                            ) : (
+                              <span className="ms-pay-confirmed">Confirmed ✓</span>
+                            )}
                           </div>
                         )
                       })

@@ -216,6 +216,43 @@ body {
   color: #c2410c;
 }
 
+.ms-pay-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ms-pay-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.ms-pay-amount {
+  font-size: 20px;
+  font-weight: 800;
+  color: #0f172a;
+}
+.ms-pay-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 13px;
+  color: #0f172a;
+  opacity: 0.85;
+}
+.ms-pay-sep {
+  opacity: 0.6;
+}
+.ms-pay-action {
+  align-self: flex-start;
+}
+.ms-pay-confirmed {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0ea5e9;
+}
+
 /* touch-friendly buttons */
 .btn, button {
   min-height: 44px;
@@ -323,6 +360,10 @@ body {
     display: flex;
     flex-direction: column;
   }
+  .live-cards {
+    gap: 6px;
+    margin-top: 6px;
+  }
   .ms-live-head {
     display: flex;
     align-items: flex-start;
@@ -330,8 +371,8 @@ body {
     gap: 10px;
   }
   .ms-live-head h3 {
-    margin: 0;
-    font-size: 22px;
+    margin: 0 !important;
+    font-size: 26px !important;
   }
   .ms-live-head-actions {
     display: flex;
@@ -357,7 +398,7 @@ body {
     color: #f8fafc;
   }
   .ms-live-sub {
-    display: none;
+    display: none !important;
   }
   .ms-mini {
     font-size: 12px;
@@ -365,7 +406,7 @@ body {
     white-space: nowrap;
   }
   .ms-content {
-    padding-bottom: 90px !important;
+    padding-bottom: 190px !important;
   }
   .ms-live-stickyhead {
     position: sticky;
@@ -378,7 +419,7 @@ body {
   .ms-live-scroll {
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    padding-top: 8px;
+    padding-top: 8px !important;
     padding-bottom: 100px;
   }
   .ms-credit-btn {
@@ -388,6 +429,43 @@ body {
     border: none;
     padding: 8px 14px;
     font-weight: 800;
+  }
+  .ms-pay-card {
+    padding: 12px !important;
+    margin: 10px 0 !important;
+  }
+  .ms-pay-amount {
+    font-size: 22px !important;
+    line-height: 1.1;
+  }
+  .ms-pay-meta {
+    font-size: 13px !important;
+    opacity: 0.8;
+  }
+  .ms-pay-action {
+    min-width: 110px;
+  }
+  .ms-pay-badge {
+    display: none !important;
+  }
+  .ms-bottom-actions {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(86px + env(safe-area-inset-bottom));
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(10px);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12);
+  }
+  .ms-endshift-header {
+    display: none !important;
   }
 }
 
@@ -406,7 +484,7 @@ body {
     display: none;
   }
   .ms-content {
-    padding-bottom: 90px !important;
+    padding-bottom: 190px !important;
   }
   .ms-endshift-btn {
     background: #ff4d4f;
