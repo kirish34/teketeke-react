@@ -113,6 +113,9 @@ const MatatuStaffDashboard = () => {
   const [endShiftBusy, setEndShiftBusy] = useState(false)
   const holdIntervalRef = useRef<number | null>(null)
   const holdStartRef = useRef<number | null>(null)
+  const appbarRef = useRef<HTMLDivElement | null>(null)
+  const bottomNavRef = useRef<HTMLDivElement | null>(null)
+  const [liveHeight, setLiveHeight] = useState<number | null>(null)
 
   const fetchJson = useCallback(<T,>(path: string) => api<T>(path, { token }), [token])
 
@@ -252,6 +255,42 @@ const MatatuStaffDashboard = () => {
     mq?.addEventListener("change", handler)
     return () => mq?.removeEventListener("change", handler)
   }, [])
+
+  const recomputeLiveHeight = useCallback(() => {
+    if (!isMobile) {
+      setLiveHeight(null)
+      return
+    }
+    const viewportH = typeof window !== "undefined"
+      ? (window.visualViewport?.height ?? window.innerHeight)
+      : null
+    if (!viewportH) {
+      setLiveHeight(null)
+      return
+    }
+    const headerH = appbarRef.current?.getBoundingClientRect().height ?? 0
+    const navH = bottomNavRef.current?.getBoundingClientRect().height ?? 0
+    const buffer = 32 // small padding/margins
+    const h = Math.max(240, Math.floor(viewportH - headerH - navH - buffer))
+    setLiveHeight(h)
+  }, [isMobile])
+
+  useEffect(() => {
+    recomputeLiveHeight()
+  }, [recomputeLiveHeight, activeTab, livePays.length, isMobile])
+
+  useEffect(() => {
+    const resizeHandler = () => recomputeLiveHeight()
+    window.addEventListener("resize", resizeHandler)
+    window.addEventListener("orientationchange", resizeHandler)
+    const vv = window.visualViewport
+    vv?.addEventListener("resize", resizeHandler)
+    return () => {
+      window.removeEventListener("resize", resizeHandler)
+      window.removeEventListener("orientationchange", resizeHandler)
+      vv?.removeEventListener("resize", resizeHandler)
+    }
+  }, [recomputeLiveHeight])
 
   useEffect(() => {
     if (!matatuId || !user?.id) {
@@ -840,7 +879,7 @@ const MatatuStaffDashboard = () => {
   )
 
   const appbar = (
-    <div className="ms-appbar">
+    <div className="ms-appbar" ref={appbarRef}>
       <div className="ms-appbar-row">
         <div className="ms-appbar-left">
           <div className="ms-appbar-title">MATATU STAFF</div>
@@ -1030,7 +1069,7 @@ const MatatuStaffDashboard = () => {
       </nav>
 
       {isMobile ? (
-        <nav className="bottom-nav" aria-label="Matatu staff mobile nav">
+        <nav className="bottom-nav" aria-label="Matatu staff mobile nav" ref={bottomNavRef}>
           {[
             { id: "live_payments", label: "Live" },
             { id: "trips", label: "Trips" },
@@ -1050,7 +1089,10 @@ const MatatuStaffDashboard = () => {
       ) : null}
 
       {activeTab === "live_payments" ? (
-        <section className="card ms-live-card">
+        <section
+          className="card ms-live-card"
+          style={isMobile && liveHeight ? { height: liveHeight } : undefined}
+        >
           <div className="ms-live-stickyhead">
             <div className="ms-live-head">
               <div>
