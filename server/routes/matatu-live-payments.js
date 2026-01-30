@@ -261,6 +261,8 @@ router.get('/live-payments', async (req, res) => {
   const matatuId = (req.query.matatu_id || '').toString().trim();
   const tripId = (req.query.trip_id || '').toString().trim() || null;
   const shiftIdQuery = (req.query.shift_id || '').toString().trim() || null;
+  const confirmedParam = (req.query.confirmed || '0').toString().trim();
+  const confirmedFilter = confirmedParam === '1' ? 1 : 0;
   const limit = normalizeLimit(req.query.limit);
   const from = normalizeFrom(req.query.from) || new Date(Date.now() - 15 * 60 * 1000);
 
@@ -411,6 +413,11 @@ router.get('/live-payments', async (req, res) => {
       '(w_alias.matatu_id = $1 OR w_match.matatu_id = $1)',
       'COALESCE(p.trans_time, p.created_at) >= $2',
     ];
+    if (confirmedFilter === 1) {
+      where.push('p.confirmed_at IS NOT NULL');
+    } else {
+      where.push('p.confirmed_at IS NULL');
+    }
     if (tripId) {
       params.push(tripId);
       where.push(`p.trip_id = $${params.length}`);
@@ -435,6 +442,9 @@ router.get('/live-payments', async (req, res) => {
           p.match_status,
           p.trip_id,
           p.shift_id,
+          p.confirmed_at,
+          p.confirmed_by,
+          p.confirmed_shift_id,
           COALESCE(w_alias.wallet_kind, w_match.wallet_kind) AS wallet_kind,
           p.raw,
           p.raw_payload,
@@ -638,6 +648,88 @@ router.post('/shifts/close', async (req, res) => {
       error: err.message || 'Failed to close shift',
       request_id: req.requestId || null,
     });
+  }
+});
+
+router.post('/payments/:paymentId/confirm', async (req, res) => {
+  try {
+    const userId = req.user?.id || null;
+    if (!userId) return res.status(401).json({ ok: false, error: 'unauthorized', request_id: req.requestId || null });
+    const paymentId = (req.params.paymentId || '').toString().trim();
+    if (!paymentId) return res.status(400).json({ ok: false, error: 'payment_id required', request_id: req.requestId || null });
+
+    // resolve payment and matatu
+    const payRes = await pool.query(
+      `
+        SELECT p.id, p.account_reference, p.matched_wallet_id, p.matatu_id,
+               p.trip_id, p.shift_id,
+               p.confirmed_at, p.confirmed_by, p.confirmed_shift_id,
+               wa.matatu_id AS alias_matatu_id,
+               w_match.matatu_id AS matched_matatu_id
+        FROM mpesa_c2b_payments p
+        LEFT JOIN wallet_aliases wa
+          ON wa.alias = p.account_reference AND wa.is_active = true
+        LEFT JOIN wallets w_match
+          ON w_match.id = p.matched_wallet_id
+        WHERE p.id = $1
+        LIMIT 1
+      `,
+      [paymentId],
+    );
+    const pay = payRes.rows[0] || null;
+    if (!pay) return res.status(404).json({ ok: false, error: 'payment not found', request_id: req.requestId || null });
+
+    const matatuIdResolved =
+      pay.matatu_id ||
+      pay.alias_matatu_id ||
+      pay.matched_matatu_id ||
+      null;
+
+    if (!matatuIdResolved) {
+      return res.status(400).json({ ok: false, error: 'payment not linked to matatu', request_id: req.requestId || null });
+    }
+
+    const staffAccess = await resolveMatatuStaffAccess(userId, matatuIdResolved, null);
+    if (!staffAccess.allowed) {
+      return res.status(403).json({
+        ok: false,
+        error: 'forbidden',
+        code: 'MATATU_ACCESS_DENIED',
+        request_id: req.requestId || null,
+      });
+    }
+
+    const activeShiftId = await resolveActiveShiftIdForMatatu(matatuIdResolved, userId);
+    if (!activeShiftId) {
+      return res.status(403).json({
+        ok: false,
+        error: 'shift required',
+        code: 'SHIFT_REQUIRED',
+        request_id: req.requestId || null,
+      });
+    }
+
+    await pool.query(
+      `
+        UPDATE mpesa_c2b_payments
+        SET confirmed_at = COALESCE(confirmed_at, now()),
+            confirmed_by = COALESCE(confirmed_by, $2),
+            confirmed_shift_id = COALESCE(confirmed_shift_id, $3),
+            shift_id = COALESCE(shift_id, $3)
+        WHERE id = $1
+      `,
+      [paymentId, userId, activeShiftId],
+    );
+
+    return res.json({
+      ok: true,
+      payment_id: paymentId,
+      confirmed_at: new Date().toISOString(),
+      shift_id: activeShiftId,
+      request_id: req.requestId || null,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message || 'Failed to confirm payment', request_id: req.requestId || null });
   }
 });
 

@@ -339,6 +339,23 @@ body {
     gap: 10px;
     flex-wrap: wrap;
   }
+  .ms-live-subtabs {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+  }
+  .ms-live-subtab {
+    border: 1px solid #0ea5e9;
+    background: #e0f2fe;
+    color: #0f172a;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-weight: 700;
+  }
+  .ms-live-subtab.active {
+    background: #0ea5e9;
+    color: #f8fafc;
+  }
   .ms-live-sub {
     display: none;
   }
@@ -363,6 +380,27 @@ body {
     -webkit-overflow-scrolling: touch;
     padding-top: 8px;
     padding-bottom: 100px;
+  }
+  .ms-swipe-wrap {
+    position: relative;
+    overflow: hidden;
+    border-radius: 16px;
+  }
+  .ms-swipe-bg {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    padding-right: 14px;
+    font-weight: 900;
+    color: #fff;
+    background: linear-gradient(90deg, #16a34a, #22c55e);
+  }
+  .ms-swipe-card {
+    position: relative;
+    background: #fff;
+    transition: transform 120ms ease;
   }
 }
 

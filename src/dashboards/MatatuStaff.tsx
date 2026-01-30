@@ -116,6 +116,11 @@ const MatatuStaffDashboard = () => {
   const appbarRef = useRef<HTMLDivElement | null>(null)
   const bottomNavRef = useRef<HTMLDivElement | null>(null)
   const [liveHeight, setLiveHeight] = useState<number | null>(null)
+  const [liveSubTab, setLiveSubTab] = useState<"live" | "confirmed">("live")
+  const [confirmedPays, setConfirmedPays] = useState<Tx[]>([])
+  const [confirmedLoading, setConfirmedLoading] = useState(false)
+  const [confirmedError, setConfirmedError] = useState<string | null>(null)
+  const [dragX, setDragX] = useState<Record<string, number>>({})
 
   const fetchJson = useCallback(<T,>(path: string) => api<T>(path, { token }), [token])
 
@@ -277,7 +282,7 @@ const MatatuStaffDashboard = () => {
 
   useEffect(() => {
     recomputeLiveHeight()
-  }, [recomputeLiveHeight, activeTab, livePays.length, isMobile])
+  }, [recomputeLiveHeight, activeTab, livePays.length, confirmedPays.length, isMobile])
 
   useEffect(() => {
     const resizeHandler = () => recomputeLiveHeight()
@@ -291,6 +296,15 @@ const MatatuStaffDashboard = () => {
       vv?.removeEventListener("resize", resizeHandler)
     }
   }, [recomputeLiveHeight])
+
+  useEffect(() => {
+    if (activeTab !== "live_payments" || !activeShift) return
+    if (liveSubTab === "confirmed") {
+      void loadLivePayments(false, true)
+    } else {
+      void loadLivePayments()
+    }
+  }, [activeTab, activeShift, liveSubTab, loadLivePayments])
 
   useEffect(() => {
     if (!matatuId || !user?.id) {
@@ -430,72 +444,120 @@ const MatatuStaffDashboard = () => {
     }
   }, [activeShift, authFetch, matatuId])
 
-  const loadLivePayments = useCallback(async (silent?: boolean) => {
-    if (!matatuId) {
-      setLivePays([])
-      setLivePaysError("No matatu assigned found for this account. Contact SACCO admin.")
-      return
-    }
-    if (shiftLoaded && !activeShift) {
-      setLivePays([])
-      setLivePaysError("No active shift. Start a shift to view live payments.")
-      return
-    }
-    if (!silent) setLivePaysLoading(true)
-    setLivePaysError(null)
-    try {
-      const params = new URLSearchParams()
-      params.set("matatu_id", matatuId)
-      params.set("limit", "50")
-      if (trip?.id) params.set("trip_id", trip.id)
-      const res = await authFetch(`/api/matatu/live-payments?${params.toString()}`, {
-        headers: { Accept: "application/json" },
-      })
-      if (!res.ok) {
-        let msg = "Failed to load live payments"
-        try {
-          const body = await res.json().catch(() => ({}))
-          if (res.status === 403 && (body?.code === "MATATU_ACCESS_DENIED" || body?.error === "forbidden")) {
-            msg = "No matatu assigned found for this account. Contact SACCO admin."
-          } else if (body?.code === "SHIFT_REQUIRED") {
-            msg = "No active shift. Start a shift to view live payments."
-          } else if (body?.error) {
-            msg = body.error
-          }
-        } catch {
-          const text = await res.text().catch(() => "")
-          msg = text || msg
-        }
-        setLivePaysError(msg)
+  const loadLivePayments = useCallback(
+    async (silent?: boolean, confirmed = false) => {
+      if (!matatuId) {
         setLivePays([])
+        setConfirmedPays([])
+        setLivePaysError("No matatu assigned found for this account. Contact SACCO admin.")
         return
       }
-      const data = await res.json().catch(() => ({}))
-      const payments: Tx[] = data?.items || data?.payments || []
-      let filtered = payments
-      if (trip) {
-        const startMs = trip.started_at ? new Date(trip.started_at).getTime() : null
-        const endMs = (trip.ended_at ? new Date(trip.ended_at) : new Date()).getTime()
-        filtered = payments.filter((p) => {
-          const tripId = (p as any)?.trip_id
-          if (tripId && trip?.id) {
-            return String(tripId) === String(trip.id)
-          }
-          const t = p.created_at ? new Date(p.created_at).getTime() : null
-          if (!startMs || !t) return false
-          return t >= startMs && t <= endMs
-        })
-      } else {
-        filtered = []
+      if (shiftLoaded && !activeShift) {
+        setLivePays([])
+        setConfirmedPays([])
+        setLivePaysError("No active shift. Start a shift to view live payments.")
+        return
       }
-      setLivePays(filtered)
-    } catch (err) {
-      setLivePaysError(err instanceof Error ? err.message : "Failed to load live payments")
-      setLivePays([])
-    } finally {
-      if (!silent) setLivePaysLoading(false)
-    }
-  }, [activeShift, authFetch, matatuId, shiftLoaded, trip])
+      if (confirmed) {
+        setConfirmedLoading(!silent)
+        setConfirmedError(null)
+      } else if (!silent) {
+        setLivePaysLoading(true)
+        setLivePaysError(null)
+      }
+      try {
+        const params = new URLSearchParams()
+        params.set("matatu_id", matatuId)
+        params.set("limit", "50")
+        params.set("confirmed", confirmed ? "1" : "0")
+        if (trip?.id) params.set("trip_id", trip.id)
+        const res = await authFetch(`/api/matatu/live-payments?${params.toString()}`, {
+          headers: { Accept: "application/json" },
+        })
+        if (!res.ok) {
+          let msg = "Failed to load live payments"
+          try {
+            const body = await res.json().catch(() => ({}))
+            if (res.status === 403 && (body?.code === "MATATU_ACCESS_DENIED" || body?.error === "forbidden")) {
+              msg = "No matatu assigned found for this account. Contact SACCO admin."
+            } else if (body?.code === "SHIFT_REQUIRED") {
+              msg = "No active shift. Start a shift to view live payments."
+            } else if (body?.error) {
+              msg = body.error
+            }
+          } catch {
+            const text = await res.text().catch(() => "")
+            msg = text || msg
+          }
+          if (confirmed) {
+            setConfirmedError(msg)
+            setConfirmedPays([])
+          } else {
+            setLivePaysError(msg)
+            setLivePays([])
+          }
+          return
+        }
+        const data = await res.json().catch(() => ({}))
+        const payments: Tx[] = data?.items || data?.payments || []
+        let filtered = payments
+        if (trip) {
+          const startMs = trip.started_at ? new Date(trip.started_at).getTime() : null
+          const endMs = (trip.ended_at ? new Date(trip.ended_at) : new Date()).getTime()
+          filtered = payments.filter((p) => {
+            const tripId = (p as any)?.trip_id
+            if (tripId && trip?.id) {
+              return String(tripId) === String(trip.id)
+            }
+            const t = p.created_at ? new Date(p.created_at).getTime() : null
+            if (!startMs || !t) return false
+            return t >= startMs && t <= endMs
+          })
+        } else {
+          filtered = []
+        }
+        if (confirmed) setConfirmedPays(filtered)
+        else setLivePays(filtered)
+      } catch (err) {
+        if (confirmed) {
+          setConfirmedError(err instanceof Error ? err.message : "Failed to load confirmed payments")
+          setConfirmedPays([])
+        } else {
+          setLivePaysError(err instanceof Error ? err.message : "Failed to load live payments")
+          setLivePays([])
+        }
+      } finally {
+        if (confirmed) setConfirmedLoading(false)
+        else if (!silent) setLivePaysLoading(false)
+      }
+    },
+    [activeShift, authFetch, matatuId, shiftLoaded, trip],
+  )
+
+  const confirmPayment = useCallback(
+    async (paymentId: string) => {
+      if (!paymentId) return
+      const target = livePays.find((p) => (p.id || p.created_at) === paymentId)
+      if (!target) return
+      setLivePays((prev) => prev.filter((p) => (p.id || p.created_at) !== paymentId))
+      setConfirmedPays((prev) => [target, ...prev])
+      try {
+        const res = await authFetch(`/api/matatu/payments/${encodeURIComponent(paymentId)}/confirm`, {
+          method: "POST",
+          headers: { Accept: "application/json" },
+        })
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          throw new Error(data?.error || res.statusText || "Confirm failed")
+        }
+      } catch (err) {
+        setConfirmedPays((prev) => prev.filter((p) => (p.id || p.created_at) !== paymentId))
+        setLivePays((prev) => [target, ...prev])
+        setLivePaysError(err instanceof Error ? err.message : "Confirm failed")
+      }
+    },
+    [authFetch, livePays],
+  )
 
   const loadActiveShift = useCallback(async () => {
     if (!matatuId) {
@@ -608,13 +670,15 @@ const MatatuStaffDashboard = () => {
   useEffect(() => {
     let id: number | null = null
     if (activeTab === "live_payments" && activeShift) {
-      void loadLivePayments()
-      id = window.setInterval(() => void loadLivePayments(true), 3000)
+      void loadLivePayments(false, liveSubTab === "confirmed")
+      if (liveSubTab === "live") {
+        id = window.setInterval(() => void loadLivePayments(true, false), 3000)
+      }
     }
     return () => {
       if (id) window.clearInterval(id)
     }
-  }, [activeShift, activeTab, loadLivePayments])
+  }, [activeShift, activeTab, liveSubTab, loadLivePayments])
 
   useEffect(() => {
     void loadActiveShift()
@@ -1110,6 +1174,21 @@ const MatatuStaffDashboard = () => {
                 {shiftError && !livePaysError ? <span className="err small">{shiftError}</span> : null}
               </div>
             </div>
+            <div className="ms-live-subtabs">
+              {[
+                { id: "live", label: "Live" },
+                { id: "confirmed", label: "Confirmed" },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`ms-live-subtab${liveSubTab === t.id ? " active" : ""}`}
+                  onClick={() => setLiveSubTab(t.id as typeof liveSubTab)}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="ms-live-scroll">
             {!matatuId ? (
@@ -1132,17 +1211,24 @@ const MatatuStaffDashboard = () => {
                           <th>Amount</th>
                           <th>Ref</th>
                           <th>Status</th>
+                          {liveSubTab === "live" ? <th>Action</th> : null}
                         </tr>
                       </thead>
                       <tbody>
-                        {livePays.length === 0 ? (
+                        {(liveSubTab === "live" ? livePays : confirmedPays).length === 0 ? (
                           <tr>
-                            <td colSpan={5} className="muted">
-                              {livePaysLoading ? "Loading..." : "No payments yet."}
+                            <td colSpan={liveSubTab === "live" ? 6 : 5} className="muted">
+                              {liveSubTab === "live"
+                                ? livePaysLoading
+                                  ? "Loading..."
+                                  : "No payments yet."
+                                : confirmedLoading
+                                  ? "Loading..."
+                                  : "No confirmed payments."}
                             </td>
                           </tr>
                         ) : (
-                          livePays.map((p) => (
+                          (liveSubTab === "live" ? livePays : confirmedPays).map((p) => (
                             <tr key={p.id || p.created_at}>
                               <td>{p.created_at ? new Date(p.created_at).toLocaleTimeString("en-KE") : "-"}</td>
                               <td>
@@ -1156,6 +1242,17 @@ const MatatuStaffDashboard = () => {
                               <td>{fmtKES((p as any)?.amount || p.fare_amount_kes)}</td>
                               <td>{(p as any)?.account_ref || (p as any)?.reference || p.notes || "-"}</td>
                               <td>{(p as any)?.status || p.status || ""}</td>
+                              {liveSubTab === "live" ? (
+                                <td>
+                                  <button
+                                    type="button"
+                                    className="btn ghost small"
+                                    onClick={() => void confirmPayment((p.id || p.created_at) as string)}
+                                  >
+                                    Confirm
+                                  </button>
+                                </td>
+                              ) : null}
                             </tr>
                           ))
                         )}
@@ -1164,10 +1261,18 @@ const MatatuStaffDashboard = () => {
                   </div>
                 ) : (
                   <div className="live-cards">
-                    {livePays.length === 0 ? (
-                      <div className="muted small">{livePaysLoading ? "Loading..." : "No payments yet."}</div>
+                    {(liveSubTab === "live" ? livePays : confirmedPays).length === 0 ? (
+                      <div className="muted small">
+                        {liveSubTab === "live"
+                          ? livePaysLoading
+                            ? "Loading..."
+                            : "No payments yet."
+                          : confirmedLoading
+                            ? "Loading..."
+                            : "No confirmed payments."}
+                      </div>
                     ) : (
-                      livePays.map((p) => {
+                      (liveSubTab === "live" ? livePays : confirmedPays).map((p) => {
                         const payer =
                           (p as any)?.sender_name ||
                           (p as any)?.payer_name ||
@@ -1179,8 +1284,51 @@ const MatatuStaffDashboard = () => {
                         const status = (p as any)?.status || p.status || ""
                         const t = p.created_at ? new Date(p.created_at).toLocaleTimeString("en-KE") : "-"
                         const amt = fmtKES((p as any)?.amount || p.fare_amount_kes)
+                        const key = (p.id || p.created_at) as string
+                        if (liveSubTab === "live") {
+                          const dx = dragX[key] || 0
+                          return (
+                            <div key={key} className="ms-swipe-wrap">
+                              <div className="ms-swipe-bg">Confirm ✅</div>
+                              <div
+                                className="ms-swipe-card live-card"
+                                style={{ transform: `translateX(${dx}px)` }}
+                                onPointerDown={(e) => {
+                                  if (!isMobile) return
+                                  const startX = e.clientX
+                                  const handleMove = (ev: PointerEvent) => {
+                                    const delta = ev.clientX - startX
+                                    setDragX((prev) => ({ ...prev, [key]: Math.max(-140, Math.min(0, delta)) }))
+                                  }
+                                  const handleUp = (ev: PointerEvent) => {
+                                    const delta = ev.clientX - startX
+                                    const width = (e.currentTarget as HTMLElement).offsetWidth || 1
+                                    if (delta <= -0.35 * width) {
+                                      void confirmPayment(key)
+                                    }
+                                    setDragX((prev) => ({ ...prev, [key]: 0 }))
+                                    window.removeEventListener("pointermove", handleMove)
+                                    window.removeEventListener("pointerup", handleUp)
+                                    window.removeEventListener("pointercancel", handleUp)
+                                  }
+                                  window.addEventListener("pointermove", handleMove)
+                                  window.addEventListener("pointerup", handleUp)
+                                  window.addEventListener("pointercancel", handleUp)
+                                }}
+                              >
+                                <div className="live-card-amount">{amt}</div>
+                                <div className="live-card-line">
+                                  <span className="mono">{t}</span>
+                                  <span className={`status-chip ${status.toLowerCase()}`}>{status || " "}</span>
+                                </div>
+                                <div className="live-card-line mono">{payer}</div>
+                                <div className="live-card-line mono muted small">Ref: {ref}</div>
+                              </div>
+                            </div>
+                          )
+                        }
                         return (
-                          <div key={p.id || p.created_at} className="live-card">
+                          <div key={key} className="live-card">
                             <div className="live-card-amount">{amt}</div>
                             <div className="live-card-line">
                               <span className="mono">{t}</span>
