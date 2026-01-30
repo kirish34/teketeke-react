@@ -745,6 +745,92 @@ a {
   color: rgba(248, 250, 252, 0.84);
 }
 
+/* Role select - mobile forward */
+.role-shell {
+  min-height: 100vh;
+  padding: 18px 16px 36px;
+  background: #fff7ff;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.role-hero {
+  background: #0ea5e9;
+  color: #f8fafc;
+  border-radius: 28px;
+  padding: 22px 20px 24px;
+  box-shadow: 0 20px 60px rgba(14, 165, 233, 0.32);
+}
+.role-hero-kicker {
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  margin-bottom: 8px;
+}
+.role-hero-title {
+  font-size: 32px;
+  font-weight: 800;
+  margin-bottom: 10px;
+}
+.role-hero-sub {
+  font-size: 16px;
+  line-height: 1.4;
+  color: rgba(248, 250, 252, 0.92);
+}
+.role-list-card {
+  background: #ffffff;
+  border-radius: 26px;
+  padding: 18px 14px 22px;
+  box-shadow: 0 16px 48px rgba(15, 23, 42, 0.12);
+  border: 1px solid rgba(226, 232, 240, 0.7);
+}
+.role-list-title {
+  font-size: 24px;
+  font-weight: 800;
+  color: #0f172a;
+  margin: 6px 6px 14px;
+}
+.role-pill-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.role-pill {
+  display: block;
+  text-align: center;
+  background: #ffffff;
+  color: #0ea5e9;
+  font-size: 20px;
+  font-weight: 800;
+  text-decoration: none;
+  padding: 16px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(14, 165, 233, 0.2);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.12);
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+}
+.role-pill:active,
+.role-pill:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(14, 165, 233, 0.22);
+  border-color: rgba(14, 165, 233, 0.4);
+}
+
+@media (min-width: 641px) {
+  .role-shell {
+    background: linear-gradient(135deg, #0ea5e9 0%, #2563eb 35%, #0ea5e9 70%, #e0f2fe 100%);
+    padding: 32px;
+    align-items: center;
+  }
+  .role-hero {
+    max-width: 640px;
+    width: 100%;
+  }
+  .role-list-card {
+    max-width: 640px;
+    width: 100%;
+  }
+}
+
 .badge {
   background: rgba(255, 255, 255, 0.18);
   border: 1px solid rgba(255, 255, 255, 0.22);
