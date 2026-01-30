@@ -11,6 +11,16 @@ const qc = new QueryClient();
 
 const base = import.meta.env.VITE_APP_BASE || "/";
 
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker
+      .register("/sw.js")
+      .catch(() => {
+        /* noop */
+      });
+  });
+}
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={qc}>
