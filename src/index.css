@@ -495,7 +495,7 @@ body {
     padding-bottom: 190px !important;
   }
   .ms-endshift-btn {
-    background: #ff4d4f;
+    background: #ef4444;
     color: #fff;
     border: none;
     border-radius: 999px;
@@ -1101,6 +1101,30 @@ a {
   background: rgba(239, 68, 68, 0.12);
   border-color: rgba(239, 68, 68, 0.35);
   color: #991b1b;
+}
+
+.btn-start {
+  background: #19c37d;
+  color: #ffffff;
+  border: none;
+  border-radius: 999px;
+  padding: 10px 16px;
+  min-height: 44px;
+}
+.btn-start:hover {
+  background: #16a34a;
+}
+
+.btn-danger {
+  background: #ef4444;
+  color: #ffffff;
+  border: none;
+  border-radius: 999px;
+  padding: 10px 16px;
+  min-height: 44px;
+}
+.btn-danger:hover {
+  background: #dc2626;
 }
 
 .shell {

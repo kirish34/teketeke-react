@@ -960,7 +960,7 @@ useEffect(() => {
             {activeShift ? (
               <button
                 type="button"
-                className={`ms-endshift-btn ms-endshift-header${isHoldingEndShift ? " holding" : ""}`}
+                className={`btn btn-danger ms-endshift-btn ms-endshift-header${isHoldingEndShift ? " holding" : ""}`}
                 disabled={endShiftBusy}
                 onPointerDown={
                   isMobile
@@ -1072,7 +1072,7 @@ useEffect(() => {
           <span className="ms-chip">Shift on</span>
           <button
             type="button"
-            className={`ms-endshift-btn${isHoldingEndShift ? " holding" : ""}`}
+            className={`btn btn-danger ms-endshift-btn${isHoldingEndShift ? " holding" : ""}`}
             disabled={endShiftBusy}
             onPointerDown={() => {
               if (endShiftBusy || !activeShift) return
@@ -1125,7 +1125,7 @@ useEffect(() => {
               <button type="button" className="btn ghost" onClick={() => setShowEndShiftConfirm(false)}>
                 Cancel
               </button>
-              <button type="button" className="btn danger" disabled={shiftLoading} onClick={() => void confirmEndShift()}>
+              <button type="button" className="btn btn-danger" disabled={shiftLoading} onClick={() => void confirmEndShift()}>
                 {shiftLoading || endShiftBusy ? "Closing..." : "End shift"}
               </button>
             </div>
@@ -1398,7 +1398,7 @@ useEffect(() => {
           </div>
           <div className="row" style={{ marginTop: 10, gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             {!trip || trip?.status === "ENDED" ? (
-              <button type="button" className="btn primary" disabled={tripLoading || !matatuId} onClick={startTrip}>
+              <button type="button" className="btn btn-start" disabled={tripLoading || !matatuId} onClick={startTrip}>
                 {tripLoading ? "Starting..." : "Start Trip"}
               </button>
             ) : (
