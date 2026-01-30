@@ -941,7 +941,7 @@ useEffect(() => {
       </div>
       <div className="row" style={{ gap: 8, alignItems: "center" }}>
         <div className="badge-ghost">{heroRight}</div>
-        <button type="button" className="btn ghost" onClick={logout}>
+        <button type="button" className="btn btn-danger" onClick={logout}>
           Logout
         </button>
       </div>
@@ -1026,7 +1026,7 @@ useEffect(() => {
               {isMobile ? (isHoldingEndShift ? "Hold 3s…" : "End shift") : "End shift"}
             </button>
           ) : null}
-          <button type="button" className="btn ghost" onClick={logout}>
+          <button type="button" className="btn btn-danger" onClick={logout}>
             Logout
           </button>
         </div>
