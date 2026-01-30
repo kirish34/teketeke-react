@@ -1285,21 +1285,15 @@ useEffect(() => {
                             const t = p.created_at
                               ? new Date(p.created_at).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" })
                               : "-"
-                            const names =
-                              [
-                                (p as any)?.sender_name,
-                                (p as any)?.payer_name,
-                                (p as any)?.created_by_name,
-                              ]
-                                .filter(Boolean)
-                                .filter((v, i, arr) => arr.indexOf(v) === i)
-                                .join(" • ")
+                            const nameParts = [
+                              (p as any)?.sender_name,
+                              (p as any)?.payer_name,
+                              (p as any)?.created_by_name,
+                            ].filter(Boolean)
+                            const uniqueNames = nameParts.filter((v, i, arr) => arr.indexOf(v) === i)
+                            const nameDisplay = uniqueNames.slice(0, 2).join(" • ")
                             const msisdn = (p as any)?.payer_msisdn || p.msisdn || p.passenger_msisdn || null
-                            const identity =
-                              [names || null, msisdn]
-                                .filter(Boolean)
-                                .filter((v, i, arr) => arr.indexOf(v) === i)
-                                .join(" • ") || "-"
+                            const identity = nameDisplay || msisdn || "-"
                             const amt = fmtKES((p as any)?.amount || p.fare_amount_kes)
                             return (
                               <tr key={key}>
@@ -1345,21 +1339,15 @@ useEffect(() => {
                           : "-"
                         const amt = fmtKES((p as any)?.amount || p.fare_amount_kes)
                         const key = paymentKey(p)
-                        const names =
-                          [
-                            (p as any)?.sender_name,
-                            (p as any)?.payer_name,
-                            (p as any)?.created_by_name,
-                          ]
-                            .filter(Boolean)
-                            .filter((v, i, arr) => arr.indexOf(v) === i)
-                            .join(" • ")
+                        const nameParts = [
+                          (p as any)?.sender_name,
+                          (p as any)?.payer_name,
+                          (p as any)?.created_by_name,
+                        ].filter(Boolean)
+                        const uniqueNames = nameParts.filter((v, i, arr) => arr.indexOf(v) === i)
+                        const nameDisplay = uniqueNames.slice(0, 2).join(" • ")
                         const msisdn = (p as any)?.payer_msisdn || p.msisdn || p.passenger_msisdn || null
-                        const identity =
-                          [names || null, msisdn]
-                            .filter(Boolean)
-                            .filter((v, i, arr) => arr.indexOf(v) === i)
-                            .join(" • ") || "-"
+                        const identity = nameDisplay || msisdn || "-"
                         return (
                           <div key={key} className="live-card ms-pay-card">
                             <div className="ms-pay-main">
