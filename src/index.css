@@ -381,27 +381,6 @@ body {
     padding-top: 8px;
     padding-bottom: 100px;
   }
-  .ms-swipe-wrap {
-    position: relative;
-    overflow: hidden;
-    border-radius: 16px;
-  }
-  .ms-swipe-bg {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    padding-right: 14px;
-    font-weight: 900;
-    color: #fff;
-    background: linear-gradient(90deg, #16a34a, #22c55e);
-  }
-  .ms-swipe-card {
-    position: relative;
-    background: #fff;
-    transition: transform 120ms ease;
-  }
 }
 
 @media (max-width: 640px) {

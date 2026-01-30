@@ -120,7 +120,6 @@ const MatatuStaffDashboard = () => {
   const [confirmedPays, setConfirmedPays] = useState<Tx[]>([])
   const [confirmedLoading, setConfirmedLoading] = useState(false)
   const [confirmedError, setConfirmedError] = useState<string | null>(null)
-  const [dragX, setDragX] = useState<Record<string, number>>({})
 
   const fetchJson = useCallback(<T,>(path: string) => api<T>(path, { token }), [token])
 
@@ -1204,16 +1203,15 @@ useEffect(() => {
                 {!isMobile ? (
                   <div className="table-wrap" style={{ marginTop: 12 }}>
                     <table>
-                      <thead>
-                        <tr>
-                          <th>Time</th>
-                          <th>Payer</th>
-                          <th>Amount</th>
-                          <th>Ref</th>
-                          <th>Status</th>
-                          {liveSubTab === "live" ? <th>Action</th> : null}
-                        </tr>
-                      </thead>
+                    <thead>
+                      <tr>
+                        <th>Time</th>
+                        <th>Payer</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                        {liveSubTab === "live" ? <th>Action</th> : null}
+                      </tr>
+                    </thead>
                       <tbody>
                         {(liveSubTab === "live" ? livePays : confirmedPays).length === 0 ? (
                           <tr>
@@ -1230,17 +1228,26 @@ useEffect(() => {
                         ) : (
                           (liveSubTab === "live" ? livePays : confirmedPays).map((p) => (
                             <tr key={p.id || p.created_at}>
-                              <td>{p.created_at ? new Date(p.created_at).toLocaleTimeString("en-KE") : "-"}</td>
                               <td>
-                                {(p as any)?.sender_name ||
-                                  (p as any)?.payer_name ||
+                                {p.created_at
+                                  ? new Date(p.created_at).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" })
+                                  : "-"}
+                              </td>
+                              <td>
+                                {[
+                                  (p as any)?.sender_name,
+                                  (p as any)?.payer_name,
+                                  (p as any)?.created_by_name,
+                                ]
+                                  .filter(Boolean)
+                                  .filter((v, i, arr) => arr.indexOf(v) === i)
+                                  .join(" • ") ||
                                   (p as any)?.payer_msisdn ||
                                   p.msisdn ||
                                   p.passenger_msisdn ||
                                   "-"}
                               </td>
                               <td>{fmtKES((p as any)?.amount || p.fare_amount_kes)}</td>
-                              <td>{(p as any)?.account_ref || (p as any)?.reference || p.notes || "-"}</td>
                               <td>{(p as any)?.status || p.status || ""}</td>
                               {liveSubTab === "live" ? (
                                 <td>
@@ -1273,56 +1280,42 @@ useEffect(() => {
                       </div>
                     ) : (
                       (liveSubTab === "live" ? livePays : confirmedPays).map((p) => {
-                        const payer =
-                          (p as any)?.sender_name ||
-                          (p as any)?.payer_name ||
+                        const status = (p as any)?.status || p.status || ""
+                        const t = p.created_at
+                          ? new Date(p.created_at).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" })
+                          : "-"
+                        const amt = fmtKES((p as any)?.amount || p.fare_amount_kes)
+                        const key = (p.id || p.created_at) as string
+                        const names =
+                          [
+                            (p as any)?.sender_name,
+                            (p as any)?.payer_name,
+                            (p as any)?.created_by_name,
+                          ]
+                            .filter(Boolean)
+                            .filter((v, i, arr) => arr.indexOf(v) === i)
+                            .join(" • ") ||
                           (p as any)?.payer_msisdn ||
                           p.msisdn ||
                           p.passenger_msisdn ||
                           "-"
-                        const ref = (p as any)?.account_ref || (p as any)?.reference || p.notes || "-"
-                        const status = (p as any)?.status || p.status || ""
-                        const t = p.created_at ? new Date(p.created_at).toLocaleTimeString("en-KE") : "-"
-                        const amt = fmtKES((p as any)?.amount || p.fare_amount_kes)
-                        const key = (p.id || p.created_at) as string
                         if (liveSubTab === "live") {
-                          const dx = dragX[key] || 0
                           return (
-                            <div key={key} className="ms-swipe-wrap">
-                              <div className="ms-swipe-bg">Confirm ✅</div>
-                              <div
-                                className="ms-swipe-card live-card"
-                                style={{ transform: `translateX(${dx}px)` }}
-                                onPointerDown={(e) => {
-                                  if (!isMobile) return
-                                  const startX = e.clientX
-                                  const handleMove = (ev: PointerEvent) => {
-                                    const delta = ev.clientX - startX
-                                    setDragX((prev) => ({ ...prev, [key]: Math.max(-140, Math.min(0, delta)) }))
-                                  }
-                                  const handleUp = (ev: PointerEvent) => {
-                                    const delta = ev.clientX - startX
-                                    const width = (e.currentTarget as HTMLElement).offsetWidth || 1
-                                    if (delta <= -0.35 * width) {
-                                      void confirmPayment(key)
-                                    }
-                                    setDragX((prev) => ({ ...prev, [key]: 0 }))
-                                    window.removeEventListener("pointermove", handleMove)
-                                    window.removeEventListener("pointerup", handleUp)
-                                    window.removeEventListener("pointercancel", handleUp)
-                                  }
-                                  window.addEventListener("pointermove", handleMove)
-                                  window.addEventListener("pointerup", handleUp)
-                                  window.addEventListener("pointercancel", handleUp)
-                                }}
-                              >
-                                <div className="live-card-amount">{amt}</div>
-                                <div className="live-card-line">
-                                  <span className="mono">{t}</span>
-                                  <span className={`status-chip ${status.toLowerCase()}`}>{status || " "}</span>
-                                </div>
-                                <div className="live-card-line mono">{payer}</div>
-                                <div className="live-card-line mono muted small">Ref: {ref}</div>
+                            <div key={key} className="live-card">
+                              <div className="live-card-amount">{amt}</div>
+                              <div className="live-card-line">
+                                <span className="mono">{t}</span>
+                                <span className={`status-chip ${status.toLowerCase()}`}>{status || " "}</span>
+                              </div>
+                              <div className="live-card-line mono">{names}</div>
+                              <div className="live-card-actions">
+                                <button
+                                  type="button"
+                                  className="btn ghost small"
+                                  onClick={() => void confirmPayment(key)}
+                                >
+                                  Confirm
+                                </button>
                               </div>
                             </div>
                           )
@@ -1334,8 +1327,7 @@ useEffect(() => {
                               <span className="mono">{t}</span>
                               <span className={`status-chip ${status.toLowerCase()}`}>{status || " "}</span>
                             </div>
-                            <div className="live-card-line mono">{payer}</div>
-                            <div className="live-card-line mono muted small">Ref: {ref}</div>
+                            <div className="live-card-line mono">{names}</div>
                           </div>
                         )
                       })
