@@ -1103,6 +1103,38 @@ a {
   color: #991b1b;
 }
 
+/* Semantic action buttons */
+.btn-start {
+  background: #19c37d;
+  color: #ffffff;
+  border: none;
+  border-radius: 999px;
+  padding: 10px 16px;
+  min-height: 44px;
+}
+.btn-start:hover {
+  background: #16a34a;
+}
+
+.btn-danger {
+  background: #ef4444;
+  color: #ffffff;
+  border: none;
+  border-radius: 999px;
+  padding: 10px 16px;
+  min-height: 44px;
+}
+.btn-danger:hover {
+  background: #dc2626;
+}
+
+/* Ensure all End Shift buttons stay red/white */
+.ms-endshift-btn {
+  background: #ef4444;
+  color: #ffffff;
+  border: none;
+}
+
 .btn-start {
   background: #19c37d;
   color: #ffffff;
