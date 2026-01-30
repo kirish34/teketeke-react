@@ -1293,16 +1293,18 @@ useEffect(() => {
                               ]
                                 .filter(Boolean)
                                 .filter((v, i, arr) => arr.indexOf(v) === i)
-                                .join(" • ") ||
-                              (p as any)?.payer_msisdn ||
-                              p.msisdn ||
-                              p.passenger_msisdn ||
-                              "-"
+                                .join(" • ")
+                            const msisdn = (p as any)?.payer_msisdn || p.msisdn || p.passenger_msisdn || null
+                            const identity =
+                              [names || null, msisdn]
+                                .filter(Boolean)
+                                .filter((v, i, arr) => arr.indexOf(v) === i)
+                                .join(" • ") || "-"
                             const amt = fmtKES((p as any)?.amount || p.fare_amount_kes)
                             return (
                               <tr key={key}>
                                 <td>{t}</td>
-                                <td>{names}</td>
+                                <td>{identity}</td>
                                 <td>{amt}</td>
                                 {isLiveView ? (
                                   <td>
@@ -1351,17 +1353,19 @@ useEffect(() => {
                           ]
                             .filter(Boolean)
                             .filter((v, i, arr) => arr.indexOf(v) === i)
-                            .join(" • ") ||
-                          (p as any)?.payer_msisdn ||
-                          p.msisdn ||
-                          p.passenger_msisdn ||
-                          "-"
+                            .join(" • ")
+                        const msisdn = (p as any)?.payer_msisdn || p.msisdn || p.passenger_msisdn || null
+                        const identity =
+                          [names || null, msisdn]
+                            .filter(Boolean)
+                            .filter((v, i, arr) => arr.indexOf(v) === i)
+                            .join(" • ") || "-"
                         return (
                           <div key={key} className="live-card ms-pay-card">
                             <div className="ms-pay-main">
                               <div className="live-card-amount ms-pay-amount">{amt}</div>
                               <div className="ms-pay-meta">
-                                <span>{names}</span>
+                                <span>{identity}</span>
                                 <span className="ms-pay-sep">•</span>
                                 <span className="mono">{t}</span>
                               </div>
