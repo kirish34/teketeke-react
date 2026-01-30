@@ -1253,7 +1253,7 @@ useEffect(() => {
                                 <td>
                                   <button
                                     type="button"
-                                    className="btn ghost small"
+                                    className="btn ghost small ms-credit-btn"
                                     onClick={() => void confirmPayment((p.id || p.created_at) as string)}
                                   >
                                     Confirm
@@ -1311,7 +1311,7 @@ useEffect(() => {
                               <div className="live-card-actions">
                                 <button
                                   type="button"
-                                  className="btn ghost small"
+                                  className="btn ghost small ms-credit-btn"
                                   onClick={() => void confirmPayment(key)}
                                 >
                                   Confirm
