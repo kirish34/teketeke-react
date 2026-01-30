@@ -119,6 +119,7 @@ const MatatuStaffDashboard = () => {
   const [liveSubTab, setLiveSubTab] = useState<"live" | "confirmed">("live")
   const [confirmedPays, setConfirmedPays] = useState<Tx[]>([])
   const [confirmedLoading, setConfirmedLoading] = useState(false)
+  const [confirmedError, setConfirmedError] = useState<string | null>(null)
   const [dragX, setDragX] = useState<Record<string, number>>({})
 
   const fetchJson = useCallback(<T,>(path: string) => api<T>(path, { token }), [token])
@@ -1268,7 +1269,7 @@ useEffect(() => {
                             : "No payments yet."
                           : confirmedLoading
                             ? "Loading..."
-                            : "No confirmed payments."}
+                            : confirmedError || "No confirmed payments."}
                       </div>
                     ) : (
                       (liveSubTab === "live" ? livePays : confirmedPays).map((p) => {
