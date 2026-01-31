@@ -864,6 +864,21 @@ a {
   color: rgba(248, 250, 252, 0.92);
 }
 
+.ms-trip-view {
+  border: 1px solid #0ea5e9;
+  background: #0ea5e9;
+  color: #f8fafc;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.ms-trip-view:hover {
+  box-shadow: 0 8px 20px rgba(14, 165, 233, 0.25);
+}
+
 .tabs {
   width: min(1120px, 92vw);
   margin: 10px auto 0;

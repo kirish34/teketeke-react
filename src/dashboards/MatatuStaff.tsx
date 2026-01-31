@@ -1676,8 +1676,7 @@ useEffect(() => {
                           </div>
                           <button
                             type="button"
-                            className="badge"
-                            style={{ alignSelf: "flex-start" }}
+                            className="ms-trip-view"
                             onClick={() => setExpandedTripId(expanded ? null : (key as string))}
                           >
                             {expanded ? "Hide" : "View"}
