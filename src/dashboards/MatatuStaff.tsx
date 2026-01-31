@@ -1733,7 +1733,9 @@ useEffect(() => {
         )
       ) : null}
 
-      <div className="ms-attrib">A product of Sky Yalla Ltd</div>
+      <div className="ms-attrib">
+        A product of Sky Yalla Ltd · <a className="ms-attrib-link" href="/about">About</a>
+      </div>
 
     </DashboardShell>
   )
