@@ -1,36 +1,68 @@
 const pool = require('../db/pool');
 const { resolveActiveTripIdForMatatu } = require('./trip.service');
 
-async function getActiveShift(matatuId, staffUserId) {
-  if (!matatuId || !staffUserId) return null;
+async function getOpenShiftForMatatu(matatuId) {
+  if (!matatuId) return null;
   const { rows } = await pool.query(
     `
       SELECT *
       FROM matatu_shifts
       WHERE matatu_id = $1
-        AND staff_user_id = $2
         AND status = 'OPEN'
       ORDER BY opened_at DESC
       LIMIT 1
     `,
-    [matatuId, staffUserId],
+    [matatuId],
   );
   return rows[0] || null;
 }
 
+async function getActiveShift(matatuId, staffUserId) {
+  if (!matatuId) return null;
+  if (staffUserId) {
+    const { rows } = await pool.query(
+      `
+        SELECT *
+        FROM matatu_shifts
+        WHERE matatu_id = $1
+          AND staff_user_id = $2
+          AND status = 'OPEN'
+        ORDER BY opened_at DESC
+        LIMIT 1
+      `,
+      [matatuId, staffUserId],
+    );
+    if (rows[0]) return rows[0];
+  }
+  return getOpenShiftForMatatu(matatuId);
+}
+
+async function openShiftForMatatu(matatuId, actorUserId = null, openedBy = 'USER', autoOpened = false, { staffUserId = null } = {}) {
+  if (!matatuId) throw new Error('matatu_id required');
+  const staffId = staffUserId !== null ? staffUserId : actorUserId || null;
+  try {
+    const { rows } = await pool.query(
+      `
+        INSERT INTO matatu_shifts (matatu_id, staff_user_id, opened_by_user_id, opened_by, auto_opened, opening_balance)
+        VALUES ($1, $2, $3, $4, $5, 0)
+        RETURNING *
+      `,
+      [matatuId, staffId, actorUserId || staffId, openedBy || 'USER', Boolean(autoOpened)],
+    );
+    return rows[0] || null;
+  } catch (err) {
+    const isConflict = err?.code === '23505' || /uniq_open_shift_per_matatu/i.test(err?.detail || '');
+    if (isConflict) {
+      const existing = await getOpenShiftForMatatu(matatuId);
+      if (existing) return existing;
+    }
+    throw err;
+  }
+}
+
 async function openShift(matatuId, staffUserId) {
   if (!matatuId || !staffUserId) throw new Error('matatu_id and staff_user_id required');
-  const existing = await getActiveShift(matatuId, staffUserId);
-  if (existing) return existing;
-  const { rows } = await pool.query(
-    `
-      INSERT INTO matatu_shifts (matatu_id, staff_user_id, opening_balance)
-      VALUES ($1, $2, 0)
-      RETURNING *
-    `,
-    [matatuId, staffUserId],
-  );
-  return rows[0] || null;
+  return openShiftForMatatu(matatuId, staffUserId, 'USER', false, { staffUserId });
 }
 
 async function closeShift(shiftId, actorUserId) {
@@ -99,7 +131,9 @@ async function resolveActiveShiftIdForMatatu(matatuId, staffUserId = null) {
 
 module.exports = {
   getActiveShift,
+  getOpenShiftForMatatu,
   openShift,
+  openShiftForMatatu,
   closeShift,
   resolveActiveShiftIdForMatatu,
 };

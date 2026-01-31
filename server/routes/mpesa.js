@@ -5,8 +5,8 @@ const router = express.Router();
 const pool = require('../db/pool');
 const { creditFareWithFeesByWalletId, debitWallet } = require('../wallet/wallet.service');
 const { creditWalletWithLedger } = require('../services/walletLedger.service');
-const { resolveActiveTripIdForMatatu } = require('../services/trip.service');
-const { resolveActiveShiftIdForMatatu } = require('../services/shift.service');
+const { resolveActiveTripIdForMatatu, getInProgressTripForMatatu, startTripForMatatu } = require('../services/trip.service');
+const { resolveActiveShiftIdForMatatu, getOpenShiftForMatatu, openShiftForMatatu } = require('../services/shift.service');
 const { normalizeRef, resolveWalletByRef } = require('../wallet/wallet.aliases');
 const { validatePaybillCode } = require('../wallet/paybillCode.util');
 const { applyRiskRules } = require('../mpesa/c2bRisk');
@@ -337,8 +337,18 @@ router.post('/stk/callback', async (req, res) => {
 
     const walletMeta = await client.query(`SELECT matatu_id FROM wallets WHERE id = $1 LIMIT 1`, [walletId]);
     const matatuIdForTrip = walletMeta.rows[0]?.matatu_id || null;
-    const tripId = await resolveActiveTripIdForMatatu(matatuIdForTrip);
-    const shiftId = await resolveActiveShiftIdForMatatu(matatuIdForTrip);
+
+    let shiftRow = matatuIdForTrip ? await getOpenShiftForMatatu(matatuIdForTrip) : null;
+    if (!shiftRow && matatuIdForTrip) {
+      shiftRow = await openShiftForMatatu(matatuIdForTrip, null, 'SYSTEM', true);
+    }
+    let tripRow = matatuIdForTrip ? await getInProgressTripForMatatu(matatuIdForTrip) : null;
+    if (!tripRow && matatuIdForTrip) {
+      tripRow = await startTripForMatatu(matatuIdForTrip, shiftRow?.id || null, null, 'SYSTEM', true);
+    }
+
+    const tripId = tripRow?.id || null;
+    const shiftId = shiftRow?.id || null;
 
     const ledgerResult = await creditWalletWithLedger({
       walletId,
@@ -1505,7 +1515,34 @@ async function handleC2BCallback(req, res) {
     const sourceRef = mpesa_receipt || String(paymentId);
     const walletMetaRes = await pool.query(`SELECT matatu_id FROM wallets WHERE id = $1 LIMIT 1`, [walletId]);
     const matatuIdForTrip = walletMetaRes.rows[0]?.matatu_id || null;
-    const tripId = await resolveActiveTripIdForMatatu(matatuIdForTrip);
+
+    let shiftRow = matatuIdForTrip ? await getOpenShiftForMatatu(matatuIdForTrip) : null;
+    if (!shiftRow && matatuIdForTrip) {
+      shiftRow = await openShiftForMatatu(matatuIdForTrip, null, 'SYSTEM', true);
+    }
+    let tripRow = matatuIdForTrip ? await getInProgressTripForMatatu(matatuIdForTrip) : null;
+    if (!tripRow && matatuIdForTrip) {
+      tripRow = await startTripForMatatu(matatuIdForTrip, shiftRow?.id || null, null, 'SYSTEM', true);
+    }
+
+    const tripId = tripRow?.id || null;
+    const shiftId = shiftRow?.id || null;
+
+    if (paymentId) {
+      await pool.query(
+        `
+          UPDATE mpesa_c2b_payments
+          SET matatu_id = COALESCE(matatu_id, $2),
+              shift_id = COALESCE(shift_id, $3),
+              trip_id = COALESCE(trip_id, $4),
+              auto_assigned = auto_assigned OR true,
+              assigned_at = COALESCE(assigned_at, now())
+          WHERE id = $1
+        `,
+        [paymentId, matatuIdForTrip, shiftId, tripId],
+      );
+    }
+
     const existingTx = await pool.query(
       `
         SELECT id
@@ -1517,8 +1554,17 @@ async function handleC2BCallback(req, res) {
     );
     if (existingTx.rows.length) {
       await pool.query(
-        `UPDATE mpesa_c2b_payments SET status = 'CREDITED', trip_id = COALESCE(trip_id, $2), shift_id = COALESCE(shift_id, $3) WHERE id = $1 AND status = 'RECEIVED'`,
-        [paymentId, tripId || null, shiftId || null]
+        `
+          UPDATE mpesa_c2b_payments
+          SET status = 'CREDITED',
+              matatu_id = COALESCE(matatu_id, $2),
+              trip_id = COALESCE(trip_id, $3),
+              shift_id = COALESCE(shift_id, $4),
+              auto_assigned = auto_assigned OR true,
+              assigned_at = COALESCE(assigned_at, now())
+          WHERE id = $1 AND status = 'RECEIVED'
+        `,
+        [paymentId, matatuIdForTrip, tripId || null, shiftId || null]
       );
       try {
         await applyRiskRules({ paymentId, reasonCodes: ['IDEMPOTENT_REPLAY'] });
@@ -1556,10 +1602,21 @@ async function handleC2BCallback(req, res) {
         provider: 'mpesa',
         providerRef: mpesa_receipt || body?.TransID || sourceRef || null,
         client,
+        tripId,
+        shiftId,
       });
       const updated = await client.query(
-        `UPDATE mpesa_c2b_payments SET status = 'CREDITED', trip_id = COALESCE(trip_id, $2), shift_id = COALESCE(shift_id, $3) WHERE id = $1 AND status = 'RECEIVED'`,
-        [paymentId, result.tripId || tripId || null, result.shiftId || shiftId || null]
+        `
+          UPDATE mpesa_c2b_payments
+          SET status = 'CREDITED',
+              matatu_id = COALESCE(matatu_id, $2),
+              trip_id = COALESCE(trip_id, $3),
+              shift_id = COALESCE(shift_id, $4),
+              auto_assigned = auto_assigned OR true,
+              assigned_at = COALESCE(assigned_at, now())
+          WHERE id = $1 AND status = 'RECEIVED'
+        `,
+        [paymentId, matatuIdForTrip, result.tripId || tripId || null, result.shiftId || shiftId || null]
       );
       if (!updated.rowCount) {
         await client.query('ROLLBACK');

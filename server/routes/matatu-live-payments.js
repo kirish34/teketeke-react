@@ -4,7 +4,8 @@ const { requireUser } = require('../middleware/auth');
 const { resolveSaccoAuthContext } = require('../services/saccoAuth.service');
 const { ensureAppUserContextFromUserRoles } = require('../services/appUserContext.service');
 const { extractSenderNameFromRaw } = require('../utils/msisdn');
-const { resolveActiveShiftIdForMatatu, getActiveShift, openShift, closeShift } = require('../services/shift.service');
+const { resolveActiveShiftIdForMatatu, getActiveShift, openShift, closeShift, openShiftForMatatu } = require('../services/shift.service');
+const { resolveActiveTripIdForMatatu, startTripForMatatu } = require('../services/trip.service');
 
 const router = express.Router();
 
@@ -261,8 +262,11 @@ router.get('/live-payments', async (req, res) => {
   const matatuId = (req.query.matatu_id || '').toString().trim();
   const tripId = (req.query.trip_id || '').toString().trim() || null;
   const shiftIdQuery = (req.query.shift_id || '').toString().trim() || null;
-  const confirmedParam = (req.query.confirmed || '0').toString().trim();
-  const confirmedFilter = confirmedParam === '1' ? 1 : 0;
+  const bucketParam = (req.query.bucket || '').toString().trim().toLowerCase();
+  const confirmedParam = (req.query.confirmed || '').toString().trim();
+  let bucket = ['live', 'confirmed', 'unassigned'].includes(bucketParam) ? bucketParam : null;
+  if (!bucket && confirmedParam === '1') bucket = 'confirmed';
+  if (!bucket) bucket = 'live';
   const limit = normalizeLimit(req.query.limit);
   const from = normalizeFrom(req.query.from) || new Date(Date.now() - 15 * 60 * 1000);
 
@@ -378,15 +382,6 @@ router.get('/live-payments', async (req, res) => {
     let shiftFilterId = null;
     if ([ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx?.role)) {
       shiftFilterId = await resolveActiveShiftIdForMatatu(matatu.id, req.user?.id);
-      if (!shiftFilterId) {
-        return res.status(403).json({
-          ok: false,
-          error: 'shift required',
-          code: 'SHIFT_REQUIRED',
-          request_id: req.requestId || null,
-          details: { matatu_id: matatu.id, user_id: req.user?.id || null },
-        });
-      }
     } else if (shiftIdQuery) {
       const shiftRes = await pool.query(`SELECT id, matatu_id FROM matatu_shifts WHERE id = $1 LIMIT 1`, [shiftIdQuery]);
       const shiftRow = shiftRes.rows[0] || null;
@@ -413,19 +408,38 @@ router.get('/live-payments', async (req, res) => {
       '(w_alias.matatu_id = $1 OR w_match.matatu_id = $1)',
       'COALESCE(p.trans_time, p.created_at) >= $2',
     ];
-    if (confirmedFilter === 1) {
+
+    if (bucket === 'confirmed') {
       where.push('p.confirmed_at IS NOT NULL');
-    } else {
+      if (shiftFilterId) {
+        params.push(shiftFilterId);
+        where.push(`(p.confirmed_shift_id = $${params.length} OR p.shift_id = $${params.length})`);
+      }
+    } else if (bucket === 'unassigned') {
       where.push('p.confirmed_at IS NULL');
+      where.push('(p.shift_id IS NULL OR p.trip_id IS NULL)');
+    } else {
+      // live
+      where.push('p.confirmed_at IS NULL');
+      // Recommended: scope to current in-progress trip for staff
+      if (!tripId && [ROLES.MATATU_STAFF, ROLES.DRIVER].includes(userCtx?.role)) {
+        const currentTripId = await resolveActiveTripIdForMatatu(matatu.id);
+        if (currentTripId) {
+          params.push(currentTripId);
+          where.push(`p.trip_id = $${params.length}`);
+        }
+      }
     }
+
     if (tripId) {
       params.push(tripId);
       where.push(`p.trip_id = $${params.length}`);
     }
-    if (shiftFilterId) {
+    if (shiftFilterId && bucket !== 'confirmed') {
       params.push(shiftFilterId);
       where.push(`p.shift_id = $${params.length}`);
     }
+
     params.push(limit);
     const { rows } = await pool.query(
       `
@@ -483,7 +497,8 @@ router.get('/live-payments', async (req, res) => {
       ok: true,
       matatu_id: matatuId,
       from: from.toISOString(),
-      payments,
+      items: payments,
+      payments, // legacy key for existing clients
       request_id: req.requestId || null,
     });
   } catch (err) {
@@ -698,13 +713,20 @@ router.post('/payments/:paymentId/confirm', async (req, res) => {
       });
     }
 
-    const activeShiftId = await resolveActiveShiftIdForMatatu(matatuIdResolved, userId);
+    let activeShiftId = await resolveActiveShiftIdForMatatu(matatuIdResolved, userId);
     if (!activeShiftId) {
-      return res.status(403).json({
-        ok: false,
-        error: 'shift required',
-        code: 'SHIFT_REQUIRED',
+      const opened = await openShiftForMatatu(matatuIdResolved, null, 'SYSTEM', true);
+      activeShiftId = opened?.id || null;
+    }
+
+    if (pay.confirmed_at) {
+      return res.json({
+        ok: true,
+        payment_id: paymentId,
+        confirmed_at: pay.confirmed_at,
+        shift_id: pay.confirmed_shift_id || activeShiftId || null,
         request_id: req.requestId || null,
+        already_confirmed: true,
       });
     }
 
@@ -729,6 +751,123 @@ router.post('/payments/:paymentId/confirm', async (req, res) => {
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message || 'Failed to confirm payment', request_id: req.requestId || null });
+  }
+});
+
+router.post('/payments/:paymentId/assign', async (req, res) => {
+  try {
+    const userId = req.user?.id || null;
+    if (!userId) return res.status(401).json({ ok: false, error: 'unauthorized', request_id: req.requestId || null });
+    const paymentId = (req.params.paymentId || '').toString().trim();
+    if (!paymentId) return res.status(400).json({ ok: false, error: 'payment_id required', request_id: req.requestId || null });
+
+    const bodyShiftId = (req.body?.shift_id || '').toString().trim() || null;
+    const bodyTripId = (req.body?.trip_id || '').toString().trim() || null;
+
+    // resolve payment + matatu
+    const payRes = await pool.query(
+      `
+        SELECT p.*, wa.wallet_id AS alias_wallet_id,
+               w_alias.matatu_id AS alias_matatu_id,
+               w_match.matatu_id AS matched_matatu_id
+        FROM mpesa_c2b_payments p
+        LEFT JOIN wallet_aliases wa ON wa.alias = p.account_reference AND wa.is_active = true
+        LEFT JOIN wallets w_alias ON w_alias.id = wa.wallet_id
+        LEFT JOIN wallets w_match ON w_match.id = p.matched_wallet_id
+        WHERE p.id = $1
+        LIMIT 1
+      `,
+      [paymentId],
+    );
+    const pay = payRes.rows[0] || null;
+    if (!pay) return res.status(404).json({ ok: false, error: 'payment not found', request_id: req.requestId || null });
+
+    const matatuId = pay.alias_matatu_id || pay.matched_matatu_id || pay.matatu_id || null;
+    if (!matatuId) {
+      return res.status(400).json({ ok: false, error: 'payment not linked to matatu', request_id: req.requestId || null });
+    }
+
+    const staffAccess = await resolveMatatuStaffAccess(userId, matatuId, null);
+    if (!staffAccess.allowed) {
+      return res.status(403).json({ ok: false, error: 'forbidden', code: 'MATATU_ACCESS_DENIED', request_id: req.requestId || null });
+    }
+
+    let resolvedShiftId = null;
+    if (bodyShiftId) {
+      const s = await pool.query(`SELECT id, matatu_id FROM matatu_shifts WHERE id = $1 LIMIT 1`, [bodyShiftId]);
+      if (!s.rows.length || String(s.rows[0].matatu_id) !== String(matatuId)) {
+        return res.status(400).json({ ok: false, error: 'shift not valid for matatu', request_id: req.requestId || null });
+      }
+      resolvedShiftId = bodyShiftId;
+    } else {
+      resolvedShiftId = await resolveActiveShiftIdForMatatu(matatuId, null);
+      if (!resolvedShiftId) {
+        const opened = await openShiftForMatatu(matatuId, null, 'SYSTEM', true);
+        resolvedShiftId = opened?.id || null;
+      }
+    }
+
+    let resolvedTripId = null;
+    if (bodyTripId) {
+      const t = await pool.query(`SELECT id, matatu_id FROM matatu_trips WHERE id = $1 LIMIT 1`, [bodyTripId]);
+      if (!t.rows.length || String(t.rows[0].matatu_id) !== String(matatuId)) {
+        return res.status(400).json({ ok: false, error: 'trip not valid for matatu', request_id: req.requestId || null });
+      }
+      resolvedTripId = bodyTripId;
+    } else {
+      resolvedTripId = await resolveActiveTripIdForMatatu(matatuId);
+      if (!resolvedTripId) {
+        const started = await startTripForMatatu(matatuId, resolvedShiftId, null, 'SYSTEM', true);
+        resolvedTripId = started?.id || null;
+      }
+    }
+
+    const updateRes = await pool.query(
+      `
+        UPDATE mpesa_c2b_payments
+        SET shift_id = COALESCE(shift_id, $2),
+            trip_id = COALESCE(trip_id, $3),
+            matatu_id = COALESCE(matatu_id, $4),
+            assigned_at = now(),
+            assigned_by = $5,
+            auto_assigned = false
+        WHERE id = $1
+        RETURNING *
+      `,
+      [paymentId, resolvedShiftId, resolvedTripId, matatuId, userId],
+    );
+    const updatedPay = updateRes.rows[0] || pay;
+
+    // best-effort ledger backfill
+    try {
+      const ledger = await pool.query(
+        `SELECT id FROM wallet_ledger WHERE reference_type = 'MPESA_C2B' AND reference_id = $1 LIMIT 1`,
+        [paymentId],
+      );
+      if (ledger.rows.length) {
+        await pool.query(
+          `
+            UPDATE wallet_ledger
+            SET shift_id = COALESCE(shift_id, $2),
+                trip_id = COALESCE(trip_id, $3)
+            WHERE id = $1
+          `,
+          [ledger.rows[0].id, resolvedShiftId, resolvedTripId],
+        );
+      }
+    } catch (_) {
+      // ignore ledger backfill errors
+    }
+
+    return res.json({
+      ok: true,
+      item: updatedPay,
+      shift_id: resolvedShiftId,
+      trip_id: resolvedTripId,
+      request_id: req.requestId || null,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message || 'Failed to assign payment', request_id: req.requestId || null });
   }
 });
 

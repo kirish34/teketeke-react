@@ -16,11 +16,20 @@ type Tx = {
   status?: string
   matatu_id?: string
   fare_amount_kes?: number
+  amount?: number
   msisdn?: string
   passenger_msisdn?: string
   notes?: string
   created_by_name?: string
   created_by_email?: string
+  shift_id?: string | null
+  trip_id?: string | null
+  confirmed_at?: string | null
+  confirmed_by?: string | null
+  confirmed_shift_id?: string | null
+  assigned_at?: string | null
+  assigned_by?: string | null
+  auto_assigned?: boolean
 }
 type LedgerRow = {
   id?: string
@@ -121,12 +130,19 @@ const MatatuStaffDashboard = () => {
   const bottomNavRef = useRef<HTMLDivElement | null>(null)
   const bottomActionsRef = useRef<HTMLDivElement | null>(null)
   const [liveHeight, setLiveHeight] = useState<number | null>(null)
-  const [liveSubTab, setLiveSubTab] = useState<"live" | "confirmed">("live")
+  const [liveSubTab, setLiveSubTab] = useState<"live" | "confirmed" | "unassigned">("live")
   const [confirmedPays, setConfirmedPays] = useState<Tx[]>([])
   const [confirmedLoading, setConfirmedLoading] = useState(false)
   const [confirmedError, setConfirmedError] = useState<string | null>(null)
-  const visiblePayments = liveSubTab === "live" ? livePays : confirmedPays
+  const [unassignedPays, setUnassignedPays] = useState<Tx[]>([])
+  const [unassignedLoading, setUnassignedLoading] = useState(false)
+  const [unassignedError, setUnassignedError] = useState<string | null>(null)
+  const visiblePayments =
+    liveSubTab === "confirmed" ? confirmedPays : liveSubTab === "unassigned" ? unassignedPays : livePays
   const isLiveView = liveSubTab === "live"
+  const isConfirmedView = liveSubTab === "confirmed"
+  const isUnassignedView = liveSubTab === "unassigned"
+  const currentPaymentsLoading = isConfirmedView ? confirmedLoading : isUnassignedView ? unassignedLoading : livePaysLoading
 
   const fetchJson = useCallback(<T,>(path: string) => api<T>(path, { token }), [token])
 
@@ -441,44 +457,41 @@ useEffect(() => {
     }
   }, [activeShift, authFetch, matatuId])
 
-  const loadLivePayments = useCallback(
-    async (silent?: boolean, confirmed = false) => {
+  const loadPayments = useCallback(
+    async (bucket: "live" | "confirmed" | "unassigned", silent?: boolean) => {
       if (!matatuId) {
         setLivePays([])
         setConfirmedPays([])
+        setUnassignedPays([])
         setLivePaysError("No matatu assigned found for this account. Contact SACCO admin.")
         return
       }
-      if (shiftLoaded && !activeShift) {
-        setLivePays([])
-        setConfirmedPays([])
-        setLivePaysError("No active shift. Start a shift to view live payments.")
-        return
-      }
-      if (confirmed) {
+
+      if (bucket === "confirmed") {
         setConfirmedLoading(!silent)
         setConfirmedError(null)
+      } else if (bucket === "unassigned") {
+        setUnassignedLoading(!silent)
+        setUnassignedError(null)
       } else if (!silent) {
         setLivePaysLoading(true)
         setLivePaysError(null)
       }
+
       try {
         const params = new URLSearchParams()
         params.set("matatu_id", matatuId)
         params.set("limit", "50")
-        params.set("confirmed", confirmed ? "1" : "0")
-        if (trip?.id) params.set("trip_id", trip.id)
+        params.set("bucket", bucket)
         const res = await authFetch(`/api/matatu/live-payments?${params.toString()}`, {
           headers: { Accept: "application/json" },
         })
         if (!res.ok) {
-          let msg = "Failed to load live payments"
+          let msg = "Failed to load payments"
           try {
             const body = await res.json().catch(() => ({}))
             if (res.status === 403 && (body?.code === "MATATU_ACCESS_DENIED" || body?.error === "forbidden")) {
               msg = "No matatu assigned found for this account. Contact SACCO admin."
-            } else if (body?.code === "SHIFT_REQUIRED") {
-              msg = "No active shift. Start a shift to view live payments."
             } else if (body?.error) {
               msg = body.error
             }
@@ -486,9 +499,12 @@ useEffect(() => {
             const text = await res.text().catch(() => "")
             msg = text || msg
           }
-          if (confirmed) {
+          if (bucket === "confirmed") {
             setConfirmedError(msg)
             setConfirmedPays([])
+          } else if (bucket === "unassigned") {
+            setUnassignedError(msg)
+            setUnassignedPays([])
           } else {
             setLivePaysError(msg)
             setLivePays([])
@@ -497,48 +513,41 @@ useEffect(() => {
         }
         const data = await res.json().catch(() => ({}))
         const payments: Tx[] = data?.items || data?.payments || []
-        let filtered = payments
-        if (trip) {
-          const startMs = trip.started_at ? new Date(trip.started_at).getTime() : null
-          const endMs = (trip.ended_at ? new Date(trip.ended_at) : new Date()).getTime()
-          filtered = payments.filter((p) => {
-            const tripId = (p as any)?.trip_id
-            if (tripId && trip?.id) {
-              return String(tripId) === String(trip.id)
-            }
-            const t = p.created_at ? new Date(p.created_at).getTime() : null
-            if (!startMs || !t) return false
-            return t >= startMs && t <= endMs
-          })
-        } else {
-          filtered = []
-        }
-        if (confirmed) setConfirmedPays(filtered)
-        else setLivePays(filtered)
+
+        if (bucket === "confirmed") setConfirmedPays(payments)
+        else if (bucket === "unassigned") setUnassignedPays(payments)
+        else setLivePays(payments)
       } catch (err) {
-        if (confirmed) {
-          setConfirmedError(err instanceof Error ? err.message : "Failed to load confirmed payments")
+        const msg = err instanceof Error ? err.message : "Failed to load payments"
+        if (bucket === "confirmed") {
+          setConfirmedError(msg)
           setConfirmedPays([])
+        } else if (bucket === "unassigned") {
+          setUnassignedError(msg)
+          setUnassignedPays([])
         } else {
-          setLivePaysError(err instanceof Error ? err.message : "Failed to load live payments")
+          setLivePaysError(msg)
           setLivePays([])
         }
       } finally {
-        if (confirmed) setConfirmedLoading(false)
+        if (bucket === "confirmed") setConfirmedLoading(false)
+        else if (bucket === "unassigned") setUnassignedLoading(false)
         else if (!silent) setLivePaysLoading(false)
       }
     },
-    [activeShift, authFetch, matatuId, shiftLoaded, trip],
+    [authFetch, matatuId],
   )
 
   useEffect(() => {
-    if (activeTab !== "live_payments" || !activeShift) return
+    if (activeTab !== "live_payments") return
     if (liveSubTab === "confirmed") {
-      void loadLivePayments(false, true)
+      void loadPayments("confirmed")
+    } else if (liveSubTab === "unassigned") {
+      void loadPayments("unassigned")
     } else {
-      void loadLivePayments()
+      void loadPayments("live")
     }
-  }, [activeTab, activeShift, liveSubTab, loadLivePayments])
+  }, [activeTab, liveSubTab, loadPayments])
 
   const confirmPayment = useCallback(
     async (paymentId: string) => {
@@ -563,6 +572,33 @@ useEffect(() => {
       }
     },
     [authFetch, livePays],
+  )
+
+  const assignPayment = useCallback(
+    async (paymentId: string) => {
+      if (!paymentId) return
+      const target = unassignedPays.find((p) => paymentKey(p) === paymentId)
+      if (!target) return
+      setUnassignedPays((prev) => prev.filter((p) => paymentKey(p) !== paymentId))
+      setLivePays((prev) => [{ ...target, auto_assigned: false }, ...prev])
+      try {
+        const res = await authFetch(`/api/matatu/payments/${encodeURIComponent(paymentId)}/assign`, {
+          method: "POST",
+          headers: { Accept: "application/json" },
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          throw new Error(data?.error || res.statusText || "Assign failed")
+        }
+        const updated = (data?.item as Tx) || target
+        setLivePays((prev) => [{ ...updated, auto_assigned: false }, ...prev.filter((p) => paymentKey(p) !== paymentId)])
+      } catch (err) {
+        setLivePays((prev) => prev.filter((p) => paymentKey(p) !== paymentId))
+        setUnassignedPays((prev) => [target, ...prev])
+        setUnassignedError(err instanceof Error ? err.message : "Assign failed")
+      }
+    },
+    [authFetch, unassignedPays],
   )
 
   const loadActiveShift = useCallback(async () => {
@@ -667,24 +703,26 @@ useEffect(() => {
 
   useEffect(() => {
     if (activeTab !== "live_payments") return
+    // keep unassigned count fresh for banner confidence
+    void loadPayments("unassigned", true)
     const id = setInterval(() => {
       void loadTrip(true)
     }, 5000)
     return () => clearInterval(id)
-  }, [activeTab, loadTrip])
+  }, [activeTab, loadTrip, loadPayments])
 
   useEffect(() => {
     let id: number | null = null
-    if (activeTab === "live_payments" && activeShift) {
-      void loadLivePayments(false, liveSubTab === "confirmed")
+    if (activeTab === "live_payments") {
+      void loadPayments(liveSubTab, false)
       if (liveSubTab === "live") {
-        id = window.setInterval(() => void loadLivePayments(true, false), 3000)
+        id = window.setInterval(() => void loadPayments("live", true), 3000)
       }
     }
     return () => {
       if (id) window.clearInterval(id)
     }
-  }, [activeShift, activeTab, liveSubTab, loadLivePayments])
+  }, [activeTab, liveSubTab, loadPayments])
 
   useEffect(() => {
     void loadActiveShift()
@@ -916,7 +954,7 @@ useEffect(() => {
     }
     if (activeTab === "live_payments") {
       void loadActiveShift()
-      void loadLivePayments()
+      void loadPayments(liveSubTab)
     }
   }
 
@@ -1218,32 +1256,61 @@ useEffect(() => {
                 <div className="muted small ms-live-sub">
                   Shows payments only for the active trip.{activeShift?.opened_at ? ` Shift opened at ${new Date(activeShift.opened_at).toLocaleTimeString("en-KE")}.` : ""}
                 </div>
+                {unassignedPays.length > 0 ? (
+                  <div className="muted small" style={{ color: "#d97706", marginTop: 4 }}>
+                    ⚠ {unassignedPays.length} unassigned payments. Review in Unassigned.
+                  </div>
+                ) : null}
               </div>
               <div className="ms-live-head-actions">
-                <button className="btn ms-refresh-btn" type="button" onClick={() => void loadLivePayments()}>
-                  {livePaysLoading ? <span className="spinner small" aria-hidden /> : null}
+                <button className="btn ms-refresh-btn" type="button" onClick={() => void loadPayments(liveSubTab)}>
+                  {currentPaymentsLoading ? <span className="spinner small" aria-hidden /> : null}
                   <span>Refresh</span>
                 </button>
-                {livePaysError ? <span className="err small">{livePaysError}</span> : null}
-                {shiftError && !livePaysError ? <span className="err small">{shiftError}</span> : null}
-              </div>
-            </div>
-            <div className="ms-live-subtabs">
-              {[
-                { id: "live", label: "Live" },
-                { id: "confirmed", label: "Confirmed" },
-              ].map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  className={`ms-live-subtab${liveSubTab === t.id ? " active" : ""}`}
-                  onClick={() => setLiveSubTab(t.id as typeof liveSubTab)}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
+          {livePaysError && liveSubTab === "live" ? <span className="err small">{livePaysError}</span> : null}
+          {confirmedError && liveSubTab === "confirmed" ? <span className="err small">{confirmedError}</span> : null}
+          {unassignedError && liveSubTab === "unassigned" ? <span className="err small">{unassignedError}</span> : null}
+        </div>
+      </div>
+      <div className="ms-live-subtabs">
+        {[
+          { id: "live", label: "Live" },
+          { id: "confirmed", label: "Confirmed" },
+          { id: "unassigned", label: "Unassigned" },
+        ].map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            className={`ms-live-subtab${liveSubTab === t.id ? " active" : ""}`}
+            onClick={() => setLiveSubTab(t.id as typeof liveSubTab)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+        <span
+          className="badge"
+          style={{
+            background: activeShift ? "#ecfdf3" : "#fef3c7",
+            color: activeShift ? "#166534" : "#92400e",
+            border: "1px solid rgba(0,0,0,0.08)",
+          }}
+        >
+          Shift {activeShift ? "ON" : "OFF"} {activeShift?.auto_opened ? "• AUTO" : ""}
+        </span>
+        <span
+          className="badge"
+          style={{
+            background: trip ? "#eff6ff" : "#fef3c7",
+            color: trip ? "#1d4ed8" : "#92400e",
+            border: "1px solid rgba(0,0,0,0.08)",
+          }}
+        >
+          Trip {trip ? "ON" : "OFF"} {trip?.auto_started ? "• AUTO" : ""}
+        </span>
+      </div>
+    </div>
           <div className="ms-live-scroll">
             {!matatuId ? (
               <div className="muted small" style={{ marginTop: 8 }}>
@@ -1263,19 +1330,25 @@ useEffect(() => {
                           <th>Time</th>
                           <th>Payer</th>
                           <th>Amount</th>
-                          {isLiveView ? <th>Action</th> : <th>Status</th>}
+                          {isConfirmedView ? <th>Status</th> : <th>Action</th>}
                         </tr>
                       </thead>
                       <tbody>
                         {visiblePayments.length === 0 ? (
                           <tr>
                             <td colSpan={4} className="muted">
-                              {(isLiveView ? livePaysLoading : confirmedLoading) ? (
+                              {(isLiveView
+                                ? livePaysLoading
+                                : isConfirmedView
+                                ? confirmedLoading
+                                : unassignedLoading) ? (
                                 <span className="spinner small" aria-label="Loading payments" />
                               ) : isLiveView ? (
                                 "No payments yet."
-                              ) : (
+                              ) : isConfirmedView ? (
                                 "No confirmed payments."
+                              ) : (
+                                "No unassigned payments."
                               )}
                             </td>
                           </tr>
@@ -1295,13 +1368,15 @@ useEffect(() => {
                             const msisdn = (p as any)?.payer_msisdn || p.msisdn || p.passenger_msisdn || null
                             const identity = nameDisplay || msisdn || "-"
                             const amt = fmtKES((p as any)?.amount || p.fare_amount_kes)
+                            const offShift = !p.shift_id
+                            const offTrip = !p.trip_id
                             return (
                               <tr key={key}>
                                 <td>{t}</td>
                                 <td>{identity}</td>
                                 <td>{amt}</td>
-                                {isLiveView ? (
-                                  <td>
+                                <td>
+                                  {isLiveView ? (
                                     <button
                                       type="button"
                                       className="btn ghost small ms-credit-btn"
@@ -1309,10 +1384,24 @@ useEffect(() => {
                                     >
                                       Confirm
                                     </button>
-                                  </td>
-                                ) : (
-                                  <td className="ms-pay-confirmed">Confirmed ✓</td>
-                                )}
+                                  ) : isConfirmedView ? (
+                                    <span className="ms-pay-confirmed">Confirmed ✓</span>
+                                  ) : (
+                                    <div className="row" style={{ gap: 6, alignItems: "center" }}>
+                                      <div className="row" style={{ gap: 4 }}>
+                                        {offShift ? <span className="badge warn">OFF SHIFT</span> : null}
+                                        {offTrip ? <span className="badge warn">OFF TRIP</span> : null}
+                                      </div>
+                                      <button
+                                        type="button"
+                                        className="btn ghost small ms-credit-btn"
+                                        onClick={() => void assignPayment(key)}
+                                      >
+                                        Assign
+                                      </button>
+                                    </div>
+                                  )}
+                                </td>
                               </tr>
                             )
                           })
@@ -1324,12 +1413,18 @@ useEffect(() => {
                   <div className="live-cards">
                     {visiblePayments.length === 0 ? (
                       <div className="muted small">
-                        {(isLiveView ? livePaysLoading : confirmedLoading) ? (
+                        {(isLiveView
+                          ? livePaysLoading
+                          : isConfirmedView
+                          ? confirmedLoading
+                          : unassignedLoading) ? (
                           <span className="spinner small" aria-label="Loading payments" />
                         ) : isLiveView ? (
                           "No payments yet."
-                        ) : (
+                        ) : isConfirmedView ? (
                           confirmedError || "No confirmed payments."
+                        ) : (
+                          unassignedError || "No unassigned payments."
                         )}
                       </div>
                     ) : (
@@ -1348,6 +1443,8 @@ useEffect(() => {
                         const nameDisplay = uniqueNames.slice(0, 2).join(" • ")
                         const msisdn = (p as any)?.payer_msisdn || p.msisdn || p.passenger_msisdn || null
                         const identity = nameDisplay || msisdn || "-"
+                        const offShift = !p.shift_id
+                        const offTrip = !p.trip_id
                         return (
                           <div key={key} className="live-card ms-pay-card">
                             <div className="ms-pay-main">
@@ -1366,8 +1463,22 @@ useEffect(() => {
                               >
                                 Confirm
                               </button>
-                            ) : (
+                            ) : isConfirmedView ? (
                               <span className="ms-pay-confirmed">Confirmed ✓</span>
+                            ) : (
+                              <div className="row" style={{ gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                                <div className="row" style={{ gap: 4 }}>
+                                  {offShift ? <span className="badge warn">OFF SHIFT</span> : null}
+                                  {offTrip ? <span className="badge warn">OFF TRIP</span> : null}
+                                </div>
+                                <button
+                                  type="button"
+                                  className="btn ghost small ms-credit-btn ms-pay-action"
+                                  onClick={() => void assignPayment(key)}
+                                >
+                                  Assign
+                                </button>
+                              </div>
                             )}
                           </div>
                         )

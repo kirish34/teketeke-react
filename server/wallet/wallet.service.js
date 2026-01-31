@@ -310,6 +310,8 @@ async function creditFareWithFeesByWalletId({
   referenceType = null,
   description = null,
   client = null,
+  tripId: tripIdOverride = null,
+  shiftId: shiftIdOverride = null,
 }) {
   if (!walletId) throw new Error('walletId is required');
   if (!amount || Number(amount) <= 0) throw new Error('amount must be > 0');
@@ -341,8 +343,8 @@ async function creditFareWithFeesByWalletId({
 
     const matatuWallet = matatuRes.rows[0];
     const virtualAccountCode = matatuWallet.virtual_account_code;
-    const tripId = await resolveActiveTripIdForMatatu(matatuWallet.matatu_id);
-    const shiftId = await resolveActiveShiftIdForMatatu(matatuWallet.matatu_id);
+    const tripId = tripIdOverride ?? (await resolveActiveTripIdForMatatu(matatuWallet.matatu_id));
+    const shiftId = shiftIdOverride ?? (await resolveActiveShiftIdForMatatu(matatuWallet.matatu_id));
 
     // Active fees for matatu fare
     const feesRes = await useClient.query(
