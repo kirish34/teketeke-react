@@ -1513,3 +1513,8 @@ select {
   color: #94a3b8;
   text-decoration: underline;
 }
+
+.about-link {
+  color: inherit;
+  text-decoration: underline;
+}

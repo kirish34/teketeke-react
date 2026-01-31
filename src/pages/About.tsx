@@ -37,6 +37,25 @@ const About = () => {
           TekeTeke is a product of Sky Yalla Ltd, developed to support transport operators with reliable, scalable, and compliant digital payment infrastructure.
         </p>
 
+        <h4 style={{ marginBottom: 6 }}>Contact & Support</h4>
+        <p className="muted" style={{ marginBottom: 8 }}>
+          For system support, account assistance, or operational questions, please contact:
+        </p>
+        <ul className="muted" style={{ listStyle: "none", paddingLeft: 0, marginTop: 0 }}>
+          <li>
+            Email:{" "}
+            <a href="mailto:businesses@skyyalla.com" className="about-link">
+              businesses@skyyalla.com
+            </a>
+          </li>
+          <li>
+            Phone:{" "}
+            <a href="tel:0758222666" className="about-link">
+              0758 222 666
+            </a>
+          </li>
+        </ul>
+
         <div className="muted small" style={{ marginTop: 12 }}>
           © Sky Yalla Ltd. All rights reserved.
           <br />
