@@ -62,6 +62,7 @@ type Trip = {
   mpesa_count?: number
   cash_amount?: number
   cash_count?: number
+  auto_started?: boolean
 }
 
 const fmtKES = (val?: number | null) => `KES ${(Number(val || 0)).toLocaleString("en-KE")}`
