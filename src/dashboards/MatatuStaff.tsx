@@ -125,7 +125,6 @@ const MatatuStaffDashboard = () => {
   const holdStartRef = useRef<number | null>(null)
   const appbarRef = useRef<HTMLDivElement | null>(null)
   const bottomNavRef = useRef<HTMLDivElement | null>(null)
-  const bottomActionsRef = useRef<HTMLDivElement | null>(null)
   const [liveHeight, setLiveHeight] = useState<number | null>(null)
   const [liveSubTab, setLiveSubTab] = useState<"live" | "confirmed" | "unassigned">("live")
   const [confirmedPays, setConfirmedPays] = useState<Tx[]>([])
