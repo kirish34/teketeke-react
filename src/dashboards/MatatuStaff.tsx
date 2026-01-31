@@ -1174,6 +1174,16 @@ useEffect(() => {
                   {currentPaymentsLoading ? <span className="spinner small" aria-hidden /> : null}
                   <span>Refresh</span>
                 </button>
+                {activeShift ? (
+                  <button
+                    className="btn ms-endshift-btn"
+                    type="button"
+                    onClick={() => setShowEndShiftConfirm(true)}
+                    disabled={endShiftBusy}
+                  >
+                    End shift
+                  </button>
+                ) : null}
                 {livePaysError && liveSubTab === "live" ? <span className="err small">{livePaysError}</span> : null}
                 {confirmedError && liveSubTab === "confirmed" ? <span className="err small">{confirmedError}</span> : null}
                 {unassignedError && liveSubTab === "unassigned" ? <span className="err small">{unassignedError}</span> : null}
