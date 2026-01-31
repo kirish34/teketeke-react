@@ -110,6 +110,7 @@ const MatatuStaffDashboard = () => {
   const [tripHistory, setTripHistory] = useState<Trip[]>([])
   const [tripHistoryLoading, setTripHistoryLoading] = useState(false)
   const [tripHistoryError, setTripHistoryError] = useState<string | null>(null)
+  const [expandedTripId, setExpandedTripId] = useState<string | null>(null)
 
   const [accessGrants, setAccessGrants] = useState<AccessGrant[]>([])
   const [activeTab, setActiveTab] = useState<"live_payments" | "trips" | "transactions" | "vehicle_care">("live_payments")
@@ -1597,53 +1598,105 @@ useEffect(() => {
                 </button>
               </div>
             </div>
-            <div className="table-wrap" style={{ marginTop: 10 }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Start</th>
-                    <th>End</th>
-                    <th>Status</th>
-                    <th>Paybill (M-Pesa)</th>
-                    <th>Cash</th>
-                    <th>Total</th>
-                    <th>Entries</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tripHistory.length === 0 ? (
+            {!isMobile ? (
+              <div className="table-wrap" style={{ marginTop: 10 }}>
+                <table>
+                  <thead>
                     <tr>
-                      <td colSpan={7} className="muted">
-                        No trips yet.
-                      </td>
+                      <th>Start</th>
+                      <th>End</th>
+                      <th>Status</th>
+                      <th>Paybill (M-Pesa)</th>
+                      <th>Cash</th>
+                      <th>Total</th>
+                      <th>Entries</th>
                     </tr>
-                  ) : (
-                    tripHistory.map((t) => {
-                      const total = Number(t.mpesa_amount || 0) + Number(t.cash_amount || 0)
-                      return (
-                        <tr key={t.id || t.started_at}>
-                          <td>{t.started_at ? new Date(t.started_at).toLocaleString("en-KE") : "-"}</td>
-                          <td>
-                            {t.ended_at
-                              ? new Date(t.ended_at).toLocaleString("en-KE")
-                              : t.status === "IN_PROGRESS"
-                              ? "In progress"
-                              : "-"}
-                          </td>
-                          <td>{(t.status || "").replaceAll("_", " ")}</td>
-                          <td>{fmtKES(t.mpesa_amount)}</td>
-                          <td>{fmtKES(t.cash_amount)}</td>
-                          <td>{fmtKES(total)}</td>
-                          <td className="muted small">
-                            M-Pesa: {t.mpesa_count ?? 0} / Cash: {t.cash_count ?? 0}
-                          </td>
-                        </tr>
-                      )
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {tripHistory.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="muted">
+                          No trips yet.
+                        </td>
+                      </tr>
+                    ) : (
+                      tripHistory.map((t) => {
+                        const total = Number(t.mpesa_amount || 0) + Number(t.cash_amount || 0)
+                        return (
+                          <tr key={t.id || t.started_at}>
+                            <td>{t.started_at ? new Date(t.started_at).toLocaleString("en-KE") : "-"}</td>
+                            <td>
+                              {t.ended_at
+                                ? new Date(t.ended_at).toLocaleString("en-KE")
+                                : t.status === "IN_PROGRESS"
+                                ? "In progress"
+                                : "-"}
+                            </td>
+                            <td>{(t.status || "").replaceAll("_", " ")}</td>
+                            <td>{fmtKES(t.mpesa_amount)}</td>
+                            <td>{fmtKES(t.cash_amount)}</td>
+                            <td>{fmtKES(total)}</td>
+                            <td className="muted small">
+                              M-Pesa: {t.mpesa_count ?? 0} / Cash: {t.cash_count ?? 0}
+                            </td>
+                          </tr>
+                        )
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="live-cards" style={{ marginTop: 10 }}>
+                {tripHistory.length === 0 ? (
+                  <div className="muted small">No trips yet.</div>
+                ) : (
+                  tripHistory.map((t) => {
+                    const startLabel = t.started_at
+                      ? new Date(t.started_at).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" })
+                      : "-"
+                    const endLabel = t.ended_at
+                      ? new Date(t.ended_at).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" })
+                      : t.status === "IN_PROGRESS"
+                      ? "In progress"
+                      : "-"
+                    const key = t.id || t.started_at || Math.random().toString(36)
+                    const expanded = expandedTripId === key
+                    const total = Number(t.mpesa_amount || 0) + Number(t.cash_amount || 0)
+                    return (
+                      <div key={key} className="live-card" style={{ padding: 12 }}>
+                        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                          <div>
+                            <div className="muted mini">Start</div>
+                            <div style={{ fontWeight: 700 }}>{startLabel}</div>
+                          </div>
+                          <div>
+                            <div className="muted mini">End</div>
+                            <div style={{ fontWeight: 700 }}>{endLabel}</div>
+                          </div>
+                          <button
+                            type="button"
+                            className="badge"
+                            style={{ alignSelf: "flex-start" }}
+                            onClick={() => setExpandedTripId(expanded ? null : (key as string))}
+                          >
+                            {expanded ? "Hide" : "View"}
+                          </button>
+                        </div>
+                        {expanded ? (
+                          <div className="muted small" style={{ marginTop: 8, display: "grid", gap: 4 }}>
+                            <div>Status: {(t.status || "").replaceAll("_", " ")}</div>
+                            <div>M-Pesa: {fmtKES(t.mpesa_amount)} (count {t.mpesa_count ?? 0})</div>
+                            <div>Cash: {fmtKES(t.cash_amount)} (count {t.cash_count ?? 0})</div>
+                            <div>Total: {fmtKES(total)}</div>
+                          </div>
+                        ) : null}
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            )}
           </div>
         </section>
       ) : null}
