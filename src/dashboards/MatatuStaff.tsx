@@ -149,12 +149,18 @@ const MatatuStaffDashboard = () => {
   const fetchJson = useCallback(<T,>(path: string) => api<T>(path, { token }), [token])
 
   const loadTransactions = useCallback(async () => {
-    if (!saccoId || !matatuId) {
+    if (!matatuId) {
+      setTxs([])
+      return
+    }
+    const saccoParam = saccoId || currentMatatu?.sacco_id || ""
+    if (!saccoParam) {
+      setError("Select a SACCO to view collections.")
       setTxs([])
       return
     }
     try {
-      const tRes = await fetchJson<{ items?: Tx[] }>(`/u/sacco/${encodeURIComponent(saccoId)}/transactions?limit=500`)
+      const tRes = await fetchJson<{ items?: Tx[] }>(`/u/sacco/${encodeURIComponent(saccoParam)}/transactions?limit=500`)
       const items = tRes.items || []
       let scoped = items.filter((t) => t.matatu_id === matatuId)
       if (activeShift?.opened_at) {
@@ -169,7 +175,7 @@ const MatatuStaffDashboard = () => {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load transactions")
     }
-  }, [activeShift?.closed_at, activeShift?.opened_at, fetchJson, matatuId, saccoId])
+  }, [activeShift?.closed_at, activeShift?.opened_at, fetchJson, matatuId, saccoId, currentMatatu?.sacco_id])
 
   const loadWallets = useCallback(async () => {
     if (!matatuId) {
@@ -1771,58 +1777,6 @@ useEffect(() => {
                 <div style={{ fontWeight: 700 }}>{fmtKES(transactionTotals.loans)}</div>
               </div>
             </div>
-          </section>
-
-          <section className="card">
-            <div className="topline">
-              <h3 style={{ margin: 0 }}>Manual cash entry</h3>
-              <span className="muted small">{manualMsg}</span>
-            </div>
-            <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-              <input
-                type="number"
-                placeholder="Amount (KES)"
-                value={manualAmount}
-                onChange={(e) => setManualAmount(e.target.value)}
-                style={{ width: 180 }}
-              />
-              <input
-                placeholder="Note (optional)"
-                value={manualNote}
-                onChange={(e) => setManualNote(e.target.value)}
-                style={{ flex: "1 1 260px" }}
-              />
-              <button type="button" onClick={recordManualCash}>
-                Record Cash
-              </button>
-            </div>
-            <div className="muted small" style={{ marginTop: 6 }}>
-              Records cash directly against the current matatu without affecting trip states.
-            </div>
-            {manualEntries.length ? (
-              <div className="table-wrap" style={{ marginTop: 10 }}>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>When</th>
-                      <th>Amount</th>
-                      <th>Note</th>
-                      <th>ID</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {manualEntries.map((e) => (
-                      <tr key={e.id}>
-                        <td>{new Date(e.created_at).toLocaleString()}</td>
-                        <td>{fmtKES(e.amount)}</td>
-                        <td>{e.note || ""}</td>
-                        <td className="mono">{e.id}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : null}
           </section>
 
           <section className="card">
