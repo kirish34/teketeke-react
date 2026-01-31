@@ -1061,54 +1061,6 @@ useEffect(() => {
         <div className="ms-header-hero">{heroSection}</div>
       </div>
       {isMobile ? appbar : null}
-      {isMobile && activeShift ? (
-        <div className="ms-bottom-actions" ref={bottomActionsRef}>
-          <span className="ms-chip">Shift on</span>
-          <button
-            type="button"
-            className={`btn btn-danger ms-endshift-btn${isHoldingEndShift ? " holding" : ""}`}
-            disabled={endShiftBusy}
-            onPointerDown={() => {
-              if (endShiftBusy || !activeShift) return
-              setIsHoldingEndShift(true)
-              holdStartRef.current = Date.now()
-              holdIntervalRef.current = window.setInterval(() => {
-                if (!holdStartRef.current) return
-                const elapsed = Date.now() - holdStartRef.current
-                const pct = Math.min(100, (elapsed / 3000) * 100)
-                setHoldProgress(pct)
-                if (elapsed >= 3000) {
-                  if (holdIntervalRef.current) window.clearInterval(holdIntervalRef.current)
-                  holdIntervalRef.current = null
-                  holdStartRef.current = null
-                  setIsHoldingEndShift(false)
-                  setHoldProgress(100)
-                  setShowEndShiftConfirm(true)
-                }
-              }, 50)
-            }}
-            onPointerUp={() => {
-              if (holdIntervalRef.current) window.clearInterval(holdIntervalRef.current)
-              holdIntervalRef.current = null
-              holdStartRef.current = null
-              setIsHoldingEndShift(false)
-              setHoldProgress(0)
-            }}
-            onPointerLeave={() => {
-              if (holdIntervalRef.current) window.clearInterval(holdIntervalRef.current)
-              holdIntervalRef.current = null
-              holdStartRef.current = null
-              setIsHoldingEndShift(false)
-              setHoldProgress(0)
-            }}
-            style={{
-              background: `linear-gradient(90deg, rgba(255,77,79,0.9) ${holdProgress}%, rgba(255,77,79,0.25) ${holdProgress}%)`,
-            }}
-          >
-            {isHoldingEndShift ? "Hold 3s…" : "End shift"}
-          </button>
-        </div>
-      ) : null}
 
       {showEndShiftConfirm && (
         <div className="ms-confirm-backdrop">
