@@ -4,6 +4,19 @@ import DashboardShell from "../components/DashboardShell"
 const About = () => {
   const appVersion = import.meta.env.VITE_APP_VERSION || "current"
   const buildDate = useMemo(() => import.meta.env.VITE_BUILD_DATE || new Date().toISOString().slice(0, 10), [])
+  const reportIssueHref =
+    "mailto:businesses@skyyalla.com" +
+    "?subject=" +
+    encodeURIComponent("[TekeTeke Staff] Issue report") +
+    "&body=" +
+    encodeURIComponent(
+      "Please describe the issue below.\n\n" +
+        "App: TekeTeke Staff Dashboard\n" +
+        "Date:\n" +
+        "Matatu:\n" +
+        "Shift status:\n" +
+        "Trip status:\n",
+    )
 
   return (
     <DashboardShell title="About" subtitle="TekeTeke Staff Dashboard" navLabel="About">
@@ -55,6 +68,12 @@ const About = () => {
             </a>
           </li>
         </ul>
+
+        <div style={{ marginTop: 12 }}>
+          <a href={reportIssueHref} className="about-link" style={{ fontWeight: 600 }}>
+            Report an issue
+          </a>
+        </div>
 
         <div className="muted small" style={{ marginTop: 12 }}>
           © Sky Yalla Ltd. All rights reserved.
