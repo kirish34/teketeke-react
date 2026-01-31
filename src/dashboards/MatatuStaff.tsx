@@ -1733,6 +1733,8 @@ useEffect(() => {
         )
       ) : null}
 
+      <div className="ms-attrib">A product of Sky Yalla Ltd</div>
+
     </DashboardShell>
   )
 }
