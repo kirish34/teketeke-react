@@ -67,7 +67,6 @@ type Trip = {
 
 const fmtKES = (val?: number | null) => `KES ${(Number(val || 0)).toLocaleString("en-KE")}`
 const todayKey = () => new Date().toISOString().slice(0, 10)
-const manualKey = (matatuId: string) => `tt_staff_manual_${matatuId || "na"}`
 const paymentKey = (p: Tx) =>
   (p.id ||
     p.created_at ||
@@ -94,10 +93,6 @@ const MatatuStaffDashboard = () => {
   const [ledgerFrom] = useState(ledgerStart)
   const [ledgerTo] = useState(ledgerEnd)
 
-  const [manualAmount, setManualAmount] = useState("")
-  const [manualNote, setManualNote] = useState("")
-  const [manualMsg, setManualMsg] = useState("")
-  const [manualEntries, setManualEntries] = useState<{ id: string; amount: number; note?: string; created_at: string }[]>([])
   const [tripCashAmount, setTripCashAmount] = useState("")
   const [tripCashNote, setTripCashNote] = useState("")
   const [tripCashMsg, setTripCashMsg] = useState("")
@@ -153,7 +148,8 @@ const MatatuStaffDashboard = () => {
       setTxs([])
       return
     }
-    const saccoParam = saccoId || currentMatatu?.sacco_id || ""
+    const matatuSacco = matatus.find((m) => m.id === matatuId)?.sacco_id || null
+    const saccoParam = saccoId || matatuSacco || ""
     if (!saccoParam) {
       setError("Select a SACCO to view collections.")
       setTxs([])
@@ -175,7 +171,7 @@ const MatatuStaffDashboard = () => {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load transactions")
     }
-  }, [activeShift?.closed_at, activeShift?.opened_at, fetchJson, matatuId, saccoId, currentMatatu?.sacco_id])
+  }, [activeShift?.closed_at, activeShift?.opened_at, fetchJson, matatuId, matatus, saccoId])
 
   const loadWallets = useCallback(async () => {
     if (!matatuId) {
@@ -368,20 +364,6 @@ useEffect(() => {
     const timer = setInterval(updateTime, 60000)
     return () => clearInterval(timer)
   }, [])
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(manualKey(matatuId))
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        if (Array.isArray(parsed)) setManualEntries(parsed)
-      } else {
-        setManualEntries([])
-      }
-    } catch {
-      setManualEntries([])
-    }
-  }, [matatuId])
 
   const loadTrip = useCallback(
     async (background = false) => {
@@ -804,7 +786,6 @@ useEffect(() => {
   const assignedMatatuCount = matatuId ? 1 : 0
 
   const transactionTotals = useMemo(() => {
-    const manualLocal = manualEntries.reduce((acc, m) => acc + Number(m.amount || 0), 0)
     let manualCash = 0
     let mpesa = 0
     let mpesaCount = 0
@@ -839,10 +820,9 @@ useEffect(() => {
         mpesaCount += 1
       }
     })
-    const manualTotal = manualCash + manualLocal
     const accountTotal = dailyFee + savings + loans
     return {
-      manualCash: manualTotal,
+      manualCash,
       mpesa,
       mpesaCount,
       walletTotal,
@@ -854,9 +834,9 @@ useEffect(() => {
       savings,
       loans,
       accountTotal,
-      collectedTotal: manualTotal + accountTotal + mpesa,
+      collectedTotal: manualCash + accountTotal + mpesa,
     }
-  }, [filteredTx, manualEntries, wallets])
+  }, [filteredTx, wallets])
 
   const ownerScopeId = user?.matatu_id || ""
   const vehicleCareGrant = useMemo(
@@ -871,42 +851,6 @@ useEffect(() => {
   const canManageCompliance = Boolean(vehicleCareGrant?.can_manage_compliance)
   const canViewVehicleCareAnalytics = vehicleCareGrant?.can_view_analytics !== false
 
-
-  async function recordManualCash() {
-    if (!saccoId || !matatuId) {
-      setManualMsg("Missing SACCO or assigned matatu")
-      return
-    }
-    const amt = Number(manualAmount || 0)
-    if (!(amt > 0)) {
-      setManualMsg("Enter amount")
-      return
-    }
-    setManualMsg("Saving...")
-    try {
-      await api("/api/staff/cash", {
-        method: "POST",
-        body: {
-          sacco_id: saccoId,
-          matatu_id: matatuId,
-          kind: "CASH",
-          amount: amt,
-          payer_name: manualNote.trim() || "Manual cash entry",
-          payer_phone: "",
-        },
-        token,
-      })
-      const entry = { id: `MAN_${Date.now()}`, amount: amt, note: manualNote, created_at: new Date().toISOString() }
-      const next = [entry, ...manualEntries]
-      setManualEntries(next)
-      localStorage.setItem(manualKey(matatuId), JSON.stringify(next))
-      setManualAmount("")
-      setManualNote("")
-      setManualMsg("Saved")
-    } catch (err) {
-      setManualMsg(err instanceof Error ? err.message : "Save failed")
-    }
-  }
 
   const recordTripCash = useCallback(async () => {
     if (!saccoId || !matatuId) {
