@@ -204,7 +204,6 @@ body {
 .ms-live-subtab.active {
   background: #0ea5e9;
   color: #f8fafc;
-  box-shadow: 0 8px 18px rgba(14,165,233,0.25);
 }
 .live-card-amount {
   font-size: 20px;
@@ -400,7 +399,8 @@ body {
   }
   .ms-live-head h3 {
     margin: 0 !important;
-    font-size: 26px !important;
+    font-size: 22px !important;
+    margin-bottom: 6px;
   }
   .ms-live-head-actions {
     display: flex;
@@ -415,15 +415,17 @@ body {
   }
   .ms-live-subtab {
     border: 1px solid #0ea5e9;
-    background: #e0f2fe;
+    background: transparent;
     color: #0f172a;
-    padding: 6px 12px;
+    padding: 8px 12px;
     border-radius: 999px;
     font-weight: 700;
+    font-size: 14px;
   }
   .ms-live-subtab.active {
     background: #0ea5e9;
     color: #f8fafc;
+    box-shadow: none;
   }
   .ms-live-sub {
     display: none !important;
@@ -463,8 +465,9 @@ body {
     margin: 10px 0 !important;
   }
   .ms-pay-amount {
-    font-size: 22px !important;
+    font-size: 24px !important;
     line-height: 1.1;
+    font-weight: 800;
   }
   .ms-pay-meta {
     font-size: 13px !important;
@@ -487,13 +490,13 @@ body {
     z-index: 60;
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-end;
     gap: 10px;
-    padding: 10px 12px;
-    border-radius: 18px;
-    background: rgba(255, 255, 255, 0.92);
-    backdrop-filter: blur(10px);
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12);
+    padding: 8px 12px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(8px);
+    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.1);
   }
   .ms-endshift-header {
     display: none !important;
@@ -525,6 +528,7 @@ body {
     padding: 8px 12px;
     font-weight: 800;
     cursor: pointer;
+    opacity: 0.9;
   }
   .ms-confirm-backdrop {
     position: fixed;
@@ -1422,3 +1426,73 @@ select {
   display: flex;
   gap: 12px;
 }
+/* ===== Matatu Staff Mobile De-clutter Overrides (append-only) ===== */
+@media (max-width: 640px) {
+  /* shrink main live header */
+  .ms-live-head h3 {
+    font-size: 22px !important;
+    margin: 0 0 6px 0 !important;
+    line-height: 1.1 !important;
+  }
+
+  /* refresh smaller */
+  .ms-refresh-btn {
+    padding: 8px 12px !important;
+    font-size: 14px !important;
+    border-radius: 14px !important;
+  }
+
+  /* subtabs calmer */
+  .ms-subtabs {
+    display: flex !important;
+    gap: 10px !important;
+    flex-wrap: wrap !important;
+    margin-top: 10px !important;
+  }
+
+  .ms-subtab {
+    padding: 8px 12px !important;
+    font-size: 14px !important;
+    border-radius: 999px !important;
+    box-shadow: none !important;
+  }
+
+  /* status should whisper */
+  .ms-status-line {
+    font-size: 13px !important;
+    color: #64748b !important;
+    margin: 6px 0 10px 0 !important;
+  }
+
+  /* payment card density */
+  .ms-pay-card {
+    padding: 12px !important;
+    margin: 10px 0 !important;
+    border-radius: 16px !important;
+  }
+
+  .ms-pay-amount {
+    font-size: 24px !important;
+    font-weight: 800 !important;
+    line-height: 1.1 !important;
+  }
+
+  .ms-pay-meta {
+    font-size: 13px !important;
+    opacity: 0.85 !important;
+  }
+
+  /* keep bottom actions calm (if present) */
+  .ms-bottom-actions {
+    background: rgba(255, 255, 255, 0.86) !important;
+    backdrop-filter: blur(10px) !important;
+  }
+
+  .ms-endshift-btn {
+    background: #ef4444 !important;
+    color: #fff !important;
+    opacity: 0.92 !important;
+    border: none !important;
+  }
+}
+/* ===== End Matatu Staff Mobile De-clutter Overrides ===== */

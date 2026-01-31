@@ -140,6 +140,10 @@ const MatatuStaffDashboard = () => {
   const isConfirmedView = liveSubTab === "confirmed"
   const isUnassignedView = liveSubTab === "unassigned"
   const currentPaymentsLoading = isConfirmedView ? confirmedLoading : isUnassignedView ? unassignedLoading : livePaysLoading
+  const shiftOn = Boolean(activeShift)
+  const shiftAuto = Boolean(activeShift?.auto_opened)
+  const tripOn = Boolean(trip)
+  const tripAuto = Boolean((trip as any)?.auto_started)
 
   const fetchJson = useCallback(<T,>(path: string) => api<T>(path, { token }), [token])
 
@@ -1219,51 +1223,36 @@ useEffect(() => {
                   {currentPaymentsLoading ? <span className="spinner small" aria-hidden /> : null}
                   <span>Refresh</span>
                 </button>
-          {livePaysError && liveSubTab === "live" ? <span className="err small">{livePaysError}</span> : null}
-          {confirmedError && liveSubTab === "confirmed" ? <span className="err small">{confirmedError}</span> : null}
-          {unassignedError && liveSubTab === "unassigned" ? <span className="err small">{unassignedError}</span> : null}
-        </div>
-      </div>
-      <div className="ms-live-subtabs">
-        {[
-          { id: "live", label: "Live" },
-          { id: "confirmed", label: "Confirmed" },
-          { id: "unassigned", label: "Unassigned" },
-        ].map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            className={`ms-live-subtab${liveSubTab === t.id ? " active" : ""}`}
-            onClick={() => setLiveSubTab(t.id as typeof liveSubTab)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-      <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-        <span
-          className="badge"
-          style={{
-            background: activeShift ? "#ecfdf3" : "#fef3c7",
-            color: activeShift ? "#166534" : "#92400e",
-            border: "1px solid rgba(0,0,0,0.08)",
-          }}
-        >
-          Shift {activeShift ? "ON" : "OFF"} {activeShift?.auto_opened ? "• AUTO" : ""}
-        </span>
-        <span
-          className="badge"
-          style={{
-            background: trip ? "#eff6ff" : "#fef3c7",
-            color: trip ? "#1d4ed8" : "#92400e",
-            border: "1px solid rgba(0,0,0,0.08)",
-          }}
-        >
-          Trip {trip ? "ON" : "OFF"} {trip?.auto_started ? "• AUTO" : ""}
-        </span>
-      </div>
-    </div>
-          <div className="ms-live-scroll">
+                {livePaysError && liveSubTab === "live" ? <span className="err small">{livePaysError}</span> : null}
+                {confirmedError && liveSubTab === "confirmed" ? <span className="err small">{confirmedError}</span> : null}
+                {unassignedError && liveSubTab === "unassigned" ? <span className="err small">{unassignedError}</span> : null}
+              </div>
+            </div>
+            <div className="ms-live-subtabs ms-subtabs">
+              {[
+                { id: "live", label: "Live" },
+                { id: "confirmed", label: "Confirmed" },
+                { id: "unassigned", label: "Unassigned" },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`ms-live-subtab ms-subtab${liveSubTab === t.id ? " active" : ""}`}
+                  onClick={() => setLiveSubTab(t.id as typeof liveSubTab)}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <div className="ms-status-line">
+              Shift: {shiftOn ? "ON" : "OFF"}
+              {shiftOn && shiftAuto ? " (AUTO)" : ""}
+              {" · "}
+              Trip: {tripOn ? "ON" : "OFF"}
+              {tripOn && tripAuto ? " (AUTO)" : ""}
+            </div>
+          </div>
+<div className="ms-live-scroll">
             {!matatuId ? (
               <div className="muted small" style={{ marginTop: 8 }}>
                 No matatu assigned found for this account. Contact SACCO admin.
