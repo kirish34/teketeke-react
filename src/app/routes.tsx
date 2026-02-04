@@ -25,7 +25,6 @@ import AlertsPage from "../pages/system/AlertsPage";
 import QuarantinePage from "../pages/system/QuarantinePage";
 import AdminsPage from "../pages/system/AdminsPage";
 import OpsDashboard from "../dashboards/Ops";
-import DashHome from "../dashboards/DashHome";
 import WithdrawalPhonesRoute from "../pages/WithdrawalPhonesRoute";
 import PendingAccess from "../pages/PendingAccess";
 import MatatuLivePayments from "../pages/matatu/MatatuLivePayments";
@@ -35,14 +34,8 @@ export const routes: RouteObject[] = [
   { path: "/", element: <Navigate to="/role" replace /> },
   { path: "/login", element: <Login /> },
   { path: "/role", element: <RoleSelect /> },
-  { path: "/app", element: <Navigate to="/dash" replace /> },
-  { path: "/app/system", element: <Navigate to="/system" replace /> },
-  { path: "/app/sacco-admin", element: <Navigate to="/sacco" replace /> },
-  { path: "/app/sacco-staff", element: <Navigate to="/sacco/staff" replace /> },
-  { path: "/app/matatu-owner", element: <Navigate to="/matatu/owner" replace /> },
-  { path: "/app/matatu-staff", element: <Navigate to="/matatu/staff" replace /> },
   {
-    path: "/app/pending",
+    path: "/pending",
     element: (
       <RequireRole
         allow={[
@@ -58,25 +51,6 @@ export const routes: RouteObject[] = [
         ]}
       >
         <PendingAccess />
-      </RequireRole>
-    ),
-  },
-  {
-    path: "/dash",
-    element: (
-      <RequireRole
-        allow={[
-          "super_admin",
-          "system_admin",
-          "sacco_admin",
-          "sacco_staff",
-          "matatu_owner",
-          "matatu_staff",
-          "taxi",
-          "boda",
-        ]}
-      >
-        <DashHome />
       </RequireRole>
     ),
   },

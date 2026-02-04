@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import DashboardShell from '../../components/DashboardShell'
 import PaybillCodeCard from '../../components/PaybillCodeCard'
 import PaybillHeader from '../../components/PaybillHeader'
-import { authFetch } from '../../lib/auth'
+import { requestJson } from '../../lib/api'
 import { defaultOperatorType, getOperatorConfig, normalizeOperatorType, type OperatorType } from '../../lib/operatorConfig'
 import { useAuth } from '../../state/auth'
 
@@ -524,55 +524,30 @@ type MaintenanceLogRow = {
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const res = await authFetch(url, { headers: { Accept: 'application/json' } })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || res.statusText)
-  }
-  return (await res.json()) as T
+  return requestJson<T>(url)
 }
 
 async function fetchList<T>(url: string): Promise<T[]> {
-  const res = await authFetch(url, { headers: { Accept: 'application/json' } })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || res.statusText)
-  }
-  const data = await res.json()
+  const data = await requestJson<unknown>(url)
   if (Array.isArray(data)) return data as T[]
   if (Array.isArray(data?.items)) return data.items as T[]
   return []
 }
 
 async function postJson(url: string) {
-  const res = await authFetch(url, { method: 'POST', headers: { Accept: 'application/json' } })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || res.statusText)
-  }
-  return res.json().catch(() => ({}))
+  return requestJson(url, { method: 'POST', headers: { Accept: 'application/json' } })
 }
 
 async function sendJson<T = unknown>(url: string, method: 'POST' | 'PATCH', body: Record<string, unknown>) {
-  const res = await authFetch(url, {
+  return requestJson<T>(url, {
     method,
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || res.statusText)
-  }
-  return (await res.json().catch(() => ({}))) as T
 }
 
 async function deleteJson(url: string) {
-  const res = await authFetch(url, { method: 'DELETE', headers: { Accept: 'application/json' } })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || res.statusText)
-  }
-  return res.json().catch(() => ({}))
+  return requestJson(url, { method: 'DELETE', headers: { Accept: 'application/json' } })
 }
 
 const formatKes = (val?: number | null) => `KES ${(Number(val || 0)).toLocaleString('en-KE')}`

@@ -2,7 +2,7 @@
 import DashboardShell from "../components/DashboardShell"
 import PaybillCodeCard from "../components/PaybillCodeCard"
 import PaybillHeader from "../components/PaybillHeader"
-import { authFetch } from "../lib/auth"
+import { requestJson } from "../lib/api"
 import { mapPaybillCodes, PAYBILL_NUMBER, type PaybillAliasRow } from "../lib/paybill"
 import { useAuth } from "../state/auth"
 import { useEntityWallet } from "../hooks/useEntityWallet"
@@ -50,15 +50,6 @@ type ExpenseRow = {
 
 type Settings = {
   monthly_savings_target_kes?: number
-}
-
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await authFetch(url, init)
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || res.statusText)
-  }
-  return (await res.json()) as T
 }
 
 const formatKes = (val?: number | null) => `KES ${(Number(val || 0)).toLocaleString("en-KE")}`
@@ -130,9 +121,9 @@ const BodaDashboard = () => {
       setError(null)
       try {
         const [sumRes, weekRes, monthRes] = await Promise.all([
-          fetchJson<Summary>(`/api/boda/summary?date=${todayISO}`),
-          fetchJson<{ totals?: InsightTotals; trend?: InsightRow[] }>(`/api/boda/insights?start=${weekStartISO}&end=${todayISO}`),
-          fetchJson<{ totals?: InsightTotals; expenses?: { categories?: Array<{ category?: string; amount?: number }> } }>(
+          requestJson<Summary>(`/api/boda/summary?date=${todayISO}`),
+          requestJson<{ totals?: InsightTotals; trend?: InsightRow[] }>(`/api/boda/insights?start=${weekStartISO}&end=${todayISO}`),
+          requestJson<{ totals?: InsightTotals; expenses?: { categories?: Array<{ category?: string; amount?: number }> } }>(
             `/api/boda/insights?start=${monthStartISO}&end=${todayISO}`,
           ),
         ])
@@ -142,13 +133,13 @@ const BodaDashboard = () => {
         setMonthTotals(monthRes?.totals || null)
         setExpCats(monthRes?.expenses?.categories || [])
 
-        const cashRes = await fetchJson<{ items?: CashRow[] }>("/api/boda/cash?limit=200")
+        const cashRes = await requestJson<{ items?: CashRow[] }>("/api/boda/cash?limit=200")
         setCashRecent(filterToday(cashRes.items || []))
 
-        const expRes = await fetchJson<{ items?: ExpenseRow[] }>("/api/boda/expenses?limit=200")
+        const expRes = await requestJson<{ items?: ExpenseRow[] }>("/api/boda/expenses?limit=200")
         setExpRecent(filterToday(expRes.items || []))
 
-        const settingsRes = await fetchJson<Settings>("/api/boda/settings")
+        const settingsRes = await requestJson<Settings>("/api/boda/settings")
         const tgt = Number(settingsRes?.monthly_savings_target_kes || 0)
         setTarget(tgt || "")
         updateTargetSummary(tgt, monthRes?.totals?.net)
@@ -168,7 +159,7 @@ const BodaDashboard = () => {
     }
     async function loadPaybillCodes() {
       try {
-        const res = await fetchJson<{ items?: PaybillAliasRow[] }>(
+        const res = await requestJson<{ items?: PaybillAliasRow[] }>(
           `/u/paybill-codes?entity_type=BODA&entity_id=${encodeURIComponent(entityId)}`,
         )
         setPaybillAliases(res.items || [])
@@ -216,7 +207,7 @@ const BodaDashboard = () => {
     }
     setCashMsg("Saving...")
     try {
-      await authFetch("/api/boda/cash", {
+      await requestJson("/api/boda/cash", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -228,7 +219,7 @@ const BodaDashboard = () => {
       })
       setCashMsg("Cash saved")
       setCashForm({ amount: "", payer_name: "", phone: "", notes: "" })
-      const cashRes = await fetchJson<{ items?: CashRow[] }>("/api/boda/cash?limit=200")
+      const cashRes = await requestJson<{ items?: CashRow[] }>("/api/boda/cash?limit=200")
       setCashRecent(filterToday(cashRes.items || []))
     } catch (err) {
       setCashMsg(err instanceof Error ? err.message : "Save failed")
@@ -240,7 +231,7 @@ const BodaDashboard = () => {
     if (cashFrom) params.set("from", cashFrom)
     if (cashTo) params.set("to", cashTo)
     try {
-      const data = await fetchJson<{ items?: CashRow[] }>(`/api/boda/cash?${params.toString()}`)
+      const data = await requestJson<{ items?: CashRow[] }>(`/api/boda/cash?${params.toString()}`)
       setCashSearch(data.items || [])
     } catch (err) {
       setCashSearch([])
@@ -255,7 +246,7 @@ const BodaDashboard = () => {
     }
     setExpMsg("Saving...")
     try {
-      await authFetch("/api/boda/expenses", {
+      await requestJson("/api/boda/expenses", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -266,7 +257,7 @@ const BodaDashboard = () => {
       })
       setExpMsg("Expense saved")
       setExpForm({ category: "Fuel", amount: "", notes: "" })
-      const expRes = await fetchJson<{ items?: ExpenseRow[] }>("/api/boda/expenses?limit=200")
+      const expRes = await requestJson<{ items?: ExpenseRow[] }>("/api/boda/expenses?limit=200")
       setExpRecent(filterToday(expRes.items || []))
     } catch (err) {
       setExpMsg(err instanceof Error ? err.message : "Save failed")
@@ -310,7 +301,7 @@ const BodaDashboard = () => {
     }
     setTargetMsg("Saving target...")
     try {
-      const data = await fetchJson<Settings>("/api/boda/settings", {
+      const data = await requestJson<Settings>("/api/boda/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ monthly_savings_target_kes: raw }),
@@ -329,7 +320,7 @@ const BodaDashboard = () => {
     if (expFrom) params.set("from", expFrom)
     if (expTo) params.set("to", expTo)
     try {
-      const data = await fetchJson<{ items?: ExpenseRow[] }>(`/api/boda/expenses?${params.toString()}`)
+      const data = await requestJson<{ items?: ExpenseRow[] }>(`/api/boda/expenses?${params.toString()}`)
       setExpSearch(data.items || [])
     } catch (err) {
       setExpSearch([])
@@ -809,4 +800,3 @@ const BodaDashboard = () => {
 }
 
 export default BodaDashboard
-

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { authFetch } from '../../lib/auth'
+import { ApiError, requestJson } from '../../lib/api'
 import { SystemPageHeader } from './SystemPageHeader'
 
 type OverviewCounts = {
@@ -77,15 +77,6 @@ type ReconException = {
   created_at?: string
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const res = await authFetch(url, { headers: { Accept: 'application/json' } })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || res.statusText)
-  }
-  return (await res.json()) as T
-}
-
 function toList<T>(value: unknown): T[] {
   if (Array.isArray(value)) return value as T[]
   if (Array.isArray((value as { items?: unknown })?.items)) return ((value as { items: unknown[] }).items || []) as T[]
@@ -113,10 +104,10 @@ export default function OverviewPage() {
     setError(null)
     try {
       const [overviewRes, deviceResRaw, assignmentResRaw, auditRes] = await Promise.all([
-        fetchJson<SystemOverview>('/api/admin/system-overview'),
-        fetchJson<unknown>('/api/registry/devices'),
-        fetchJson<unknown>('/api/registry/assignments'),
-        fetchJson<{ items?: AdminAuditLog[] } | { ok?: boolean; items?: AdminAuditLog[] }>('/api/admin/audit?limit=20'),
+        requestJson<SystemOverview>('/api/admin/system-overview'),
+        requestJson<unknown>('/api/registry/devices'),
+        requestJson<unknown>('/api/registry/assignments'),
+        requestJson<{ items?: AdminAuditLog[] } | { ok?: boolean; items?: AdminAuditLog[] }>('/api/admin/audit?limit=20'),
       ])
       setOverview(overviewRes || null)
       setDevices(toList<RegistryDevice>(deviceResRaw))
@@ -124,28 +115,20 @@ export default function OverviewPage() {
       const auditItems = Array.isArray((auditRes as any)?.items) ? ((auditRes as any).items as AdminAuditLog[]) : []
       setAuditLogs(auditItems.slice(0, 20))
       try {
-        const [summaryRes, eventsRes] = await Promise.all([
-          authFetch('/api/admin/callback-audit/summary?from=&to='),
-          authFetch('/api/admin/callback-audit/events?limit=10&result=failure'),
+        const [summaryJson, eventsJson] = await Promise.all([
+          requestJson<{ rows?: CallbackSummaryRow[] }>('/api/admin/callback-audit/summary?from=&to='),
+          requestJson<{ items?: CallbackEvent[] }>('/api/admin/callback-audit/events?limit=10&result=failure'),
         ])
-        if (summaryRes.status === 403 || eventsRes.status === 403) {
-          setCallbackError('Not permitted')
-        } else {
-          if (!summaryRes.ok) {
-            throw new Error(await summaryRes.text())
-          }
-          if (!eventsRes.ok) {
-            throw new Error(await eventsRes.text())
-          }
-          const summaryJson = (await summaryRes.json()) as { rows?: CallbackSummaryRow[] }
-          const eventsJson = (await eventsRes.json()) as { items?: CallbackEvent[] }
         setCallbackSummary(summaryJson.rows || [])
         setCallbackEvents(eventsJson.items || [])
         setCallbackError(null)
-      }
-    } catch (cbErr) {
-        const msg = cbErr instanceof Error ? cbErr.message : 'Failed to load callback audit'
-        setCallbackError(msg)
+      } catch (cbErr) {
+        if (cbErr instanceof ApiError && cbErr.status === 403) {
+          setCallbackError('Not permitted')
+        } else {
+          const msg = cbErr instanceof Error ? cbErr.message : 'Failed to load callback audit'
+          setCallbackError(msg)
+        }
         setCallbackSummary([])
         setCallbackEvents([])
       }
@@ -160,24 +143,20 @@ export default function OverviewPage() {
 
     // Reconciliation data (ignore errors separately)
     try {
-      const [runsRes, excRes] = await Promise.all([
-        authFetch('/api/admin/reconciliation/runs?limit=1'),
-        authFetch('/api/admin/reconciliation/exceptions?limit=10'),
+      const [runsJson, excJson] = await Promise.all([
+        requestJson<{ items?: ReconRun[] }>('/api/admin/reconciliation/runs?limit=1'),
+        requestJson<{ items?: ReconException[] }>('/api/admin/reconciliation/exceptions?limit=10'),
       ])
-      if (runsRes.status === 403 || excRes.status === 403) {
+      setReconRuns(runsJson.items || [])
+      setReconExceptions(excJson.items || [])
+      setReconError(null)
+    } catch (rErr) {
+      if (rErr instanceof ApiError && rErr.status === 403) {
         setReconError('Not permitted')
       } else {
-        if (!runsRes.ok) throw new Error(await runsRes.text())
-        if (!excRes.ok) throw new Error(await excRes.text())
-        const runsJson = (await runsRes.json()) as { items?: ReconRun[] }
-        const excJson = (await excRes.json()) as { items?: ReconException[] }
-        setReconRuns(runsJson.items || [])
-        setReconExceptions(excJson.items || [])
-        setReconError(null)
+        const msg = rErr instanceof Error ? rErr.message : 'Failed to load reconciliation'
+        setReconError(msg)
       }
-    } catch (rErr) {
-      const msg = rErr instanceof Error ? rErr.message : 'Failed to load reconciliation'
-      setReconError(msg)
       setReconRuns([])
       setReconExceptions([])
     }
@@ -424,20 +403,19 @@ export default function OverviewPage() {
               const from = new Date(now.getTime() - 24 * 3600 * 1000).toISOString();
               const to = now.toISOString();
               try {
-                const res = await authFetch('/api/admin/reconciliation/run', {
+                await requestJson('/api/admin/reconciliation/run', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ from, to }),
                 });
-                if (res.status === 403) {
-                  setReconError('Not permitted');
-                  return;
-                }
-                if (!res.ok) throw new Error(await res.text());
                 setReconError(null);
                 void loadAll();
               } catch (err) {
-                setReconError(err instanceof Error ? err.message : 'Failed to run reconciliation');
+                if (err instanceof ApiError && err.status === 403) {
+                  setReconError('Not permitted');
+                } else {
+                  setReconError(err instanceof Error ? err.message : 'Failed to run reconciliation');
+                }
               }
             }}
           >

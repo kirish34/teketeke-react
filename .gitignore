@@ -29,3 +29,6 @@ dist-ssr
 !.env.example
 
 .vercel
+
+# Route audit artifacts
+docs/route-audit/*.json

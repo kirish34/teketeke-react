@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { authFetch } from '../../lib/auth'
+import { ApiError, requestJson } from '../../lib/api'
 import { SystemPageHeader } from './SystemPageHeader'
 
 type Overview = {
@@ -53,26 +53,26 @@ export default function MonitoringPage() {
     setLoading(true)
     setError(null)
     try {
-      const [overviewRes, callbacksRes, withdrawalsRes] = await Promise.all([
-        authFetch(`/api/admin/monitoring/overview?from=${encodeURIComponent(rangeParams.from)}&to=${encodeURIComponent(rangeParams.to)}`),
-        authFetch(
+      const [ov, callbacksRes, withdrawalsRes] = await Promise.all([
+        requestJson<Overview>(
+          `/api/admin/monitoring/overview?from=${encodeURIComponent(rangeParams.from)}&to=${encodeURIComponent(rangeParams.to)}`,
+        ),
+        requestJson<{ items?: CallbackRow[] }>(
           `/api/admin/monitoring/callbacks?result=failure&limit=20&from=${encodeURIComponent(rangeParams.from)}&to=${encodeURIComponent(rangeParams.to)}`,
         ),
-        authFetch(
+        requestJson<{ items?: WithdrawalRow[] }>(
           `/api/admin/monitoring/payouts?limit=20&from=${encodeURIComponent(rangeParams.from)}&to=${encodeURIComponent(rangeParams.to)}`,
         ),
       ])
-      if (overviewRes.status === 403) throw new Error('Not permitted')
-      const ov = (await overviewRes.json()) as Overview
       setOverview(ov)
-
-      if (callbacksRes.status === 403) setCallbacks([])
-      else setCallbacks(((await callbacksRes.json()) as any)?.items || [])
-
-      if (withdrawalsRes.status === 403) setWithdrawals([])
-      else setWithdrawals(((await withdrawalsRes.json()) as any)?.items || [])
+      setCallbacks(callbacksRes.items || [])
+      setWithdrawals(withdrawalsRes.items || [])
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load monitoring')
+      if (err instanceof ApiError && err.status === 403) {
+        setError('Not permitted')
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to load monitoring')
+      }
     } finally {
       setLoading(false)
     }

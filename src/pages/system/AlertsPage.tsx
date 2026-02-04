@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { authFetch } from '../../lib/auth'
+import { ApiError, requestJson } from '../../lib/api'
 import { SystemPageHeader } from './SystemPageHeader'
 
 type AlertRow = {
@@ -56,12 +56,14 @@ export default function AlertsPage() {
     setLoading(true)
     setError(null)
     try {
-      const res = await authFetch(`/api/admin/fraud/alerts?${query}`)
-      if (res.status === 403) throw new Error('Not permitted')
-      const json = await res.json()
+      const json = await requestJson<{ items?: AlertRow[] }>(`/api/admin/fraud/alerts?${query}`)
       setAlerts(json.items || [])
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load alerts')
+      if (err instanceof ApiError && err.status === 403) {
+        setError('Not permitted')
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to load alerts')
+      }
       setAlerts([])
     } finally {
       setLoading(false)
@@ -77,12 +79,11 @@ export default function AlertsPage() {
     setActionMsg('')
     setActionErr('')
     try {
-      const res = await authFetch(`/api/admin/fraud/alerts/${encodeURIComponent(id)}/status`, {
+      await requestJson(`/api/admin/fraud/alerts/${encodeURIComponent(id)}/status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: nextStatus, note }),
       })
-      if (!res.ok) throw new Error(await res.text())
       setActionMsg(`Status updated to ${nextStatus}`)
       await loadAlerts()
     } catch (err) {
@@ -98,12 +99,11 @@ export default function AlertsPage() {
     const assigned_to = raw.trim() ? raw.trim() : null
     const note = window.prompt('Add note for assignment (optional)', '') || undefined
     try {
-      const res = await authFetch(`/api/admin/fraud/alerts/${encodeURIComponent(id)}/assign`, {
+      await requestJson(`/api/admin/fraud/alerts/${encodeURIComponent(id)}/assign`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ assigned_to, note }),
       })
-      if (!res.ok) throw new Error(await res.text())
       setActionMsg('Assignment updated')
       await loadAlerts()
     } catch (err) {
@@ -115,9 +115,10 @@ export default function AlertsPage() {
     setActionMsg('')
     setActionErr('')
     try {
-      const res = await authFetch('/api/admin/fraud/escalate/run', { method: 'POST' })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json?.error || 'Failed to run escalation')
+      const json = await requestJson<{ queued?: boolean; job_id?: string; escalated?: number; reminded?: number }>(
+        '/api/admin/fraud/escalate/run',
+        { method: 'POST' },
+      )
       const msg = json.queued
         ? `Escalation queued (${json.job_id || 'job'})`
         : `Escalation run: escalated ${json.escalated || 0}, reminded ${json.reminded || 0}`

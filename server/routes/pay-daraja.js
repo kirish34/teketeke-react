@@ -524,6 +524,8 @@ router.post('/stk/callback', async (req,res)=>{
     }
 
     const client = await pool.connect();
+    let ledgerResult = null;
+    let creditSucceeded = false;
     try {
       await client.query('BEGIN');
       if (paymentRow?.id) {
@@ -543,7 +545,7 @@ router.post('/stk/callback', async (req,res)=>{
         }
       }
       const providerRef = receipt || checkoutRequestId || (paymentRow ? String(paymentRow.id) : null);
-      const ledgerResult = await creditFareWithFeesByWalletId({
+      ledgerResult = await creditFareWithFeesByWalletId({
         walletId,
         amount,
         source: 'MPESA_STK',
@@ -566,6 +568,7 @@ router.post('/stk/callback', async (req,res)=>{
         }
       }
       await client.query('COMMIT');
+      creditSucceeded = true;
     } catch (err) {
       await client.query('ROLLBACK');
       console.error('Error crediting wallet for STK:', err.message);
@@ -583,7 +586,8 @@ router.post('/stk/callback', async (req,res)=>{
       req,
       key: idempotencyKey || sourceRef || checkoutRequestId || null,
       kind: 'STK_CALLBACK',
-      result: ledgerResult?.deduped ? 'accepted_deduped' : 'accepted',
+      result: creditSucceeded ? (ledgerResult?.deduped ? 'accepted_deduped' : 'accepted') : 'rejected',
+      reason: creditSucceeded ? undefined : 'credit_failed',
     });
     return safeAck(res, { ok: true });
   } catch (err) {
