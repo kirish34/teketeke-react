@@ -102,7 +102,7 @@ export default function IntelligencePage() {
 
       <div className="row" style={{ flexWrap: 'wrap', gap: 12 }}>
         <StatCard title="Fees collected" value={overview?.revenue?.fees_collected ?? 0} />
-        <StatCard title="Payouts total" value={overview?.revenue?.payouts_total ?? 0} />
+        <StatCard title="Withdrawals total" value={overview?.revenue?.payouts_total ?? 0} />
         <StatCard title="Net flow" value={overview?.revenue?.net_flow ?? 0} />
       </div>
 
@@ -117,7 +117,7 @@ export default function IntelligencePage() {
       </div>
 
       <div className="row" style={{ flexWrap: 'wrap', gap: 12 }}>
-        <StatCard title="Payout fail rate" value={`${overview?.ops?.payout_fail_rate ?? 0}%`} />
+        <StatCard title="Withdrawal fail rate" value={`${overview?.ops?.payout_fail_rate ?? 0}%`} />
         <StatCard title="Recon exceptions" value={overview?.ops?.recon_exception_rate ?? 0} />
         <StatCard title="Open high alerts" value={overview?.ops?.fraud_open_high ?? 0} />
         <StatCard title="Quarantine open" value={overview?.ops?.quarantine_open ?? 0} />

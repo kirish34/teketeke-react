@@ -122,22 +122,7 @@ async function quarantineOperation({
     record = existing.rows?.[0] || null;
   }
 
-  switch (operationType) {
-    case 'PAYOUT_ITEM':
-      await db.query(
-        `UPDATE payout_items SET status = 'QUARANTINED', failure_reason = $2 WHERE id = $1`,
-        [operationId, reason],
-      );
-      break;
-    case 'PAYOUT_BATCH':
-      await db.query(`UPDATE payout_batches SET status = 'QUARANTINED' WHERE id = $1`, [operationId]);
-      await db.query(`UPDATE payout_items SET status = 'QUARANTINED' WHERE batch_id = $1 AND status = 'PENDING'`, [
-        operationId,
-      ]);
-      break;
-    default:
-      break;
-  }
+  // No-op for payout batch/item quarantine (legacy flow removed)
 
   await logAdminAction({
     req: actorReq || { user: { id: null, role: null } },
@@ -174,32 +159,7 @@ async function releaseOperation({
   const record = rows[0];
 
   if (resume) {
-    if (record.operation_type === 'PAYOUT_ITEM') {
-      const { processPayoutBatch } = require('./payoutBatchProcessor.service'); // lazy to avoid circular import
-      const itemRes = await db.query(`SELECT batch_id FROM payout_items WHERE id = $1 LIMIT 1`, [record.operation_id]);
-      const batchId = itemRes.rows?.[0]?.batch_id || null;
-      await db.query(`UPDATE payout_items SET status = 'PENDING' WHERE id = $1`, [record.operation_id]);
-      if (batchId) {
-        await processPayoutBatch({
-          batchId,
-          actorUserId,
-          actorRole,
-          requestId: `release-${id}`,
-        });
-      }
-    } else if (record.operation_type === 'PAYOUT_BATCH') {
-      const { processPayoutBatch } = require('./payoutBatchProcessor.service'); // lazy
-      await db.query(`UPDATE payout_items SET status = 'PENDING' WHERE batch_id = $1 AND status = 'QUARANTINED'`, [
-        record.operation_id,
-      ]);
-      await db.query(`UPDATE payout_batches SET status = 'APPROVED' WHERE id = $1`, [record.operation_id]);
-      await processPayoutBatch({
-        batchId: record.operation_id,
-        actorUserId,
-        actorRole,
-        requestId: `release-${id}`,
-      });
-    } else if (record.operation_type === 'WALLET_CREDIT') {
+    if (record.operation_type === 'WALLET_CREDIT') {
       const payload = record.payload || {};
       await creditWallet({
         virtualAccountCode: payload.virtualAccountCode,

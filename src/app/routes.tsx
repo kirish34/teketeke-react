@@ -26,7 +26,6 @@ import QuarantinePage from "../pages/system/QuarantinePage";
 import AdminsPage from "../pages/system/AdminsPage";
 import OpsDashboard from "../dashboards/Ops";
 import DashHome from "../dashboards/DashHome";
-import SaccoApprovals from "../pages/SaccoApprovals";
 import WithdrawalPhonesRoute from "../pages/WithdrawalPhonesRoute";
 import PendingAccess from "../pages/PendingAccess";
 import MatatuLivePayments from "../pages/matatu/MatatuLivePayments";
@@ -176,20 +175,10 @@ export const routes: RouteObject[] = [
       { path: "operators", element: <OperatorsPage /> },
       { path: "payments", element: <PaymentsPage /> },
       { path: "finance", element: <FinancePage /> },
-      { path: "payouts", element: <FinancePage initialTab="payouts" /> },
-      { path: "worker-monitor", element: <FinancePage initialTab="worker_monitor" /> },
       { path: "comms", element: <CommsPage /> },
       { path: "registry", element: <RegistryPage /> },
       { path: "*", element: <Navigate to="/system" replace /> },
     ],
-  },
-  {
-    path: "/sacco/approvals",
-    element: (
-      <RequireRole allow={["super_admin", "system_admin", "sacco_admin"]}>
-        <SaccoApprovals />
-      </RequireRole>
-    ),
   },
   {
     path: "/ops",

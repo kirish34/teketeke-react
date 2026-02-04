@@ -9,7 +9,7 @@ function mockPool(rowsMap) {
   return {
     async query(sql, params) {
       if (/mpesa_callback/.test(sql) && /duplicate/.test(sql)) return { rows: rowsMap.dup || [] };
-      if (/payout_items/.test(sql) && /FAILED/.test(sql)) return { rows: rowsMap.payout || [] };
+      if (/withdrawals/.test(sql) && /FAILED/.test(sql)) return { rows: rowsMap.payout || [] };
       return { rows: [] };
     },
   };

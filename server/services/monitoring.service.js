@@ -38,37 +38,26 @@ async function getCallbackOverview({ from, to, db = pool }) {
 
 async function getPayoutOverview({ from, to, db = pool }) {
   const { fromTs, toTs } = parseRange({ from, to });
-  const batchRes = await db.query(
+  const payoutRes = await db.query(
     `
-      SELECT status, COUNT(*)::int AS count
-      FROM payout_batches
-      WHERE created_at BETWEEN $1 AND $2
-      GROUP BY status
-    `,
-    [fromTs.toISOString(), toTs.toISOString()],
-  );
-  const itemRes = await db.query(
-    `
-      SELECT status, COUNT(*)::int AS count,
+      SELECT status,
+             COUNT(*)::int AS count,
              AVG(extract(epoch from (COALESCE(updated_at, now()) - created_at))) AS avg_time_sec
-      FROM payout_items
+      FROM withdrawals
       WHERE created_at BETWEEN $1 AND $2
       GROUP BY status
     `,
     [fromTs.toISOString(), toTs.toISOString()],
   );
-  const batches = {};
-  (batchRes.rows || []).forEach((r) => {
-    batches[r.status] = r.count;
-  });
-  const items = { total: 0, success: 0, failed: 0, avg_time_sec: null };
+  const items = { total: 0, success: 0, failed: 0, processing: 0, avg_time_sec: null };
   let avgCount = 0;
   let avgTotal = 0;
-  (itemRes.rows || []).forEach((r) => {
+  (payoutRes.rows || []).forEach((r) => {
     items.total += r.count;
     const st = (r.status || '').toUpperCase();
-    if (['SENT', 'PAID', 'SUCCESS', 'COMPLETED'].includes(st)) items.success += r.count;
-    if (['FAILED', 'BLOCKED', 'REJECTED'].includes(st)) items.failed += r.count;
+    if (st === 'SUCCESS' || st === 'PAID') items.success += r.count;
+    if (st === 'FAILED') items.failed += r.count;
+    if (st === 'PROCESSING' || st === 'PENDING' || st === 'SENT') items.processing += r.count;
     if (r.avg_time_sec !== null) {
       avgTotal += Number(r.avg_time_sec || 0) * r.count;
       avgCount += r.count;
@@ -76,12 +65,13 @@ async function getPayoutOverview({ from, to, db = pool }) {
   });
   items.avg_time_sec = avgCount ? Math.round(avgTotal / avgCount) : null;
   return {
-    batches_total: Object.values(batches).reduce((a, b) => a + b, 0),
-    batches_processing: batches.PROCESSING || 0,
-    batches_done: (batches.COMPLETED || 0) + (batches.FAILED || 0) + (batches.CANCELLED || 0),
+    batches_total: 0,
+    batches_processing: 0,
+    batches_done: 0,
     items_total: items.total,
     items_success: items.success,
     items_failed: items.failed,
+    items_processing: items.processing,
     avg_time_sec: items.avg_time_sec,
   };
 }
@@ -176,28 +166,25 @@ async function listCallbacks({ from, to, kind, result, limit = 50, db = pool }) 
 async function listPayouts({ from, to, status, limit = 50, db = pool }) {
   const { fromTs, toTs } = parseRange({ from, to });
   const params = [fromTs.toISOString(), toTs.toISOString()];
-  const where = ['pi.created_at BETWEEN $1 AND $2'];
+  const where = ['created_at BETWEEN $1 AND $2'];
   if (status) {
     params.push(status.toUpperCase());
-    where.push(`pi.status = $${params.length}`);
+    where.push(`status = $${params.length}`);
   } else {
-    where.push(`pi.status IN ('FAILED','BLOCKED','REJECTED')`);
+    where.push(`status = 'FAILED'`);
   }
   params.push(limit);
   const res = await db.query(
     `
       SELECT
-        pi.id,
-        pi.status,
-        pi.failure_reason,
-        pi.amount,
-        pi.created_at,
-        pb.id AS batch_id,
-        pb.status AS batch_status
-      FROM payout_items pi
-      LEFT JOIN payout_batches pb ON pb.id = pi.batch_id
+        id,
+        status,
+        failure_reason,
+        amount,
+        created_at
+      FROM withdrawals
       WHERE ${where.join(' AND ')}
-      ORDER BY pi.created_at DESC
+      ORDER BY created_at DESC
       LIMIT $${params.length}
     `,
     params,

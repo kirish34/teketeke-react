@@ -5,9 +5,6 @@ import { useAuth } from '../../state/auth'
 
 const financeTabs: Array<{ id: SystemTabId; label: string }> = [
   { id: 'finance', label: 'Finance' },
-  { id: 'payouts', label: 'Payouts' },
-  { id: 'payout_approvals', label: 'Approvals' },
-  { id: 'worker_monitor', label: 'Workers' },
 ]
 
 type FinancePageProps = {
@@ -43,7 +40,7 @@ export default function FinancePage({ initialTab }: FinancePageProps) {
     <div className="stack">
       <SystemPageHeader
         title="Finance"
-        subtitle="Wallets, payouts, and worker monitoring"
+        subtitle="Wallets and withdrawals"
         lastUpdated={lastUpdated}
         onRefresh={handleRefresh}
         actions={

@@ -5,8 +5,6 @@ import PaybillCodeCard from '../../components/PaybillCodeCard'
 import PaybillHeader from '../../components/PaybillHeader'
 import { authFetch } from '../../lib/auth'
 import { defaultOperatorType, getOperatorConfig, normalizeOperatorType, type OperatorType } from '../../lib/operatorConfig'
-import PayoutHistory from '../PayoutHistory'
-import WorkerMonitor from '../WorkerMonitor'
 import { useAuth } from '../../state/auth'
 
 type OverviewCounts = {
@@ -379,9 +377,7 @@ type SystemTabId =
   | 'reconciliation'
   | 'quarantine'
   | 'alerts'
-  | 'payouts'
   | 'payout_approvals'
-  | 'worker_monitor'
   | 'saccos'
   | 'matatu'
   | 'taxis'
@@ -1440,9 +1436,6 @@ const SystemDashboard = ({
     { id: 'reconciliation', label: 'Reconciliation' },
     { id: 'quarantine', label: 'Quarantine' },
     { id: 'alerts', label: 'Alerts' },
-    { id: 'payouts', label: 'B2C Payouts' },
-    { id: 'payout_approvals', label: 'Payout Approvals' },
-    { id: 'worker_monitor', label: 'Worker Monitor' },
     { id: 'saccos', label: 'Operators' },
     { id: 'matatu', label: 'Shuttles' },
     { id: 'taxis', label: 'Taxis' },
@@ -1457,13 +1450,9 @@ const SystemDashboard = ({
 
   const tabFromState = tabs.find((t) => t.id === (location.state as { tab?: string } | null)?.tab)?.id || null
   const tabFromPath =
-    location.pathname === '/system/payouts'
-      ? 'payouts'
-      : location.pathname === '/system/worker-monitor'
-        ? 'worker_monitor'
-        : location.pathname === '/system/admins'
-          ? 'system_admins'
-        : null
+    location.pathname === '/system/admins'
+      ? 'system_admins'
+      : null
 
   useEffect(() => {
     if (isControlledTab) return
@@ -3693,9 +3682,6 @@ const SystemDashboard = ({
     }
     if (activeTab === 'alerts') {
       void loadAlerts({ page: 1 })
-    }
-    if (activeTab === 'payout_approvals') {
-      void loadPayoutApprovals()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
@@ -8465,377 +8451,7 @@ const SystemDashboard = ({
       </section>
         </>
       ) : null}
-
-      {activeTab === 'payouts' ? <PayoutHistory canAct={canFinanceAct} /> : null}
-
-      {activeTab === 'payout_approvals' ? (
-        <>
-          <section className="card">
-            <div className="topline">
-              <h3 style={{ margin: 0 }}>Payout Approvals</h3>
-              <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-                <label className="muted small">
-                  Status
-                  <select
-                    value={payoutApprovalStatus}
-                    onChange={(e) => loadPayoutApprovals(e.target.value)}
-                    style={{ padding: 10, marginLeft: 8 }}
-                  >
-                    <option value="SUBMITTED">SUBMITTED</option>
-                    <option value="APPROVED">APPROVED</option>
-                    <option value="PROCESSING">PROCESSING</option>
-                    <option value="COMPLETED">COMPLETED</option>
-                    <option value="FAILED">FAILED</option>
-                    <option value="CANCELLED">CANCELLED</option>
-                  </select>
-                </label>
-                <button className="btn ghost" type="button" onClick={() => loadPayoutApprovals()}>
-                  Reload
-                </button>
-                <span className="muted small">{payoutApprovalMsg}</span>
-                {payoutJobId ? (
-                  <a
-                    className="btn ghost"
-                    href={`/api/admin/jobs/${encodeURIComponent(payoutJobId)}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    View job {payoutJobId}
-                  </a>
-                ) : null}
-                {payoutApprovalError ? <span className="err">{payoutApprovalError}</span> : null}
-              </div>
-            </div>
-            <div className="muted small" style={{ marginTop: 6 }}>
-              Only MSISDN payouts are automated in v1. PayBill/Till destinations require manual transfer.
-            </div>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Date range</th>
-                    <th>SACCO</th>
-                    <th>Status</th>
-                    <th>Readiness</th>
-                    <th>Total</th>
-                    <th>Created</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {payoutApprovalRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="muted">
-                        No payout batches.
-                      </td>
-                    </tr>
-                  ) : (
-                    payoutApprovalRows.map((row) => (
-                      <tr
-                        key={row.id}
-                        style={row.id && row.id === payoutApprovalSelected ? { background: '#f1f5f9' } : undefined}
-                      >
-                        <td>
-                          <div>
-                            {row.date_from} to {row.date_to}
-                            {row.meta?.auto_draft ? (
-                              <span className="badge-ghost" style={{ marginLeft: 6 }}>
-                                AUTO-DRAFT
-                              </span>
-                            ) : null}
-                          </div>
-                        </td>
-                        <td>{row.sacco_name || row.sacco_id || '-'}</td>
-                        <td>{row.status}</td>
-                        <td>
-                          {(() => {
-                            const chip = buildReadinessChip(row.id ? payoutReadinessMap[row.id] : null)
-                            return (
-                              <span
-                                className="badge-ghost"
-                                style={
-                                  chip.tone === 'bad'
-                                    ? { borderColor: '#ef4444', color: '#b91c1c' }
-                                    : chip.tone === 'good'
-                                      ? { borderColor: '#22c55e', color: '#15803d' }
-                                      : undefined
-                                }
-                              >
-                                {chip.label}
-                              </span>
-                            )
-                          })()}
-                        </td>
-                        <td>{formatKes(row.total_amount)}</td>
-                        <td>{row.created_at ? new Date(row.created_at).toLocaleString() : '-'}</td>
-                        <td className="row" style={{ gap: 6 }}>
-                          <button
-                            className="btn ghost"
-                            type="button"
-                            onClick={() => loadPayoutApprovalDetail(row.id || '')}
-                          >
-                            View
-                          </button>
-                          {row.status === 'SUBMITTED' ? (
-                            <button
-                              type="button"
-                              onClick={() => approvePayoutBatch(row.id || '')}
-                              disabled={
-                                !canFinanceAct ||
-                                (!!row.id && payoutReadinessMap[row.id]?.checks?.can_approve?.pass === false)
-                              }
-                              title={
-                                row.id && payoutReadinessMap[row.id]?.checks?.can_approve?.pass === false
-                                  ? payoutReadinessMap[row.id]?.checks?.can_approve?.reason || 'Cannot approve'
-                                  : ''
-                              }
-                            >
-                              {canFinanceAct ? 'Approve' : '🔒 Admin only'}
-                            </button>
-                          ) : null}
-                          {row.status === 'APPROVED' || row.status === 'PROCESSING' ? (
-                            <button
-                              type="button"
-                              onClick={() => processPayoutBatch(row.id || '')}
-                              disabled={
-                                !canFinanceAct ||
-                                (!!row.id && payoutReadinessMap[row.id]?.checks?.can_process?.pass === false)
-                              }
-                              title={
-                                row.id && payoutReadinessMap[row.id]?.checks?.can_process?.pass === false
-                                  ? payoutReadinessMap[row.id]?.checks?.can_process?.reason || 'Cannot process'
-                                  : ''
-                              }
-                            >
-                              {canFinanceAct ? 'Process' : '🔒 Admin only'}
-                            </button>
-                          ) : null}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section className="card">
-            <div className="topline">
-              <h3 style={{ margin: 0 }}>Batch detail</h3>
-              <span className="muted small">
-                {payoutApprovalDetail ? payoutApprovalDetail.status : 'Select a batch'}
-              </span>
-            </div>
-            {payoutApprovalDetail ? (
-              <>
-                <div className="row" style={{ gap: 12, marginTop: 8 }}>
-                  <div className="badge-ghost">
-                    {payoutApprovalDetail.date_from} to {payoutApprovalDetail.date_to}
-                  </div>
-                  <div className="badge-ghost">Total: {formatKes(payoutApprovalDetail.total_amount)}</div>
-                </div>
-                {payoutApprovalReadiness ? (
-                  <div className="card" style={{ marginTop: 12, boxShadow: 'none' }}>
-                    <div className="topline">
-                      <h4 style={{ margin: 0 }}>Readiness</h4>
-                      <div className="row" style={{ gap: 8 }}>
-                        {findIssue(payoutApprovalReadiness, 'DESTINATION_NOT_VERIFIED') ? (
-                          <button type="button" className="btn ghost" onClick={() => handleTabChange('saccos')}>
-                            Go to Destinations Verification
-                          </button>
-                        ) : null}
-                        {findIssue(payoutApprovalReadiness, 'QUARANTINES_PRESENT') ? (
-                          <button type="button" className="btn ghost" onClick={() => handleTabChange('quarantine')}>
-                            Go to Quarantine
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
-                    <div className="grid g2" style={{ gap: 12 }}>
-                      <div>
-                        <div className="row" style={{ gap: 8 }}>
-                          <span className="badge-ghost">
-                            {payoutApprovalReadiness.checks?.can_approve?.pass ? 'OK' : 'BLOCK'}
-                          </span>
-                          <strong>Approve</strong>
-                        </div>
-                        <div className="muted small">
-                          {payoutApprovalReadiness.checks?.can_approve?.reason || 'Checking approve readiness...'}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="row" style={{ gap: 8 }}>
-                          <span className="badge-ghost">
-                            {payoutApprovalReadiness.checks?.can_process?.pass ? 'OK' : 'BLOCK'}
-                          </span>
-                          <strong>Process</strong>
-                        </div>
-                        <div className="muted small">
-                          {payoutApprovalReadiness.checks?.can_process?.reason || 'Checking process readiness...'}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="row" style={{ gap: 12, flexWrap: 'wrap', marginTop: 8 }}>
-                      <div className="badge-ghost">
-                        Pending: {payoutApprovalReadiness.items_summary?.pending_count || 0}
-                      </div>
-                      <div className="badge-ghost">
-                        Blocked: {payoutApprovalReadiness.items_summary?.blocked_count || 0}
-                      </div>
-                      <div className="badge-ghost">
-                        Sent: {payoutApprovalReadiness.items_summary?.sent_count || 0}
-                      </div>
-                      <div className="badge-ghost">
-                        Confirmed: {payoutApprovalReadiness.items_summary?.confirmed_count || 0}
-                      </div>
-                      <div className="badge-ghost">
-                        Failed: {payoutApprovalReadiness.items_summary?.failed_count || 0}
-                      </div>
-                    </div>
-                    {payoutApprovalReadiness.items_summary?.blocked_reasons?.length ? (
-                      <div className="muted small" style={{ marginTop: 8 }}>
-                        Blocked reasons:{' '}
-                        {payoutApprovalReadiness.items_summary.blocked_reasons
-                          .map((r) => `${r.reason} (${r.count})`)
-                          .join(', ')}
-                      </div>
-                    ) : null}
-                    {payoutApprovalReadiness.issues?.length ? (
-                      <div className="muted small" style={{ marginTop: 8 }}>
-                        Issues:
-                        <ul style={{ marginTop: 6 }}>
-                          {payoutApprovalReadiness.issues.map((issue) => (
-                            <li key={`${issue.code}-${issue.message}`}>
-                              {issue.code}: {issue.message}
-                              {issue.hint ? ` (${issue.hint})` : ''}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-                <div className="grid g2" style={{ gap: 12, marginTop: 12 }}>
-                  <div className="table-wrap">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Wallet kind</th>
-                          <th>Amount</th>
-                          <th>Destination</th>
-                          <th>Status</th>
-                          <th>Block reason</th>
-                          <th>Receipt</th>
-                          <th>Ledger</th>
-                          <th>Failure</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {payoutApprovalItems.length === 0 ? (
-                          <tr>
-                            <td colSpan={8} className="muted">
-                              No items.
-                            </td>
-                          </tr>
-                        ) : (
-                          payoutApprovalItems.map((item) => (
-                            <tr key={item.id}>
-                              <td>{formatPayoutKind(item.wallet_kind)}</td>
-                              <td>{formatKes(item.amount)}</td>
-                              <td>
-                                <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-                                  <span>{item.destination_type}</span>
-                                  <span className="mono">{item.destination_ref || '-'}</span>
-                                  {item.destination_ref ? (
-                                    <button
-                                      type="button"
-                                      className="btn ghost"
-                                      onClick={() => copyPayoutValue(item.destination_ref || '', 'Copied destination')}
-                                    >
-                                      Copy
-                                    </button>
-                                  ) : null}
-                                </div>
-                              </td>
-                              <td>{item.status}</td>
-                              <td>{item.block_reason || '-'}</td>
-                              <td className="mono">
-                                <span>{item.provider_receipt || '-'}</span>
-                                {item.provider_receipt ? (
-                                  <button
-                                    type="button"
-                                    className="btn ghost"
-                                    style={{ marginLeft: 6 }}
-                                    onClick={() => copyPayoutValue(item.provider_receipt || '', 'Copied receipt')}
-                                  >
-                                    Copy
-                                  </button>
-                                ) : null}
-                              </td>
-                              <td className="mono">
-                                {item.ledger_entry_id ? (
-                                  <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-                                    <span>{item.ledger_entry_id}</span>
-                                    <button
-                                      type="button"
-                                      className="btn ghost"
-                                      onClick={() => copyPayoutValue(item.ledger_entry_id || '', 'Copied ledger id')}
-                                    >
-                                      Copy
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <span className="muted">-</span>
-                                )}
-                              </td>
-                              <td>{item.failure_reason || '-'}</td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="table-wrap">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Time</th>
-                          <th>Event</th>
-                          <th>Message</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {payoutApprovalEvents.length === 0 ? (
-                          <tr>
-                            <td colSpan={3} className="muted">
-                              No events.
-                            </td>
-                          </tr>
-                        ) : (
-                          payoutApprovalEvents.map((event) => (
-                            <tr key={event.id}>
-                              <td>{event.created_at ? new Date(event.created_at).toLocaleString() : ''}</td>
-                              <td>{event.event_type}</td>
-                              <td>{event.message || '-'}</td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="muted small" style={{ marginTop: 8 }}>
-                Pick a batch to view details and events.
-              </div>
-            )}
-          </section>
-        </>
-      ) : null}
-
-      {activeTab === 'worker_monitor' ? <WorkerMonitor /> : null}
-
+      
       {activeTab === 'ussd' ? (
         <>
       <section className="card" style={{ background: '#f8fafc' }}>

@@ -16,9 +16,6 @@ type Props = {
 export const navLinks: Array<{ to: string; label: string; allow: string[] }> = [
   { to: '/system', label: 'System', allow: ['super_admin', 'system_admin'] },
   { to: '/system/registry', label: 'Registry', allow: ['super_admin', 'system_admin'] },
-  { to: '/system/payouts', label: 'Payouts', allow: ['super_admin', 'system_admin'] },
-  { to: '/sacco/approvals', label: 'Approvals', allow: ['super_admin', 'system_admin', 'sacco_admin'] },
-  { to: '/system/worker-monitor', label: 'Worker Monitor', allow: ['super_admin', 'system_admin'] },
   { to: '/ops', label: 'Ops', allow: ['super_admin', 'system_admin'] },
   { to: '/sacco', label: 'Operator', allow: ['super_admin', 'system_admin', 'sacco_admin'] },
   { to: '/sacco/staff', label: 'Operator Staff', allow: ['super_admin', 'sacco_admin', 'sacco_staff'] },

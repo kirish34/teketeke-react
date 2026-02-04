@@ -107,38 +107,6 @@ async function fetchC2bLedgers(fromTs, toTs) {
   return res.rows || [];
 }
 
-async function fetchB2cProviders(fromTs, toTs) {
-  const res = await pool.query(
-    `
-      SELECT id, mpesa_conversation_id, mpesa_transaction_id, amount, status, created_at
-      FROM withdrawals
-      WHERE created_at BETWEEN $1 AND $2
-        AND (mpesa_conversation_id IS NOT NULL OR mpesa_transaction_id IS NOT NULL)
-    `,
-    [fromTs, toTs],
-  );
-  return (res.rows || []).map((row) => {
-    const provider_ref = row.mpesa_transaction_id || row.mpesa_conversation_id || row.id;
-    return {
-      kind: 'B2C',
-      provider_ref,
-      amount: Number(row.amount || 0),
-      raw_id: row.id,
-    };
-  });
-}
-
-async function fetchB2cInternals(fromTs, toTs) {
-  const res = await pool.query(
-    `
-      SELECT id, amount, provider_request_id, provider_conversation_id, created_at
-      FROM payout_items
-      WHERE created_at BETWEEN $1 AND $2
-    `,
-    [fromTs, toTs],
-  );
-  return res.rows || [];
-}
 
 function computeMatches(kind, providers, internal) {
   const items = [];
@@ -153,12 +121,6 @@ function computeMatches(kind, providers, internal) {
           String(w.reference_id || '') === String(ref) ||
           String(w.source_ref || '') === String(ref) ||
           String(w.reference_id || '') === String(p.raw_id || ''),
-      );
-    } else if (kind === 'B2C') {
-      candidates = internal.filter(
-        (pi) =>
-          String(pi.provider_request_id || '') === String(ref) ||
-          String(pi.provider_conversation_id || '') === String(ref),
       );
     }
     const match = buildMatch(kind, p, candidates);
@@ -182,11 +144,9 @@ async function runReconciliation({ fromTs, toTs, actorUserId = null, actorRole =
   const totals = { C2B: {}, STK: {}, B2C: {} };
   const reconItems = [];
 
-  const [providersC2b, providersB2c, ledgersC2b, internalsB2c] = await Promise.all([
+  const [providersC2b, ledgersC2b] = await Promise.all([
     fetchC2bProviders(from, to),
-    fetchB2cProviders(from, to),
     fetchC2bLedgers(from, to),
-    fetchB2cInternals(from, to),
   ]);
 
   const c2bProviders = providersC2b.filter((p) => p.kind === 'C2B');
@@ -194,9 +154,7 @@ async function runReconciliation({ fromTs, toTs, actorUserId = null, actorRole =
 
   const c2bMatches = computeMatches('C2B', c2bProviders, ledgersC2b);
   const stkMatches = computeMatches('STK', stkProviders, ledgersC2b);
-  const b2cMatches = computeMatches('B2C', providersB2c, internalsB2c);
-
-  reconItems.push(...c2bMatches, ...stkMatches, ...b2cMatches);
+  reconItems.push(...c2bMatches, ...stkMatches);
 
   for (const item of reconItems) {
     const bucket = totals[item.kind] || {};
@@ -236,25 +194,16 @@ async function runReconciliation({ fromTs, toTs, actorUserId = null, actorRole =
 
   const exceptions = reconItems.filter((r) => r.status !== 'matched');
 
-  const payoutItemsMissingLedgerRes = await pool.query(
+  const payoutsMissingProviderRefRes = await pool.query(
     `
-      select id, wallet_id, amount, status, provider_request_id, provider_receipt
-      from payout_items
-      where status = 'CONFIRMED'
-        and not exists (
-          select 1 from wallet_ledger wl
-          where wl.reference_type = 'PAYOUT_ITEM'
-            and wl.reference_id = payout_items.id::text
-        )
-      limit 100
-    `,
-  );
-  const ledgerMissingProviderRefRes = await pool.query(
-    `
-      select id, wallet_id, reference_id
-      from wallet_ledger
-      where reference_type = 'PAYOUT_ITEM'
-        and (provider_ref is null or provider_ref = '')
+      select id,
+             wallet_id,
+             amount,
+             status,
+             mpesa_transaction_id as provider_reference
+      from withdrawals
+      where status = 'SUCCESS'
+        and (mpesa_transaction_id is null or mpesa_transaction_id = '')
       order by created_at desc
       limit 100
     `,
@@ -277,13 +226,15 @@ async function runReconciliation({ fromTs, toTs, actorUserId = null, actorRole =
       limit 100
     `,
   );
-  const stuckSendingRes = await pool.query(
+  const stuckProcessingRes = await pool.query(
     `
-      select id, wallet_id, amount, sending_at
-      from payout_items
-      where status = 'SENDING'
-        and provider_request_id is null
-        and sending_at < now() - interval '10 minutes'
+      select id,
+             wallet_id,
+             amount,
+             updated_at as processing_started_at
+      from withdrawals
+      where status = 'PROCESSING'
+        and updated_at < now() - interval '10 minutes'
       limit 100
     `,
   );
@@ -292,11 +243,10 @@ async function runReconciliation({ fromTs, toTs, actorUserId = null, actorRole =
     ok: true,
     totals,
     exceptions: exceptions.slice(0, 20),
-    payout_items_missing_ledger: payoutItemsMissingLedgerRes.rows || [],
-    ledger_missing_provider_ref: ledgerMissingProviderRefRes.rows || [],
+    payouts_missing_provider_ref: payoutsMissingProviderRefRes.rows || [],
     wallet_balance_drift: driftRes.rows || [],
     active_holds_stale: staleHoldsRes.rows || [],
-    stuck_sending_items: stuckSendingRes.rows || [],
+    payouts_processing_stuck: stuckProcessingRes.rows || [],
   };
 }
 

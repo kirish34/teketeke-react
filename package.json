@@ -17,7 +17,6 @@
     "verify:prod": "node scripts/verify-prod.js",
     "verify:whoami": "node scripts/verify-whoami.js",
     "validate:env": "node scripts/validate-env.js",
-    "check:payouts": "node scripts/check-payout-health.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },

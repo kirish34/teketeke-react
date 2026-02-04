@@ -19,13 +19,12 @@ type CallbackRow = {
   payload?: { [k: string]: any }
 }
 
-type PayoutRow = {
+type WithdrawalRow = {
   id?: string
   status?: string
   failure_reason?: string | null
   amount?: number | null
   created_at?: string
-  batch_id?: string | null
 }
 
 function fmtDate(value?: string) {
@@ -37,7 +36,7 @@ export default function MonitoringPage() {
   const [range, setRange] = useState<'1h' | '24h' | '7d'>('24h')
   const [overview, setOverview] = useState<Overview | null>(null)
   const [callbacks, setCallbacks] = useState<CallbackRow[]>([])
-  const [payouts, setPayouts] = useState<PayoutRow[]>([])
+  const [withdrawals, setWithdrawals] = useState<WithdrawalRow[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -54,7 +53,7 @@ export default function MonitoringPage() {
     setLoading(true)
     setError(null)
     try {
-      const [overviewRes, callbacksRes, payoutsRes] = await Promise.all([
+      const [overviewRes, callbacksRes, withdrawalsRes] = await Promise.all([
         authFetch(`/api/admin/monitoring/overview?from=${encodeURIComponent(rangeParams.from)}&to=${encodeURIComponent(rangeParams.to)}`),
         authFetch(
           `/api/admin/monitoring/callbacks?result=failure&limit=20&from=${encodeURIComponent(rangeParams.from)}&to=${encodeURIComponent(rangeParams.to)}`,
@@ -70,8 +69,8 @@ export default function MonitoringPage() {
       if (callbacksRes.status === 403) setCallbacks([])
       else setCallbacks(((await callbacksRes.json()) as any)?.items || [])
 
-      if (payoutsRes.status === 403) setPayouts([])
-      else setPayouts(((await payoutsRes.json()) as any)?.items || [])
+      if (withdrawalsRes.status === 403) setWithdrawals([])
+      else setWithdrawals(((await withdrawalsRes.json()) as any)?.items || [])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load monitoring')
     } finally {
@@ -85,7 +84,7 @@ export default function MonitoringPage() {
   }, [range])
 
   const callbacksCard = overview?.callbacks || {}
-  const payoutsCard = overview?.payouts || {}
+  const withdrawalsCard = overview?.payouts || {}
   const walletsCard = overview?.wallets || {}
   const jobsCard = overview?.jobs || {}
 
@@ -93,7 +92,7 @@ export default function MonitoringPage() {
     <div className="stack">
       <SystemPageHeader
         title="Monitoring"
-        subtitle="Platform health, callbacks, payouts, and jobs"
+        subtitle="Platform health, callbacks, withdrawals, and jobs"
         onRefresh={loadAll}
         actions={
           <div className="row" style={{ gap: 8 }}>
@@ -132,29 +131,29 @@ export default function MonitoringPage() {
 
         <section className="card">
           <div className="topline">
-            <h3 style={{ margin: 0 }}>Payout Health</h3>
-            <span className="muted small">Batches + Items</span>
+            <h3 style={{ margin: 0 }}>Withdrawal Health</h3>
+            <span className="muted small">B2C withdrawals</span>
           </div>
           <div className="grid metrics">
             <div className="metric">
-              <div className="k">Batches processing</div>
-              <div className="v">{Number(payoutsCard.batches_processing || 0)}</div>
+              <div className="k">Total</div>
+              <div className="v">{Number(withdrawalsCard.items_total || 0)}</div>
             </div>
             <div className="metric">
-              <div className="k">Batches done</div>
-              <div className="v">{Number(payoutsCard.batches_done || 0)}</div>
+              <div className="k">Processing</div>
+              <div className="v">{Number(withdrawalsCard.items_processing || 0)}</div>
             </div>
             <div className="metric">
-              <div className="k">Items success</div>
-              <div className="v">{Number(payoutsCard.items_success || 0)}</div>
+              <div className="k">Paid</div>
+              <div className="v">{Number(withdrawalsCard.items_success || 0)}</div>
             </div>
             <div className="metric">
-              <div className="k">Items failed</div>
-              <div className="v">{Number(payoutsCard.items_failed || 0)}</div>
+              <div className="k">Failed</div>
+              <div className="v">{Number(withdrawalsCard.items_failed || 0)}</div>
             </div>
             <div className="metric">
               <div className="k">Avg time (s)</div>
-              <div className="v">{payoutsCard.avg_time_sec ?? '-'}</div>
+              <div className="v">{withdrawalsCard.avg_time_sec ?? '-'}</div>
             </div>
           </div>
         </section>
@@ -249,7 +248,7 @@ export default function MonitoringPage() {
 
       <section className="card">
         <div className="topline">
-          <h3 style={{ margin: 0 }}>Recent payout failures</h3>
+          <h3 style={{ margin: 0 }}>Recent withdrawal failures</h3>
           <span className="muted small">Up to 20</span>
         </div>
         <div className="table-wrap">
@@ -259,24 +258,22 @@ export default function MonitoringPage() {
                 <th>When</th>
                 <th>Status</th>
                 <th>Amount</th>
-                <th>Batch</th>
                 <th>Reason</th>
               </tr>
             </thead>
             <tbody>
-              {payouts.length === 0 ? (
+              {withdrawals.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="muted">
-                    No payout failures in range.
+                  <td colSpan={4} className="muted">
+                    No withdrawal failures in range.
                   </td>
                 </tr>
               ) : (
-                payouts.map((row) => (
+                withdrawals.map((row) => (
                   <tr key={row.id}>
                     <td className="mono">{fmtDate(row.created_at)}</td>
                     <td>{row.status || '-'}</td>
                     <td>{row.amount ?? '-'}</td>
-                    <td className="mono">{row.batch_id || '-'}</td>
                     <td>{row.failure_reason || '-'}</td>
                   </tr>
                 ))

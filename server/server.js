@@ -12,7 +12,6 @@ const buildInfo = require('./buildInfo');
 const registryRouter = require('./routes/registry');
 const telemetryRouter = require('./routes/telemetry');
 const darajaB2CRouter = require('./routes/daraja-b2c');
-const payoutReadinessRouter = require('./routes/payout-readiness');
 const walletLedgerRouter = require('./routes/wallet-ledger');
 const walletV2Router = require('./routes/wallet-v2');
 const walletMatatuV2Router = require('./routes/wallet-matatu-v2');
@@ -88,7 +87,7 @@ app.use(cors({
     return cb(new Error('Not allowed by CORS'), false);
   },
   credentials: true,
-  exposedHeaders: ['x-teketeke-build', 'x-deployed-at', 'x-request-id', 'x-railway-request-id', 'x-sacco-payouts-build'],
+  exposedHeaders: ['x-teketeke-build', 'x-deployed-at', 'x-request-id', 'x-railway-request-id'],
 }));
 
 // Security & logs
@@ -193,8 +192,6 @@ const skipMpesa = (router) => (req, res, next) => {
 app.use('/api/registry', skipMpesa(registryRouter));
 app.use('/api', skipMpesa(telemetryRouter));
 app.use('/api', skipMpesa(darajaB2CRouter));
-app.use('/api', skipMpesa(payoutReadinessRouter));
-app.use('/api/sacco', require('./routes/sacco-payouts'));
 app.use('/api/sacco', livePaymentsRouter);
 app.use('/api/matatu', matatuLivePaymentsRouter);
 app.use('/api/sacco', saccoStaffAssignmentsRouter);
@@ -213,7 +210,7 @@ app.use('/api/admin', require('./routes/admin-quarantine'));
 app.use('/', require('./routes/sacco'));
 app.use('/api/sacco', require('./routes/sacco-intelligence'));
 
-console.log('[mount] /api/sacco -> sacco-payouts router loaded');
+console.log('[mount] /api -> core routers loaded');
 // Daraja C2B aliases (Safaricom blocks "mpesa" substring in RegisterURL)
 if (mpesaRouter.handleC2BValidation) {
   app.post('/validation', mpesaRouter.handleC2BValidation);

@@ -54,7 +54,7 @@ async function systemOverview({ from, to, db = pool }) {
       `
         SELECT
           COALESCE((SELECT SUM(amount) FROM wallet_ledger WHERE entry_type ILIKE '%FEE%' AND created_at BETWEEN $1 AND $2),0)::numeric AS fees_collected,
-          COALESCE((SELECT SUM(amount) FROM payout_items WHERE created_at BETWEEN $1 AND $2),0)::numeric AS payouts_total,
+          COALESCE((SELECT SUM(amount) FROM withdrawals WHERE created_at BETWEEN $1 AND $2),0)::numeric AS payouts_total,
           COALESCE((SELECT SUM(amount) FROM wallet_ledger WHERE created_at BETWEEN $1 AND $2),0)::numeric AS net_flow
       `,
       params,
@@ -79,7 +79,7 @@ async function systemOverview({ from, to, db = pool }) {
         SELECT
           SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END)::int AS failed,
           COUNT(*)::int AS total
-        FROM payout_items
+        FROM withdrawals
         WHERE created_at BETWEEN $1 AND $2
       `,
       params,
@@ -109,15 +109,16 @@ async function systemOverview({ from, to, db = pool }) {
     ),
     db.query(
       `
-        SELECT pb.sacco_id,
+        SELECT w.sacco_id,
                s.name,
-               COALESCE(SUM(pb.total_amount),0)::numeric AS volume,
-               COUNT(DISTINCT pi.id)::int AS items
-        FROM payout_batches pb
-        LEFT JOIN saccos s ON s.id = pb.sacco_id
-        LEFT JOIN payout_items pi ON pi.batch_id = pb.id
-        WHERE pb.created_at BETWEEN $1 AND $2
-        GROUP BY pb.sacco_id, s.name
+               COALESCE(SUM(wdr.amount),0)::numeric AS volume,
+               COUNT(wdr.id)::int AS items
+        FROM withdrawals wdr
+        JOIN wallets w ON w.id = wdr.wallet_id
+        LEFT JOIN saccos s ON s.id = w.sacco_id
+        WHERE wdr.created_at BETWEEN $1 AND $2
+          AND w.sacco_id IS NOT NULL
+        GROUP BY w.sacco_id, s.name
         ORDER BY volume DESC
         LIMIT 5
       `,
@@ -211,7 +212,7 @@ async function systemTrends({ from, to, metric, db = pool }) {
         SELECT date_trunc('day', created_at) AS d,
                SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END)::int AS failed,
                COUNT(*)::int AS total
-        FROM payout_items
+        FROM withdrawals
         WHERE created_at BETWEEN $1 AND $2
         GROUP BY d ORDER BY d
       `;
@@ -255,11 +256,13 @@ async function topEntities({ kind, from, to, limit = 20, offset = 0, db = pool }
   let sql = '';
   if (kind === 'sacco') {
     sql = `
-      SELECT pb.sacco_id AS id, s.name, SUM(pb.total_amount)::numeric AS volume, COUNT(*)::int AS batches
-      FROM payout_batches pb
-      LEFT JOIN saccos s ON s.id = pb.sacco_id
-      WHERE pb.created_at BETWEEN $1 AND $2
-      GROUP BY pb.sacco_id, s.name
+      SELECT w.sacco_id AS id, s.name, SUM(wdr.amount)::numeric AS volume, COUNT(wdr.id)::int AS batches
+      FROM withdrawals wdr
+      JOIN wallets w ON w.id = wdr.wallet_id
+      LEFT JOIN saccos s ON s.id = w.sacco_id
+      WHERE wdr.created_at BETWEEN $1 AND $2
+        AND w.sacco_id IS NOT NULL
+      GROUP BY w.sacco_id, s.name
       ORDER BY volume DESC
       LIMIT $3 OFFSET $4
     `;

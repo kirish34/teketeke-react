@@ -1,6 +1,5 @@
 const { Worker } = require('bullmq');
 const { getQueueConfig, getQueue, isQueueEnabled } = require('./queues/queue');
-const { processPayoutBatch } = require('./services/payoutBatchProcessor.service');
 const { logAdminAction } = require('./services/audit.service');
 
 const { queueName, connection } = getQueueConfig();
@@ -29,14 +28,6 @@ const worker = new Worker(
     });
 
     switch (job.name) {
-      case 'PAYOUT_BATCH_PROCESS':
-        await processPayoutBatch({
-          batchId: job.data?.batchId,
-          actorUserId: ctx.actorUserId,
-          actorRole: ctx.actorRole,
-          requestId: ctx.requestId,
-        });
-        break;
       case 'FRAUD_DETECTOR_RUN':
         {
           const { runFraudDetection } = require('./services/fraudDetector.service');

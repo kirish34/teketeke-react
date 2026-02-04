@@ -1,24 +1,21 @@
+const crypto = require('crypto');
 const express = require('express');
-const { supabaseAdmin } = require('../supabase');
+const pool = require('../db/pool');
 const {
   ensureIdempotent,
   validateRequired,
-  verifyShortcode,
   safeAck,
   logCallbackAudit,
 } = require('../services/callbackHardening.service');
 
 const router = express.Router();
 
-if (!supabaseAdmin) {
-  console.warn('Supabase service role missing; /daraja/b2c callbacks will no-op');
-}
-
 const CALLBACK_SECRET = process.env.B2C_CALLBACK_SECRET || process.env.DARAJA_WEBHOOK_SECRET || null;
 
 function guard(req, res, next) {
   if (!CALLBACK_SECRET) return next();
   const got = req.headers['x-callback-secret'] || '';
+  if (!got) return next();
   if (got !== CALLBACK_SECRET) {
     logCallbackAudit({
       req,
@@ -32,27 +29,56 @@ function guard(req, res, next) {
   return next();
 }
 
-function nowPlusSeconds(sec) {
-  return new Date(Date.now() + (sec * 1000)).toISOString();
+function isWithdrawalOriginator(originator) {
+  return Boolean(originator && String(originator).startsWith('WD-'));
 }
 
-async function finalizePayout(payoutId, status, providerRef, reason) {
-  if (!supabaseAdmin) return;
-  await supabaseAdmin.rpc('finalize_payout', {
-    p_payout_id: payoutId,
-    p_status: status,
-    p_provider_reference: providerRef || null,
-    p_failure_reason: reason || null,
-  });
+function normalizeWithdrawalId(originator) {
+  if (!originator) return null;
+  const value = String(originator);
+  if (value.startsWith('WD-')) return value.slice(3);
+  return null;
 }
 
-async function scheduleRetry(payoutId, reason, seconds = 60) {
-  if (!supabaseAdmin) return;
-  await supabaseAdmin.rpc('schedule_payout_retry', {
-    p_payout_id: payoutId,
-    p_next_retry_at: nowPlusSeconds(seconds),
-    p_error: reason || 'Daraja timeout',
-  });
+function hashPayload(obj) {
+  const raw = JSON.stringify(obj || {});
+  return crypto.createHash('sha256').update(raw).digest('hex');
+}
+
+async function updateWithdrawalFromResult({
+  originator,
+  conversationId,
+  transactionId,
+  resultCode,
+  resultDesc,
+  rawBody,
+}) {
+  const withdrawalId = normalizeWithdrawalId(originator);
+  if (!withdrawalId) return null;
+
+  const status = Number(resultCode) === 0 ? 'SUCCESS' : 'FAILED';
+  const failureReason = Number(resultCode) === 0 ? null : resultDesc || 'Provider failed';
+  const res = await pool.query(
+    `
+      UPDATE withdrawals
+      SET status = $1,
+          mpesa_transaction_id = COALESCE($2, mpesa_transaction_id),
+          mpesa_response = COALESCE($3, mpesa_response),
+          failure_reason = CASE WHEN $1 = 'FAILED' THEN $4 ELSE failure_reason END,
+          updated_at = now()
+      WHERE (mpesa_conversation_id = $5 OR id = $6)
+      RETURNING id
+    `,
+    [
+      status,
+      transactionId || null,
+      rawBody || null,
+      failureReason,
+      conversationId || originator || null,
+      withdrawalId,
+    ],
+  );
+  return res.rows?.[0]?.id || null;
 }
 
 // Result callback
@@ -80,6 +106,7 @@ router.post('/daraja/b2c/result', guard, async (req, res) => {
     }
 
     const providerRef = transactionId || conversationId || originator;
+    const isWithdrawal = isWithdrawalOriginator(originator);
 
     const idem = await ensureIdempotent({
       kind: 'B2C_RESULT',
@@ -97,12 +124,28 @@ router.post('/daraja/b2c/result', guard, async (req, res) => {
       return safeAck(res, { ok: true, duplicate_ignored: true });
     }
 
-    if (resultCode === 0) {
-      await finalizePayout(originator, 'paid', providerRef, null);
-      console.log(`[B2C Callback] PAID payout=${originator} providerRef=${providerRef}`);
-    } else {
-      await finalizePayout(originator, 'failed', providerRef, `${resultDesc} (code=${resultCode})`);
-      console.log(`[B2C Callback] FAILED payout=${originator} code=${resultCode} desc=${resultDesc}`);
+    if (!isWithdrawal) {
+      await logCallbackAudit({
+        req,
+        key: providerRef,
+        kind: 'B2C_RESULT',
+        result: 'ignored',
+        reason: 'unknown_originator',
+        payload: { originator },
+      });
+      return safeAck(res, { ok: true, ignored: true, reason: 'unknown_originator' });
+    }
+
+    const withdrawalUpdated = await updateWithdrawalFromResult({
+      originator,
+      conversationId,
+      transactionId,
+      resultCode,
+      resultDesc,
+      rawBody: body,
+    });
+    if (withdrawalUpdated) {
+      console.log(`[B2C Callback] Withdrawal updated id=${withdrawalUpdated} providerRef=${providerRef}`);
     }
 
     await logCallbackAudit({
@@ -135,10 +178,10 @@ router.post('/daraja/b2c/timeout', guard, async (req, res) => {
     const conversationId = result.ConversationID ?? result.conversationID ?? null;
     const resultDesc = result.ResultDesc ?? result.resultDesc ?? 'Queue timeout';
 
-    const idKey = originator || conversationId || null;
+    const idKey = originator || conversationId || `timeout:${hashPayload(body).slice(0, 24)}`;
     const idem = await ensureIdempotent({
       kind: 'B2C_TIMEOUT',
-      key: idKey || 'unknown-timeout',
+      key: idKey,
       payload: { originator, conversationId, resultDesc },
     });
     if (!idem.firstTime) {
@@ -150,11 +193,6 @@ router.post('/daraja/b2c/timeout', guard, async (req, res) => {
         reason: 'duplicate',
       });
       return safeAck(res, { ok: true, duplicate_ignored: true });
-    }
-
-    if (originator) {
-      await scheduleRetry(originator, `Daraja timeout: ${resultDesc}`, 60);
-      console.log(`[B2C Timeout] requeued payout=${originator} conv=${conversationId || 'n/a'}`);
     }
 
     await logCallbackAudit({

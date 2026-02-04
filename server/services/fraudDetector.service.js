@@ -172,11 +172,14 @@ async function detectPayoutFailureSpike({ db = pool } = {}) {
   const from = new Date(to.getTime() - PAYOUT_FAILURE_WINDOW_MIN * 60 * 1000);
   const res = await db.query(
     `
-      SELECT destination_ref AS key, COUNT(*)::int AS count, MIN(created_at) AS first_at, MAX(created_at) AS last_at
-      FROM payout_items
+      SELECT COALESCE(phone_number, wallet_id::text, 'unknown') AS key,
+             COUNT(*)::int AS count,
+             MIN(created_at) AS first_at,
+             MAX(created_at) AS last_at
+      FROM withdrawals
       WHERE status = 'FAILED'
         AND created_at BETWEEN $1 AND $2
-      GROUP BY destination_ref
+      GROUP BY key
       HAVING COUNT(*) >= $3
     `,
     [from.toISOString(), to.toISOString(), PAYOUT_FAILURE_THRESHOLD],

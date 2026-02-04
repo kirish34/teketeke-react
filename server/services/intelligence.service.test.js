@@ -9,11 +9,13 @@ function makeDb(rowsMap = {}) {
       if (/FROM admin_audit_logs/.test(sql) && /mpesa_callback/.test(sql)) {
         return { rows: [rowsMap.payments || {}] };
       }
-      if (/FROM payout_items/.test(sql) && /status = 'FAILED'/.test(sql)) return { rows: [rowsMap.payouts || {}] };
+      if (/FROM withdrawals/.test(sql) && /status = 'FAILED'/.test(sql)) {
+        return { rows: [rowsMap.payouts || {}] };
+      }
       if (/FROM recon_items/.test(sql)) return { rows: [rowsMap.recon || {}] };
       if (/FROM fraud_alerts/.test(sql)) return { rows: [rowsMap.fraud || {}] };
       if (/FROM quarantined_operations/.test(sql)) return { rows: [rowsMap.quarantine || {}] };
-      if (/FROM payout_batches/.test(sql)) return { rows: rowsMap.topSaccos || [] };
+      if (/FROM withdrawals/.test(sql) && /JOIN wallets/.test(sql)) return { rows: rowsMap.topSaccos || [] };
       return { rows: [] };
     },
   };
