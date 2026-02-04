@@ -530,7 +530,9 @@ async function fetchJson<T>(url: string): Promise<T> {
 async function fetchList<T>(url: string): Promise<T[]> {
   const data = await requestJson<unknown>(url)
   if (Array.isArray(data)) return data as T[]
-  if (Array.isArray(data?.items)) return data.items as T[]
+  if (data && typeof data === 'object' && Array.isArray((data as { items?: unknown }).items)) {
+    return (data as { items: T[] }).items
+  }
   return []
 }
 
