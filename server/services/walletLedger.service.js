@@ -4,12 +4,11 @@ const pool = require('../db/pool');
 const ENTRY_TYPES = new Set([
   'C2B_CREDIT',
   'STK_CREDIT',
-  'PAYOUT_DEBIT',
   'MANUAL_ADJUSTMENT',
   'REVERSAL',
 ]);
 
-const REFERENCE_TYPES = new Set(['MPESA_C2B', 'PAYOUT_ITEM', 'ADMIN']);
+const REFERENCE_TYPES = new Set(['MPESA_C2B', 'ADMIN']);
 
 function normalizeEntryType(entryType) {
   const value = String(entryType || '').trim().toUpperCase();
@@ -155,8 +154,8 @@ async function creditWalletWithLedger({
 async function debitWalletWithLedger({
   walletId,
   amount,
-  entryType = 'PAYOUT_DEBIT',
-  referenceType = 'PAYOUT_ITEM',
+  entryType = 'MANUAL_ADJUSTMENT',
+  referenceType = 'ADMIN',
   referenceId,
   description = null,
   provider = null,

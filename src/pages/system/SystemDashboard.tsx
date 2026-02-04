@@ -157,75 +157,6 @@ type OpsAlertRow = {
   meta?: Record<string, unknown>
 }
 
-type PayoutBatchRow = {
-  id?: string
-  sacco_id?: string
-  sacco_name?: string
-  date_from?: string
-  date_to?: string
-  status?: string
-  total_amount?: number
-  currency?: string
-  created_at?: string
-  updated_at?: string
-  meta?: Record<string, any>
-}
-
-type PayoutItemRow = {
-  id?: string
-  wallet_kind?: string
-  amount?: number
-  wallet_balance?: number
-  destination_type?: string
-  destination_ref?: string
-  status?: string
-  block_reason?: string | null
-  provider_receipt?: string | null
-  failure_reason?: string | null
-  ledger_entry_id?: string | null
-  created_at?: string
-}
-
-type PayoutEventRow = {
-  id?: string
-  event_type?: string
-  message?: string | null
-  created_at?: string
-  meta?: Record<string, unknown>
-}
-
-type ReadinessCheck = {
-  pass?: boolean
-  reason?: string
-  details?: Record<string, unknown>
-}
-
-type ReadinessIssue = {
-  code?: string
-  level?: 'WARN' | 'BLOCK' | string
-  message?: string
-  hint?: string | null
-  details?: Record<string, unknown>
-}
-
-type BatchReadiness = {
-  batch?: { id?: string; status?: string; sacco_id?: string; date_from?: string; date_to?: string; total_amount?: number }
-  checks?: {
-    can_submit?: ReadinessCheck
-    can_approve?: ReadinessCheck
-    can_process?: ReadinessCheck
-  }
-  items_summary?: {
-    pending_count?: number
-    blocked_count?: number
-    sent_count?: number
-    confirmed_count?: number
-    failed_count?: number
-    blocked_reasons?: Array<{ reason?: string; count?: number }>
-  }
-  issues?: ReadinessIssue[]
-  unverified_destinations?: Array<{ destination_ref?: string; destination_type?: string }>
-}
 type C2bActionState = {
   busy?: boolean
   error?: string
@@ -305,8 +236,6 @@ type SmsSettings = {
   fee_failed_enabled?: boolean
   balance_enabled?: boolean
   eod_enabled?: boolean
-  payout_paid_enabled?: boolean
-  payout_failed_enabled?: boolean
   savings_paid_enabled?: boolean
   savings_balance_enabled?: boolean
   loan_paid_enabled?: boolean
@@ -377,7 +306,6 @@ type SystemTabId =
   | 'reconciliation'
   | 'quarantine'
   | 'alerts'
-  | 'payout_approvals'
   | 'saccos'
   | 'matatu'
   | 'taxis'
@@ -649,28 +577,6 @@ async function deleteJson(url: string) {
 
 const formatKes = (val?: number | null) => `KES ${(Number(val || 0)).toLocaleString('en-KE')}`
 const WITHDRAW_STATUS_OPTIONS = ['PENDING', 'PROCESSING', 'SENT', 'SUCCESS', 'FAILED']
-
-function formatPayoutKind(kind?: string) {
-  const k = (kind || '').toUpperCase()
-  if (k === 'SACCO_FEE' || k === 'FEE' || k === 'SACCO_DAILY_FEE') return 'Daily Fee'
-  if (k === 'SACCO_LOAN' || k === 'LOAN') return 'Loan'
-  if (k === 'SACCO_SAVINGS' || k === 'SAVINGS') return 'Savings'
-  return k || '-'
-}
-
-function findIssue(readiness: BatchReadiness | null | undefined, code: string) {
-  return readiness?.issues?.find((issue) => issue.code === code) || null
-}
-
-function buildReadinessChip(readiness: BatchReadiness | null | undefined) {
-  if (!readiness) return { label: 'CHECKING', tone: 'muted' }
-  if (findIssue(readiness, 'QUARANTINES_PRESENT')) return { label: 'BLOCKED: QUARANTINES', tone: 'bad' }
-  if (findIssue(readiness, 'DESTINATION_NOT_VERIFIED')) return { label: 'BLOCKED: DESTINATION', tone: 'bad' }
-  if (readiness.checks?.can_process?.pass) return { label: 'READY: PROCESS', tone: 'good' }
-  if (readiness.checks?.can_approve?.pass) return { label: 'READY: APPROVE', tone: 'good' }
-  if (readiness.checks?.can_submit?.pass) return { label: 'READY: SUBMIT', tone: 'good' }
-  return { label: 'NEEDS REVIEW', tone: 'muted' }
-}
 
 function parseAmountInput(value: string) {
   const num = Number(value)
@@ -1072,8 +978,6 @@ const smsSettingsDefaults: SmsSettings = {
   fee_failed_enabled: true,
   balance_enabled: true,
   eod_enabled: true,
-  payout_paid_enabled: false,
-  payout_failed_enabled: true,
   savings_paid_enabled: false,
   savings_balance_enabled: true,
   loan_paid_enabled: false,
@@ -1085,9 +989,7 @@ const smsTemplateHints: Record<string, string> = {
   fee_paid: 'Tokens: plate, amount, ref, balance',
   fee_failed: 'Tokens: plate, amount, reason',
   balance_request: 'Tokens: plate, balance, available, date',
-  eod_summary: 'Tokens: plate, collected, fee, savings, loan_paid, payout, balance, date',
-  payout_paid: 'Tokens: plate, amount, phone, ref, balance',
-  payout_failed: 'Tokens: plate, amount, reason, ref',
+  eod_summary: 'Tokens: plate, collected, fee, savings, loan_paid, balance, date',
   savings_paid: 'Tokens: plate, amount, savings_balance',
   savings_balance: 'Tokens: plate, savings_balance, date',
   loan_paid: 'Tokens: plate, amount, loan_balance',
@@ -1201,17 +1103,6 @@ const SystemDashboard = ({
   const [alertsRows, setAlertsRows] = useState<OpsAlertRow[]>([])
   const [alertsError, setAlertsError] = useState<string | null>(null)
 
-  const [payoutApprovalStatus, setPayoutApprovalStatus] = useState('SUBMITTED')
-  const [payoutApprovalRows, setPayoutApprovalRows] = useState<PayoutBatchRow[]>([])
-  const [payoutApprovalError, setPayoutApprovalError] = useState<string | null>(null)
-  const [payoutApprovalMsg, setPayoutApprovalMsg] = useState('')
-  const [payoutJobId, setPayoutJobId] = useState('')
-  const [payoutApprovalSelected, setPayoutApprovalSelected] = useState('')
-  const [payoutApprovalDetail, setPayoutApprovalDetail] = useState<PayoutBatchRow | null>(null)
-  const [payoutApprovalItems, setPayoutApprovalItems] = useState<PayoutItemRow[]>([])
-  const [payoutApprovalEvents, setPayoutApprovalEvents] = useState<PayoutEventRow[]>([])
-  const [payoutReadinessMap, setPayoutReadinessMap] = useState<Record<string, BatchReadiness | null>>({})
-  const [payoutApprovalReadiness, setPayoutApprovalReadiness] = useState<BatchReadiness | null>(null)
 
   const [walletCode, setWalletCode] = useState('')
   const [walletAutoRefreshCode, setWalletAutoRefreshCode] = useState('')
@@ -3501,128 +3392,6 @@ const SystemDashboard = ({
     }
   }
 
-  async function loadPayoutApprovals(status?: string) {
-    const nextStatus = status !== undefined ? status : payoutApprovalStatus
-    if (status !== undefined) setPayoutApprovalStatus(nextStatus)
-    try {
-      const params = new URLSearchParams()
-      if (nextStatus) params.set('status', nextStatus)
-      const res = await fetchJson<{ batches?: PayoutBatchRow[] }>(
-        `/api/admin/payout-batches?${params.toString()}`,
-      )
-      setPayoutApprovalRows(res.batches || [])
-      setPayoutApprovalError(null)
-      const batches = res.batches || []
-      batches.forEach((row) => {
-        if (row.id && !payoutReadinessMap[row.id]) {
-          void loadBatchReadiness(row.id)
-        }
-      })
-    } catch (err) {
-      setPayoutApprovalRows([])
-      setPayoutApprovalError(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  async function loadBatchReadiness(batchId: string) {
-    if (!batchId) return
-    try {
-      const res = await fetchJson<BatchReadiness>(`/api/payout-batches/${encodeURIComponent(batchId)}/readiness`)
-      setPayoutReadinessMap((prev) => ({ ...prev, [batchId]: res }))
-      if (batchId === payoutApprovalSelected) {
-        setPayoutApprovalReadiness(res)
-      }
-    } catch (err) {
-      setPayoutReadinessMap((prev) => ({
-        ...prev,
-        [batchId]: { issues: [{ code: 'READINESS_LOAD_FAILED', level: 'WARN', message: String(err) }] },
-      }))
-      if (batchId === payoutApprovalSelected) {
-        setPayoutApprovalReadiness(null)
-      }
-    }
-  }
-
-  async function loadPayoutApprovalDetail(batchId: string) {
-    if (!batchId) return
-    setPayoutApprovalSelected(batchId)
-    setPayoutApprovalMsg('Loading batch...')
-    try {
-      const res = await fetchJson<{ batch?: PayoutBatchRow; items?: PayoutItemRow[]; events?: PayoutEventRow[] }>(
-        `/api/admin/payout-batches/${encodeURIComponent(batchId)}`,
-      )
-      setPayoutApprovalDetail(res.batch || null)
-      setPayoutApprovalItems(res.items || [])
-      setPayoutApprovalEvents(res.events || [])
-      await loadBatchReadiness(batchId)
-      setPayoutApprovalMsg('')
-    } catch (err) {
-      setPayoutApprovalMsg(err instanceof Error ? err.message : 'Failed to load batch')
-    }
-  }
-
-  async function approvePayoutBatch(batchId: string) {
-    if (!batchId) return
-    if (!canFinanceAct) {
-      setPayoutApprovalMsg('View-only: You do not have permission to approve payouts.')
-      return
-    }
-    if (!window.confirm(`Approve payout batch ${batchId}?`)) {
-      setPayoutApprovalMsg('Approval cancelled')
-      return
-    }
-    setPayoutApprovalMsg('Approving batch...')
-    try {
-      await sendJson(`/api/admin/payout-batches/${encodeURIComponent(batchId)}/approve`, 'POST', {})
-      setPayoutApprovalMsg('Approved')
-      await loadPayoutApprovals()
-      await loadPayoutApprovalDetail(batchId)
-    } catch (err) {
-      setPayoutApprovalMsg(err instanceof Error ? err.message : 'Approval failed')
-    }
-  }
-
-  async function processPayoutBatch(batchId: string) {
-    if (!batchId) return
-    if (!canFinanceAct) {
-      setPayoutApprovalMsg('View-only: You do not have permission to process payouts.')
-      return
-    }
-    if (!window.confirm(`Process payout batch ${batchId}?`)) {
-      setPayoutApprovalMsg('Process cancelled')
-      return
-    }
-    setPayoutApprovalMsg('Processing batch...')
-    setPayoutJobId('')
-    try {
-      const res = await sendJson<{ ok?: boolean; job_id?: string; mode?: string }>(
-        `/api/admin/payout-batches/${encodeURIComponent(batchId)}/process`,
-        'POST',
-        {},
-      )
-      if (res?.job_id) {
-        setPayoutJobId(res.job_id)
-        setPayoutApprovalMsg(`Queued payout batch. Job ${res.job_id}`)
-      } else {
-        setPayoutApprovalMsg(res?.mode === 'inline' ? 'Processed inline' : 'Processing started')
-      }
-      await loadPayoutApprovals()
-      await loadPayoutApprovalDetail(batchId)
-    } catch (err) {
-      setPayoutApprovalMsg(err instanceof Error ? err.message : 'Process failed')
-    }
-  }
-
-  async function copyPayoutValue(value: string, label: string) {
-    if (!value) return
-    try {
-      await navigator.clipboard.writeText(value)
-      setPayoutApprovalMsg(label)
-    } catch (err) {
-      setPayoutApprovalMsg(err instanceof Error ? err.message : 'Copy failed')
-    }
-  }
-
   useEffect(() => {
     if (!routeMapOpen || !routeEditId) return
     let cancelled = false
@@ -4671,12 +4440,6 @@ const SystemDashboard = ({
         case 'alerts':
           await loadAlerts({ page: 1 })
           break
-        case 'payout_approvals':
-          await loadPayoutApprovals()
-          if (payoutApprovalSelected) {
-            await loadPayoutApprovalDetail(payoutApprovalSelected)
-          }
-          break
         case 'ussd':
           if (saccos.length === 0) await loadSaccosList()
           await loadUssd()
@@ -4711,7 +4474,7 @@ const SystemDashboard = ({
     }
     void loadTabData(activeTab)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, saccoRange, withdrawStatus, reconFrom, reconTo, payoutApprovalSelected])
+  }, [activeTab, saccoRange, withdrawStatus, reconFrom, reconTo])
 
   const counts = overview?.counts || {}
   const pool = overview?.ussd_pool || {}
@@ -9593,24 +9356,6 @@ const SystemDashboard = ({
               style={{ marginRight: 6 }}
             />
             End of day summary
-          </label>
-          <label className="muted small">
-            <input
-              type="checkbox"
-              checked={!!smsSettingsForm.payout_paid_enabled}
-              onChange={(e) => setSmsSettingsForm((f) => ({ ...f, payout_paid_enabled: e.target.checked }))}
-              style={{ marginRight: 6 }}
-            />
-            Payout paid
-          </label>
-          <label className="muted small">
-            <input
-              type="checkbox"
-              checked={!!smsSettingsForm.payout_failed_enabled}
-              onChange={(e) => setSmsSettingsForm((f) => ({ ...f, payout_failed_enabled: e.target.checked }))}
-              style={{ marginRight: 6 }}
-            />
-            Payout failed
           </label>
           <label className="muted small">
             <input

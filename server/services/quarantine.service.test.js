@@ -28,7 +28,7 @@ describe('quarantine.service', () => {
   it('shouldQuarantine returns true for high alert', async () => {
     const db = makeDb({ alerts: [{ id: 'a1', severity: 'high', status: 'open' }] });
     const res = await shouldQuarantine({
-      operationType: 'PAYOUT_ITEM',
+      operationType: 'WALLET_CREDIT',
       entityType: 'MSISDN',
       entityId: '2547',
       db,

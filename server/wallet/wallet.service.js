@@ -15,13 +15,11 @@ function mapEntryTypeFromSource(source) {
   const normalized = String(source || '').trim().toUpperCase();
   if (normalized === 'MPESA_C2B') return 'C2B_CREDIT';
   if (normalized === 'MPESA_STK') return 'STK_CREDIT';
-  if (normalized === 'SACCO_PAYOUT') return 'PAYOUT_DEBIT';
   return 'MANUAL_ADJUSTMENT';
 }
 
 function mapReferenceTypeFromSource(source) {
   const normalized = String(source || '').trim().toUpperCase();
-  if (normalized === 'SACCO_PAYOUT') return 'PAYOUT_ITEM';
   if (normalized === 'MPESA_C2B' || normalized === 'MPESA_STK') return 'MPESA_C2B';
   return 'ADMIN';
 }

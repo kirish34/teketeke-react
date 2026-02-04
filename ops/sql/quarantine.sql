@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS quarantined_operations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   created_at timestamptz NOT NULL DEFAULT now(),
   domain text NOT NULL DEFAULT 'teketeke',
-  operation_type text NOT NULL, -- PAYOUT_ITEM | PAYOUT_BATCH | WALLET_CREDIT
+  operation_type text NOT NULL, -- WALLET_CREDIT | ADMIN_ACTION | OTHER
   operation_id text NOT NULL,
   entity_type text NULL,
   entity_id text NULL,

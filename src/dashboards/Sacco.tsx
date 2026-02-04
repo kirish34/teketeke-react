@@ -1552,8 +1552,8 @@ export default function SaccoDashboard() {
     const entry = String(row.entry_type || '').toUpperCase()
     if (entry === 'C2B_CREDIT') return 'PayBill'
     if (entry === 'STK_CREDIT') return 'STK'
-    if (entry === 'PAYOUT_DEBIT') return 'Payout'
     if (entry === 'REVERSAL') return 'Reversal'
+    if (entry === 'MANUAL_ADJUSTMENT') return 'Adjustment'
     return row.reference_type || entry || '-'
   }
 

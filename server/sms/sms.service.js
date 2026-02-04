@@ -5,8 +5,6 @@ const TEMPLATE_SETTING_MAP = {
   fee_failed: 'fee_failed_enabled',
   balance_request: 'balance_enabled',
   eod_summary: 'eod_enabled',
-  payout_paid: 'payout_paid_enabled',
-  payout_failed: 'payout_failed_enabled',
   savings_paid: 'savings_paid_enabled',
   savings_balance: 'savings_balance_enabled',
   loan_paid: 'loan_paid_enabled',
