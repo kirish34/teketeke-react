@@ -1,0 +1,881 @@
+{
+  "generated_at": "2026-02-04T15:04:42.398Z",
+  "items": [
+    {
+      "method": "GET",
+      "path": "/api/admin/admin/withdrawals"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/admin/withdrawals/:id/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/audit"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/boda-bikes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/bodabodas/:id/payout"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/c2b-payments"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/c2b-payments/:id/raw"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/c2b-payments/:id/reprocess"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/c2b/:id/resolve"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/c2b/quarantine"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/callback-audit/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/callback-audit/summary"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/delete-boda/:id"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/delete-matatu/:id"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/delete-sacco/:id"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/delete-shuttle/:id"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/delete-taxi/:id"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/dev/replay-callback"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/fraud/alerts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/fraud/alerts/:id"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/fraud/alerts/:id/assign"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/fraud/alerts/:id/status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/fraud/escalate/run"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/fraud/run"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/health"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/intelligence/overview"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/intelligence/top-entities"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/intelligence/trends"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/jobs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/jobs/:id"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/loans"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/loans"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/maintenance-logs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/maintenance-logs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/maintenance-logs/update"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/matatus"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/matatus/:id/payout"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/monitoring/callbacks"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/monitoring/jobs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/monitoring/overview"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/monitoring/payouts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/ops-alerts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/paybill-codes"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/ping"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/platform-overview"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/platform-saccos-summary"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/quarantine"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/quarantine/:id"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/quarantine/:id/cancel"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/quarantine/:id/release"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/reconciliation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/reconciliation/exceptions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/reconciliation/override"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/reconciliation/run"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/reconciliation/runs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/register-boda"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/register-matatu"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/register-sacco"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/register-shuttle"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/register-taxi"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/route-hits/test-bump"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/routes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/routes"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/routes/:routeId"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/routes/:routeId"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/routes/usage-summary"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/saccos"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/shuttles"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/sms"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/sms/:id/retry"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/sms/settings"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/sms/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/sms/templates"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/sms/templates/:code"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/staff"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/staff"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/system-admins"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/system-admins"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/system-admins/:userId"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/system-admins/self"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/system-overview"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/taxis"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/taxis/:id/payout"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/transactions/fees"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/transactions/loans"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/update-boda"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/update-matatu"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/update-sacco"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/update-shuttle"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/update-taxi"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/user-roles/:user_id"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/user-roles/create-user"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/user-roles/logins"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/user-roles/update"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/ussd/bind-from-pool"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/ussd/pool/allocated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/ussd/pool/assign-next"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/ussd/pool/available"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/ussd/pool/import"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/ussd/pool/release"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/wallets/credit"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/withdrawals"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/withdrawals/:id/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/context"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/me"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/whoami"
+    },
+    {
+      "method": "GET",
+      "path": "/api/boda/cash"
+    },
+    {
+      "method": "POST",
+      "path": "/api/boda/cash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/boda/expenses"
+    },
+    {
+      "method": "POST",
+      "path": "/api/boda/expenses"
+    },
+    {
+      "method": "GET",
+      "path": "/api/boda/insights"
+    },
+    {
+      "method": "POST",
+      "path": "/api/boda/mpesa-import"
+    },
+    {
+      "method": "GET",
+      "path": "/api/boda/settings"
+    },
+    {
+      "method": "POST",
+      "path": "/api/boda/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/boda/summary"
+    },
+    {
+      "method": "GET",
+      "path": "/api/boda/wallet"
+    },
+    {
+      "method": "GET",
+      "path": "/api/db/health"
+    },
+    {
+      "method": "GET",
+      "path": "/api/db/whoami"
+    },
+    {
+      "method": "GET",
+      "path": "/api/healthz"
+    },
+    {
+      "method": "GET",
+      "path": "/api/matatu/live-payments"
+    },
+    {
+      "method": "GET",
+      "path": "/api/matatu/my-assignment"
+    },
+    {
+      "method": "POST",
+      "path": "/api/matatu/payments/:paymentId/assign"
+    },
+    {
+      "method": "POST",
+      "path": "/api/matatu/payments/:paymentId/confirm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/matatu/shifts/active"
+    },
+    {
+      "method": "POST",
+      "path": "/api/matatu/shifts/close"
+    },
+    {
+      "method": "POST",
+      "path": "/api/matatu/shifts/open"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mpesa/c2b/confirmation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mpesa/c2b/validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mpesa/callback"
+    },
+    {
+      "method": "GET",
+      "path": "/api/pay/status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pay/stk"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pay/stk/callback"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sacco/intelligence/overview"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sacco/intelligence/vehicles"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sacco/live-payments"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/sacco/staff-assignments"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sacco/staff-assignments"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sacco/staff-assignments"
+    },
+    {
+      "method": "POST",
+      "path": "/api/signup/boda"
+    },
+    {
+      "method": "POST",
+      "path": "/api/signup/taxi"
+    },
+    {
+      "method": "POST",
+      "path": "/api/staff/cash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/staff/trips/current"
+    },
+    {
+      "method": "POST",
+      "path": "/api/staff/trips/end"
+    },
+    {
+      "method": "GET",
+      "path": "/api/staff/trips/history"
+    },
+    {
+      "method": "POST",
+      "path": "/api/staff/trips/positions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/staff/trips/start"
+    },
+    {
+      "method": "GET",
+      "path": "/api/taxi/cash"
+    },
+    {
+      "method": "POST",
+      "path": "/api/taxi/cash"
+    },
+    {
+      "method": "GET",
+      "path": "/api/taxi/expenses"
+    },
+    {
+      "method": "POST",
+      "path": "/api/taxi/expenses"
+    },
+    {
+      "method": "GET",
+      "path": "/api/taxi/insights"
+    },
+    {
+      "method": "POST",
+      "path": "/api/taxi/mpesa-import"
+    },
+    {
+      "method": "GET",
+      "path": "/api/taxi/settings"
+    },
+    {
+      "method": "POST",
+      "path": "/api/taxi/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/taxi/summary"
+    },
+    {
+      "method": "GET",
+      "path": "/api/taxi/wallet"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/matatu/wallet-ledger"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/matatu/wallets"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/sacco/wallet-ledger"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/sacco/wallets"
+    },
+    {
+      "method": "GET",
+      "path": "/api/version"
+    },
+    {
+      "method": "POST",
+      "path": "/confirmation"
+    },
+    {
+      "method": "GET",
+      "path": "/healthz"
+    },
+    {
+      "method": "POST",
+      "path": "/mpesa/c2b/confirmation"
+    },
+    {
+      "method": "POST",
+      "path": "/mpesa/c2b/validation"
+    },
+    {
+      "method": "POST",
+      "path": "/mpesa/callback"
+    },
+    {
+      "method": "GET",
+      "path": "/saccos/:saccoId/matatus/summary"
+    },
+    {
+      "method": "GET",
+      "path": "/saccos/:saccoId/overview"
+    },
+    {
+      "method": "POST",
+      "path": "/test/credit-wallet"
+    },
+    {
+      "method": "GET",
+      "path": "/u/access-grants"
+    },
+    {
+      "method": "POST",
+      "path": "/u/access-grants"
+    },
+    {
+      "method": "PATCH",
+      "path": "/u/matatu/:id"
+    },
+    {
+      "method": "POST",
+      "path": "/u/matatu/:id/loan-requests"
+    },
+    {
+      "method": "GET",
+      "path": "/u/matatu/:id/staff"
+    },
+    {
+      "method": "POST",
+      "path": "/u/matatu/:id/staff"
+    },
+    {
+      "method": "PATCH",
+      "path": "/u/matatu/:id/staff/:staff_id"
+    },
+    {
+      "method": "DELETE",
+      "path": "/u/matatu/:id/staff/:user_id"
+    },
+    {
+      "method": "GET",
+      "path": "/u/matatu/:id/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/u/matatu/by-plate"
+    },
+    {
+      "method": "GET",
+      "path": "/u/me"
+    },
+    {
+      "method": "GET",
+      "path": "/u/my-saccos"
+    },
+    {
+      "method": "GET",
+      "path": "/u/paybill-codes"
+    },
+    {
+      "method": "GET",
+      "path": "/u/sacco/:id/daily-fee-rates"
+    },
+    {
+      "method": "POST",
+      "path": "/u/sacco/:id/daily-fee-rates"
+    },
+    {
+      "method": "GET",
+      "path": "/u/sacco/:id/live-positions"
+    },
+    {
+      "method": "GET",
+      "path": "/u/sacco/:id/loan-requests"
+    },
+    {
+      "method": "PATCH",
+      "path": "/u/sacco/:id/loan-requests/:reqId"
+    },
+    {
+      "method": "POST",
+      "path": "/u/sacco/:id/loan-requests/:reqId/disburse"
+    },
+    {
+      "method": "GET",
+      "path": "/u/sacco/:id/loans"
+    },
+    {
+      "method": "POST",
+      "path": "/u/sacco/:id/loans"
+    },
+    {
+      "method": "DELETE",
+      "path": "/u/sacco/:id/loans/:loanId"
+    },
+    {
+      "method": "PATCH",
+      "path": "/u/sacco/:id/loans/:loanId"
+    },
+    {
+      "method": "GET",
+      "path": "/u/sacco/:id/loans/:loanId/payments"
+    },
+    {
+      "method": "GET",
+      "path": "/u/sacco/:id/loans/due-today"
+    },
+    {
+      "method": "GET",
+      "path": "/u/sacco/:id/matatus"
+    },
+    {
+      "method": "GET",
+      "path": "/u/sacco/:id/routes"
+    },
+    {
+      "method": "POST",
+      "path": "/u/sacco/:id/routes"
+    },
+    {
+      "method": "DELETE",
+      "path": "/u/sacco/:id/routes/:routeId"
+    },
+    {
+      "method": "PATCH",
+      "path": "/u/sacco/:id/routes/:routeId"
+    },
+    {
+      "method": "GET",
+      "path": "/u/sacco/:id/staff"
+    },
+    {
+      "method": "POST",
+      "path": "/u/sacco/:id/staff"
+    },
+    {
+      "method": "DELETE",
+      "path": "/u/sacco/:id/staff/:staffId"
+    },
+    {
+      "method": "PATCH",
+      "path": "/u/sacco/:id/staff/:staffId"
+    },
+    {
+      "method": "GET",
+      "path": "/u/sacco/:id/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/u/sacco/overview"
+    },
+    {
+      "method": "GET",
+      "path": "/u/staff/my-matatu"
+    },
+    {
+      "method": "GET",
+      "path": "/u/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/u/ussd"
+    },
+    {
+      "method": "GET",
+      "path": "/u/vehicle-care/assets"
+    },
+    {
+      "method": "PATCH",
+      "path": "/u/vehicle-care/assets/:assetType/:assetId/compliance"
+    },
+    {
+      "method": "GET",
+      "path": "/u/vehicle-care/logs"
+    },
+    {
+      "method": "POST",
+      "path": "/u/vehicle-care/logs"
+    },
+    {
+      "method": "PATCH",
+      "path": "/u/vehicle-care/logs/:id"
+    },
+    {
+      "method": "GET",
+      "path": "/u/vehicles"
+    },
+    {
+      "method": "POST",
+      "path": "/validation"
+    },
+    {
+      "method": "GET",
+      "path": "/wallets/:virtualAccountCode"
+    },
+    {
+      "method": "GET",
+      "path": "/wallets/:virtualAccountCode/transactions"
+    },
+    {
+      "method": "POST",
+      "path": "/wallets/:virtualAccountCode/withdraw"
+    },
+    {
+      "method": "POST",
+      "path": "/wallets/:virtualAccountCode/withdraw/bank"
+    }
+  ]
+}

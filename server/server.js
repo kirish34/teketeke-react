@@ -18,9 +18,9 @@ const walletMatatuV2Router = require('./routes/wallet-matatu-v2');
 const saccoStaffAssignmentsRouter = require('./routes/sacco-staff-assignments');
 const livePaymentsRouter = require('./routes/live-payments');
 const matatuLivePaymentsRouter = require('./routes/matatu-live-payments');
-const debugMatatuAccessRouter = require('./routes/debug-matatu-access');
 const authRouter = require('./routes/auth');
 const mpesaRouter = require('./routes/mpesa');
+const { routeHitsMiddleware } = require('./middleware/routeHits');
 
 const app = express();
 const trustProxy =
@@ -103,6 +103,7 @@ const apiLimiter = rateLimit({
   skip: (req) => req.path.startsWith('/u'),
 });
 app.use('/api', apiLimiter);
+app.use(routeHitsMiddleware);
 
 // Optional whitelist bypass for auth endpoints to skip any upstream guards.
 if (process.env.AUTH_WHITELIST_BYPASS === '1') {
@@ -195,7 +196,6 @@ app.use('/api', skipMpesa(darajaB2CRouter));
 app.use('/api/sacco', livePaymentsRouter);
 app.use('/api/matatu', matatuLivePaymentsRouter);
 app.use('/api/sacco', saccoStaffAssignmentsRouter);
-app.use('/api', debugMatatuAccessRouter);
 app.use('/api', skipMpesa(walletLedgerRouter));
 app.use('/test', require('./routes/wallet'));
 app.use('/', require('./routes/wallet-withdraw'));

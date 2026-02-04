@@ -24,6 +24,7 @@ const { requireUser } = require('../middleware/auth');
 const { requireSystemOrSuper, requireSuperOnly } = require('../middleware/requireAdmin');
 const { normalizeMsisdn, maskMsisdn, extractMsisdnFromRaw, safeDisplayMsisdn } = require('../utils/msisdn');
 const { logAdminAction } = require('../services/audit.service');
+const { bumpRouteHit, getRouteHitEntry } = require('../services/routeHits.service');
 const { enqueueJob, isQueueEnabled, getQueue } = require('../queues/queue');
 const { runReconciliation } = require('../services/reconciliation.service');
 const { ensureIdempotent, logCallbackAudit, safeAck } = require('../services/callbackHardening.service');
@@ -3837,6 +3838,20 @@ router.get('/routes/usage-summary', async (_req,res)=>{
   }catch(e){
     res.status(500).json({ error: e.message || 'Failed to load routes usage summary' });
   }
+});
+
+// Route hits sanity bump (system admin only)
+router.post('/route-hits/test-bump', (req, res) => {
+  const method = 'POST';
+  const routeKey = '/api/admin/route-hits/test-bump';
+  req.routeHitSkip = true;
+  const entry = bumpRouteHit(method, routeKey) || getRouteHitEntry(method, routeKey);
+  res.json({
+    ok: true,
+    key: `${method} ${routeKey}`,
+    count: entry?.count || 0,
+    last_seen_at: entry?.last_seen_at || null,
+  });
 });
 
 // Create a new route (system admin only)
