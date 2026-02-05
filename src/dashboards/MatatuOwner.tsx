@@ -3,7 +3,7 @@ import DashboardShell from '../components/DashboardShell'
 import PaybillCodeCard from '../components/PaybillCodeCard'
 import PaybillHeader from '../components/PaybillHeader'
 import { useAuth } from '../state/auth'
-import { authFetch } from '../lib/auth'
+import { ApiError, requestJson } from '../lib/api'
 import { mapPaybillCodes, type PaybillAliasRow } from '../lib/paybill'
 import VehicleCarePage from '../modules/vehicleCare/VehicleCarePage'
 import { fetchAccessGrants, saveAccessGrant, type AccessGrant } from '../modules/vehicleCare/vehicleCare.api'
@@ -90,15 +90,6 @@ type LedgerWallet = {
   balance?: number
   total?: number
   items?: LedgerRow[]
-}
-
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await authFetch(url, init)
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || res.statusText)
-  }
-  return (await res.json()) as T
 }
 
 const formatKes = (val?: number | null) => `KES ${(Number(val || 0)).toLocaleString('en-KE')}`
@@ -256,7 +247,7 @@ const MatatuOwnerDashboard = () => {
   useEffect(() => {
     async function loadVehicles() {
       try {
-        const data = await fetchJson<{ items?: Vehicle[] }>('/u/vehicles')
+        const data = await requestJson<{ items?: Vehicle[] }>('/u/vehicles')
         const items = data.items || []
         setVehicles(items)
         setStatus(`${items.length} vehicle(s)`)
@@ -277,8 +268,8 @@ const MatatuOwnerDashboard = () => {
       setStatus('Loading data...')
       try {
         const [txRes, stRes] = await Promise.all([
-          fetchJson<{ items?: Tx[] }>(`/u/matatu/${encodeURIComponent(id)}/transactions?limit=200`),
-          fetchJson<{ items?: Staff[] }>(`/u/matatu/${encodeURIComponent(id)}/staff`),
+          requestJson<{ items?: Tx[] }>(`/u/matatu/${encodeURIComponent(id)}/transactions?limit=200`),
+          requestJson<{ items?: Staff[] }>(`/u/matatu/${encodeURIComponent(id)}/staff`),
         ])
         setTxs(txRes.items || [])
         setStaff(stRes.items || [])
@@ -299,7 +290,7 @@ const MatatuOwnerDashboard = () => {
     const entityId = currentId
     async function loadPaybillCodes() {
       try {
-        const res = await fetchJson<{ items?: PaybillAliasRow[] }>(
+        const res = await requestJson<{ items?: PaybillAliasRow[] }>(
           `/u/paybill-codes?entity_type=MATATU&entity_id=${encodeURIComponent(entityId)}`,
         )
         setPaybillAliases(res.items || [])
@@ -368,9 +359,9 @@ const MatatuOwnerDashboard = () => {
     async function loadLoans() {
       try {
         const [reqs, due, saccoLoans] = await Promise.all([
-          fetchJson<{ items?: LoanRequest[] }>(`/u/sacco/${encodeURIComponent(sid)}/loan-requests`),
-          fetchJson<{ items?: LoanDue[] }>(`/u/sacco/${encodeURIComponent(sid)}/loans/due-today`),
-          fetchJson<{ items?: Loan[] }>(`/u/sacco/${encodeURIComponent(sid)}/loans`),
+          requestJson<{ items?: LoanRequest[] }>(`/u/sacco/${encodeURIComponent(sid)}/loan-requests`),
+          requestJson<{ items?: LoanDue[] }>(`/u/sacco/${encodeURIComponent(sid)}/loans/due-today`),
+          requestJson<{ items?: Loan[] }>(`/u/sacco/${encodeURIComponent(sid)}/loans`),
         ])
         const allLoans = (saccoLoans.items || []).filter((ln) => !currentId || ln.matatu_id === currentId)
         setLoanReqs(reqs.items || [])
@@ -403,7 +394,7 @@ const MatatuOwnerDashboard = () => {
         email: stEmail.trim() || null,
         role: stRole,
       }
-      await fetchJson(`/u/matatu/${encodeURIComponent(currentId)}/staff`, {
+      await requestJson(`/u/matatu/${encodeURIComponent(currentId)}/staff`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(body),
@@ -413,7 +404,7 @@ const MatatuOwnerDashboard = () => {
       setStPhone('')
       setStEmail('')
       setStRole('MATATU_STAFF')
-      const stRes = await fetchJson<{ items?: Staff[] }>(`/u/matatu/${encodeURIComponent(currentId)}/staff`)
+      const stRes = await requestJson<{ items?: Staff[] }>(`/u/matatu/${encodeURIComponent(currentId)}/staff`)
       setStaff(stRes.items || [])
     } catch (error) {
       setStMsg(error instanceof Error ? error.message : 'Failed to save staff')
@@ -445,7 +436,7 @@ const MatatuOwnerDashboard = () => {
 
     setLoginMsg('Saving...')
     try {
-      await fetchJson(`/u/matatu/${encodeURIComponent(currentId)}/staff`, {
+      await requestJson(`/u/matatu/${encodeURIComponent(currentId)}/staff`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
@@ -464,7 +455,7 @@ const MatatuOwnerDashboard = () => {
       setLoginEmail('')
       setLoginRole('MATATU_STAFF')
       setLoginPassword('')
-      const stRes = await fetchJson<{ items?: Staff[] }>(`/u/matatu/${encodeURIComponent(currentId)}/staff`)
+      const stRes = await requestJson<{ items?: Staff[] }>(`/u/matatu/${encodeURIComponent(currentId)}/staff`)
       setStaff(stRes.items || [])
     } catch (error) {
       setLoginMsg(error instanceof Error ? error.message : 'Failed to create login')
@@ -474,11 +465,11 @@ const MatatuOwnerDashboard = () => {
   async function deleteStaff(id?: string) {
     if (!currentId || !id) return
     try {
-      await fetchJson(`/u/matatu/${encodeURIComponent(currentId)}/staff/${encodeURIComponent(id)}`, {
+      await requestJson(`/u/matatu/${encodeURIComponent(currentId)}/staff/${encodeURIComponent(id)}`, {
         method: 'DELETE',
         headers: { Accept: 'application/json' },
       })
-      const stRes = await fetchJson<{ items?: Staff[] }>(`/u/matatu/${encodeURIComponent(currentId)}/staff`)
+      const stRes = await requestJson<{ items?: Staff[] }>(`/u/matatu/${encodeURIComponent(currentId)}/staff`)
       setStaff(stRes.items || [])
     } catch (error) {
       setStMsg(error instanceof Error ? error.message : 'Failed to delete staff')
@@ -494,13 +485,13 @@ const MatatuOwnerDashboard = () => {
     }
     setStMsg('Assigning...')
     try {
-      await fetchJson(`/u/matatu/${encodeURIComponent(currentId)}/staff/${encodeURIComponent(staffId)}`, {
+      await requestJson(`/u/matatu/${encodeURIComponent(currentId)}/staff/${encodeURIComponent(staffId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ matatu_id: targetMatatuId }),
       })
       setStMsg('Staff assigned')
-      const stRes = await fetchJson<{ items?: Staff[] }>(`/u/matatu/${encodeURIComponent(currentId)}/staff`)
+      const stRes = await requestJson<{ items?: Staff[] }>(`/u/matatu/${encodeURIComponent(currentId)}/staff`)
       setStaff(stRes.items || [])
     } catch (error) {
       setStMsg(error instanceof Error ? error.message : 'Failed to assign staff')
@@ -511,7 +502,7 @@ const MatatuOwnerDashboard = () => {
     if (!currentId) return
     setComplianceMsg('Saving...')
     try {
-      const updated = await fetchJson<Vehicle>(`/u/matatu/${encodeURIComponent(currentId)}`, {
+      const updated = await requestJson<Vehicle>(`/u/matatu/${encodeURIComponent(currentId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
@@ -576,7 +567,7 @@ const MatatuOwnerDashboard = () => {
         payout_phone: loanPhone || null,
         payout_account: loanAccount || null,
       }
-      await fetchJson(`/u/matatu/${encodeURIComponent(currentId)}/loan-requests`, {
+      await requestJson(`/u/matatu/${encodeURIComponent(currentId)}/loan-requests`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(body),
@@ -588,7 +579,7 @@ const MatatuOwnerDashboard = () => {
       setLoanAccount('')
       const saccoId = currentVehicle?.sacco_id
       if (saccoId) {
-        const reqs = await fetchJson<{ items?: LoanRequest[] }>(
+        const reqs = await requestJson<{ items?: LoanRequest[] }>(
           `/u/sacco/${encodeURIComponent(saccoId)}/loan-requests`,
         )
         setLoanReqs(reqs.items || [])
@@ -603,7 +594,7 @@ const MatatuOwnerDashboard = () => {
     if (!saccoId || !id) return
     setLoanHist({ loanId: id, items: [], total: 0, msg: 'Loading history...' })
     try {
-      const res = await fetchJson<{ items?: Tx[]; total?: number }>(
+      const res = await requestJson<{ items?: Tx[]; total?: number }>(
         `/u/sacco/${encodeURIComponent(saccoId)}/loans/${encodeURIComponent(id)}/payments`,
       )
       setLoanHist({ loanId: id, items: res.items || [], total: res.total || 0, msg: '' })
@@ -634,7 +625,7 @@ const MatatuOwnerDashboard = () => {
     }
     setManualLoanMsg('Saving...')
     try {
-      const created = await fetchJson<Tx>('/api/staff/cash', {
+      const created = await requestJson<Tx>('/api/staff/cash', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
@@ -683,7 +674,7 @@ const MatatuOwnerDashboard = () => {
     }
     setManualSavingsMsg('Saving...')
     try {
-      const created = await fetchJson<Tx>('/api/staff/cash', {
+      const created = await requestJson<Tx>('/api/staff/cash', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
@@ -742,26 +733,18 @@ const MatatuOwnerDashboard = () => {
       if (ledgerFrom) params.set('from', ledgerFrom)
       if (ledgerTo) params.set('to', ledgerTo)
       if (currentId) params.set('matatu_id', currentId)
-      const res = await authFetch(`/api/wallets/owner-ledger?${params.toString()}`, {
+      const data = await requestJson<any>(`/api/wallets/owner-ledger?${params.toString()}`, {
         headers: { Accept: 'application/json' },
       })
-      if (!res.ok) {
-        let msg = 'Failed to load wallet ledger'
-        try {
-          const body = await res.json()
-          if (res.status === 403 && body?.code === 'SACCO_SCOPE_MISMATCH') {
-            msg = 'This vehicle belongs to a different SACCO than your account.'
-          }
-        } catch {
-          const text = await res.text()
-          msg = text || msg
-        }
-        setLedgerError(msg)
-        return
-      }
-      const data = (await res.json()) as any
       setLedgerWallets(data.wallets || [])
     } catch (err) {
+      if (err instanceof ApiError && err.status === 403 && err.payload && typeof err.payload === 'object') {
+        const code = (err.payload as { code?: string }).code
+        if (code === 'SACCO_SCOPE_MISMATCH') {
+          setLedgerError('This vehicle belongs to a different SACCO than your account.')
+          return
+        }
+      }
       setLedgerError(err instanceof Error ? err.message : 'Failed to load wallet ledger')
     } finally {
       setLedgerLoading(false)

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import DashboardShell from '../../components/DashboardShell'
-import { authFetch } from '../../lib/auth'
+import { requestJson } from '../../lib/api'
 
 type SaccoOption = { sacco_id: string; name?: string }
 type Matatu = {
@@ -90,15 +90,6 @@ function fmtKES(v: number | undefined | null) {
   return `KES ${(Number(v || 0)).toLocaleString('en-KE')}`
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const res = await authFetch(url, { headers: { Accept: 'application/json' } })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || res.statusText)
-  }
-  return (await res.json()) as T
-}
-
 const todayIso = () => new Date().toISOString().slice(0, 10)
 
 export default function SaccoDashboard() {
@@ -168,7 +159,7 @@ export default function SaccoDashboard() {
   useEffect(() => {
     async function loadSaccos() {
       try {
-        const data = await fetchJson<{ items: SaccoOption[] }>('/u/my-saccos')
+        const data = await requestJson<{ items: SaccoOption[] }>('/u/my-saccos')
         const items = data.items || []
         setSaccos(items)
         setStatusMsg(`${items.length} SACCO(s)`)
@@ -192,9 +183,9 @@ export default function SaccoDashboard() {
       setError(null)
       try {
         const [matatuRes, txRes, staffRes] = await Promise.all([
-          fetchJson<{ items: Matatu[] }>(`/u/sacco/${currentSacco}/matatus`),
-          fetchJson<{ items: Tx[] }>(`/u/sacco/${currentSacco}/transactions?limit=2000`),
-          fetchJson<{ items: Staff[] }>(`/u/sacco/${currentSacco}/staff`),
+          requestJson<{ items: Matatu[] }>(`/u/sacco/${currentSacco}/matatus`),
+          requestJson<{ items: Tx[] }>(`/u/sacco/${currentSacco}/transactions?limit=2000`),
+          requestJson<{ items: Staff[] }>(`/u/sacco/${currentSacco}/staff`),
         ])
         setMatatus(matatuRes.items || [])
         setTxs(txRes.items || [])
@@ -358,7 +349,7 @@ export default function SaccoDashboard() {
     if (!currentSacco) return
     setLoanReqMsg('Loading...')
     try {
-      const res = await fetchJson<{ items?: LoanRequest[] }>(
+      const res = await requestJson<{ items?: LoanRequest[] }>(
         `/u/sacco/${currentSacco}/loan-requests?status=PENDING`,
       )
       setLoanRequests(res.items || [])
@@ -373,7 +364,7 @@ export default function SaccoDashboard() {
     if (!currentSacco) return
     setLoanDisbMsg('Loading...')
     try {
-      const res = await fetchJson<{ items?: LoanRequest[] }>(
+      const res = await requestJson<{ items?: LoanRequest[] }>(
         `/u/sacco/${currentSacco}/loan-requests?status=APPROVED`,
       )
       const items = (res.items || []).filter((r) => !(r as any).disbursed_at)
@@ -393,7 +384,7 @@ export default function SaccoDashboard() {
       if (reason && reason.trim()) payload.rejection_reason = reason.trim()
     }
     try {
-      await authFetch(`/u/sacco/${currentSacco}/loan-requests/${id}`, {
+      await requestJson(`/u/sacco/${currentSacco}/loan-requests/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(payload),
@@ -413,7 +404,7 @@ export default function SaccoDashboard() {
       const body: Record<string, string> = { method }
       if (method === 'M_PESA' && req.payout_phone) body.phone = req.payout_phone
       if (method === 'ACCOUNT' && req.payout_account) body.account = req.payout_account
-      await authFetch(`/u/sacco/${currentSacco}/loan-requests/${req.id}/disburse`, {
+      await requestJson(`/u/sacco/${currentSacco}/loan-requests/${req.id}/disburse`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(body),
@@ -429,7 +420,7 @@ export default function SaccoDashboard() {
     if (!currentSacco) return
     setFeeMsg('Loading rates...')
     try {
-      const res = await fetchJson<{ items?: DailyFeeRate[] }>(
+      const res = await requestJson<{ items?: DailyFeeRate[] }>(
         `/u/sacco/${currentSacco}/daily-fee-rates`,
       )
       setFeeRates(res.items || [])
@@ -452,7 +443,7 @@ export default function SaccoDashboard() {
     }
     setFeeMsg('Saving...')
     try {
-      await authFetch(`/u/sacco/${currentSacco}/daily-fee-rates`, {
+      await requestJson(`/u/sacco/${currentSacco}/daily-fee-rates`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ vehicle_type: feeForm.vehicle_type, daily_fee_kes: Number(feeForm.amount) }),
@@ -469,7 +460,7 @@ export default function SaccoDashboard() {
     if (!currentSacco) return
     setRoutesMsg('Loading...')
     try {
-      const res = await fetchJson<{ items?: SaccoRoute[] }>(`/u/sacco/${currentSacco}/routes`)
+      const res = await requestJson<{ items?: SaccoRoute[] }>(`/u/sacco/${currentSacco}/routes`)
       setRoutes(res.items || [])
       setRoutesMsg('')
     } catch (err) {
@@ -482,7 +473,7 @@ export default function SaccoDashboard() {
     if (!currentSacco || !id) return
     setRoutesMsg('Saving...')
     try {
-      await authFetch(`/u/sacco/${currentSacco}/routes/${id}`, {
+      await requestJson(`/u/sacco/${currentSacco}/routes/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ active: !active }),
@@ -498,7 +489,7 @@ export default function SaccoDashboard() {
     if (!currentSacco) return
     setLoanMsg('Loading loans...')
     try {
-      const res = await fetchJson<{ items?: Loan[] }>(`/u/sacco/${currentSacco}/loans`)
+      const res = await requestJson<{ items?: Loan[] }>(`/u/sacco/${currentSacco}/loans`)
       setLoans(res.items || [])
       setLoanMsg('')
     } catch (err) {
@@ -527,7 +518,7 @@ export default function SaccoDashboard() {
     }
     setLoanMsg('Saving...')
     try {
-      await authFetch(`/u/sacco/${currentSacco}/loans`, {
+      await requestJson(`/u/sacco/${currentSacco}/loans`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
@@ -551,7 +542,7 @@ export default function SaccoDashboard() {
     if (!currentSacco || !id) return
     setLoanHistory((prev) => ({ ...prev, msg: 'Loading history...', items: [], loanId: id }))
     try {
-      const res = await fetchJson<{ items?: Tx[]; total?: number }>(
+      const res = await requestJson<{ items?: Tx[]; total?: number }>(
         `/u/sacco/${currentSacco}/loans/${id}/payments`,
       )
       setLoanHistory({ loanId: id, items: res.items || [], total: res.total || 0, msg: '' })
@@ -564,7 +555,7 @@ export default function SaccoDashboard() {
     if (!currentSacco || !id) return
     setLoanMsg('Updating loan...')
     try {
-      await authFetch(`/u/sacco/${currentSacco}/loans/${id}`, {
+      await requestJson(`/u/sacco/${currentSacco}/loans/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ status }),
@@ -580,7 +571,7 @@ export default function SaccoDashboard() {
     if (!currentSacco || !id) return
     setLoanMsg('Deleting...')
     try {
-      await authFetch(`/u/sacco/${currentSacco}/loans/${id}`, {
+      await requestJson(`/u/sacco/${currentSacco}/loans/${id}`, {
         method: 'DELETE',
         headers: { Accept: 'application/json' },
       })
@@ -599,7 +590,7 @@ export default function SaccoDashboard() {
     }
     setRoutesMsg('Saving...')
     try {
-      await authFetch(`/u/sacco/${currentSacco}/routes`, {
+      await requestJson(`/u/sacco/${currentSacco}/routes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
@@ -623,7 +614,7 @@ export default function SaccoDashboard() {
     notifications.forEach((n) => prevRead.set(`${n.severity}:${n.message}`, Boolean(n.is_read)))
     const items: NotificationItem[] = []
     try {
-      const res = await fetchJson<{ items?: LoanRequest[] }>(
+      const res = await requestJson<{ items?: LoanRequest[] }>(
         `/u/sacco/${currentSacco}/loan-requests?status=PENDING`,
       )
       const pending = (res.items || []).length
@@ -638,7 +629,7 @@ export default function SaccoDashboard() {
       }
     } catch {}
     try {
-      const loans = await fetchJson<{ items?: any[]; data?: any[] }>('/u/transactions?kind=loans')
+      const loans = await requestJson<{ items?: any[]; data?: any[] }>('/u/transactions?kind=loans')
       const rows = (loans.items || loans.data || []) as any[]
       const todayISO = new Date().toISOString().slice(0, 10)
       const count = rows.filter((r) => String(r.created_at || '').slice(0, 10) === todayISO).length
@@ -657,7 +648,7 @@ export default function SaccoDashboard() {
         const y = new Date()
         y.setDate(y.getDate() - 1)
         const yISO = y.toISOString().slice(0, 10)
-        const tx = await fetchJson<{ items?: any[] }>(
+        const tx = await requestJson<{ items?: any[] }>(
           `/u/sacco/${currentSacco}/transactions?limit=2000`,
         )
         const items = tx.items || []
@@ -1618,4 +1609,3 @@ export default function SaccoDashboard() {
     </DashboardShell>
   )
 }
-

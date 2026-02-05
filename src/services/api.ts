@@ -1,3 +1,4 @@
+import { requestJson } from "../lib/api";
 import { env } from "../lib/env";
 
 type ApiOpts = {
@@ -9,8 +10,7 @@ type ApiOpts = {
 
 export async function api<T = any>(path: string, opts: ApiOpts = {}): Promise<T> {
   const url = resolveApiUrl(path);
-
-  const res = await fetch(url, {
+  return requestJson<T>(url, {
     method: opts.method || "GET",
     headers: {
       "Content-Type": "application/json",
@@ -19,15 +19,6 @@ export async function api<T = any>(path: string, opts: ApiOpts = {}): Promise<T>
     },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
-
-  const text = await res.text();
-  const data = text ? safeJson(text) : null;
-
-  if (!res.ok) {
-    const msg = (data && (data.error || data.message)) || res.statusText;
-    throw new Error(msg);
-  }
-  return data as T;
 }
 
 export function resolveApiUrl(path: string, baseOverride?: string, isDevOverride?: boolean) {
@@ -51,12 +42,4 @@ export function resolveApiUrl(path: string, baseOverride?: string, isDevOverride
 
   if (!base || base === "/") return path;
   return `${base}${path}`;
-}
-
-function safeJson(t: string) {
-  try {
-    return JSON.parse(t);
-  } catch {
-    return { raw: t };
-  }
 }

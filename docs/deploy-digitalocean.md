@@ -69,8 +69,8 @@ sudo systemctl reload nginx
 curl -I https://api.teketeke.org/
 curl -I https://api.teketeke.org/api/mpesa/callback
 curl -I https://api.teketeke.org/api/pay/stk/callback
-curl -I https://api.teketeke.org/api/mpesa/b2c/result
-curl -I https://api.teketeke.org/api/mpesa/b2c/timeout
+curl -I https://api.teketeke.org/api/daraja/b2c/result
+curl -I https://api.teketeke.org/api/daraja/b2c/timeout
 pm2 status
 pm2 logs --lines 100
 sudo nginx -t
@@ -80,8 +80,8 @@ sudo nginx -t
 ## 9) Safaricom callback URLs (register exactly)
 - C2B PayBill confirmation: `https://api.teketeke.org/api/mpesa/callback`
 - STK Push callback: `https://api.teketeke.org/api/pay/stk/callback`
-- B2C Result: `https://api.teketeke.org/api/mpesa/b2c/result`
-- B2C Timeout: `https://api.teketeke.org/api/mpesa/b2c/timeout`
+- B2C Result: `https://api.teketeke.org/api/daraja/b2c/result`
+- B2C Timeout: `https://api.teketeke.org/api/daraja/b2c/timeout`
 
 ## 10) Roll forward / roll back
 ```bash

@@ -22,17 +22,13 @@ function bool(v, def) {
 const ENABLE_STK = bool(process.env.ENABLE_STK, true);
 const ENABLE_B2C = bool(process.env.ENABLE_B2C, false);
 const REQUIRE_TELEMETRY = bool(process.env.REQUIRE_TELEMETRY, false);
+const REQUIRE_WEBHOOK = bool(process.env.MPESA_C2B_REQUIRE_SECRET, false);
 
 // Always required for backend
 const requiredBase = [
   'SUPABASE_URL',
+  'SUPABASE_ANON_KEY',
   'SUPABASE_SERVICE_ROLE_KEY',
-];
-
-// Always required if any Daraja feature is enabled
-const requiredOAuth = [
-  'MPESA_CONSUMER_KEY',
-  'MPESA_CONSUMER_SECRET',
 ];
 
 // STK required set
@@ -59,13 +55,24 @@ const requiredWebhook = [
 function buildRequiredList() {
   const req = [...requiredBase];
 
+  const hasDbUrl = Boolean(process.env.SUPABASE_DB_URL || process.env.DATABASE_URL);
+  if (!hasDbUrl) {
+    req.push('SUPABASE_DB_URL or DATABASE_URL');
+  }
+
+  const hasMpesaOAuth = Boolean(process.env.MPESA_CONSUMER_KEY && process.env.MPESA_CONSUMER_SECRET);
+  const hasDarajaOAuth = Boolean(process.env.DARAJA_CONSUMER_KEY && process.env.DARAJA_CONSUMER_SECRET);
+
   // If STK or B2C is enabled, we must have OAuth
-  if (ENABLE_STK || ENABLE_B2C) req.push(...requiredOAuth);
+  if ((ENABLE_STK || ENABLE_B2C) && !hasMpesaOAuth && !hasDarajaOAuth) {
+    req.push('MPESA_CONSUMER_KEY/MPESA_CONSUMER_SECRET or DARAJA_CONSUMER_KEY/DARAJA_CONSUMER_SECRET');
+  }
 
   if (ENABLE_STK) req.push(...requiredSTK);
   if (ENABLE_B2C) req.push(...requiredB2C);
 
   if (REQUIRE_TELEMETRY) req.push('TELEMETRY_TOKEN');
+  if (REQUIRE_WEBHOOK) req.push('DARAJA_WEBHOOK_SECRET');
 
   // If you enforce webhook verification, add it here
   // req.push(...requiredWebhook);

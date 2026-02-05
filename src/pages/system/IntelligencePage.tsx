@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { authFetch } from '../../lib/auth'
+import { requestJson } from '../../lib/api'
 import { SystemPageHeader } from './SystemPageHeader'
 
 type Overview = {
@@ -51,9 +51,7 @@ export default function IntelligencePage() {
     setLoading(true)
     setError(null)
     try {
-      const res = await authFetch(`/api/admin/intelligence/overview?${query}`)
-      if (!res.ok) throw new Error(await res.text())
-      const json = await res.json()
+      const json = await requestJson<Overview>(`/api/admin/intelligence/overview?${query}`)
       setOverview(json || {})
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load')

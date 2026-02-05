@@ -40,29 +40,25 @@ function normalizePath(raw: string | null | undefined) {
   return trimmed;
 }
 
-function stripAppPrefix(path: string) {
-  return path.startsWith("/app/") ? path.slice(4) || "/" : path;
-}
-
 export function resolveHomePath(role: Role | null | undefined): string {
   switch ((role || "").toLowerCase()) {
     case "user":
-      return "/app/pending";
+      return "/pending";
     case "super_admin":
     case "system_admin":
-      return "/app/system";
+      return "/system";
     case "sacco_admin":
     case "sacco":
-      return "/app/sacco-admin";
+      return "/sacco";
     case "sacco_staff":
-      return "/app/sacco-staff";
+      return "/sacco/staff";
     case "matatu_owner":
     case "owner":
-      return "/app/matatu-owner";
+      return "/matatu/owner";
     case "matatu_staff":
     case "staff":
     case "driver":
-      return "/app/matatu-staff";
+      return "/matatu/staff";
     case "taxi":
       return "/taxi";
     case "boda":
@@ -74,12 +70,16 @@ export function resolveHomePath(role: Role | null | undefined): string {
 
 export function isPathAllowedForRole(role: Role | null | undefined, rawPath: string | null | undefined) {
   if (!role) return false;
-  const normalized = stripAppPrefix(normalizePath(rawPath));
+  const normalized = normalizePath(rawPath);
   const r = role;
-  if (normalized.startsWith("/pending")) return true;
-  if (normalized.startsWith("/app/pending")) return true;
+  if (normalized.startsWith("/pending") || normalized.startsWith("/about") || normalized.startsWith("/role")) {
+    return true;
+  }
   if (normalized.startsWith("/system") || normalized.startsWith("/ops")) {
     return r === "system_admin" || r === "super_admin";
+  }
+  if (normalized.startsWith("/matatu/withdrawal-phones")) {
+    return r === "matatu_owner" || r === "super_admin";
   }
   if (normalized.startsWith("/sacco/live-payments")) {
     return (
@@ -106,8 +106,7 @@ export function isPathAllowedForRole(role: Role | null | undefined, rawPath: str
   }
   if (normalized.startsWith("/taxi")) return r === "taxi" || r === "super_admin";
   if (normalized.startsWith("/boda")) return r === "boda" || r === "super_admin";
-  if (normalized.startsWith("/dash")) return true;
-  return true;
+  return false;
 }
 
 function mapRole(role?: string | null): Role | null {

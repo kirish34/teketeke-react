@@ -18,9 +18,9 @@ const walletMatatuV2Router = require('./routes/wallet-matatu-v2');
 const saccoStaffAssignmentsRouter = require('./routes/sacco-staff-assignments');
 const livePaymentsRouter = require('./routes/live-payments');
 const matatuLivePaymentsRouter = require('./routes/matatu-live-payments');
-const debugMatatuAccessRouter = require('./routes/debug-matatu-access');
 const authRouter = require('./routes/auth');
 const mpesaRouter = require('./routes/mpesa');
+const { recordRouteHit } = require('./services/routeHit.service');
 
 const app = express();
 const trustProxy =
@@ -103,6 +103,28 @@ const apiLimiter = rateLimit({
   skip: (req) => req.path.startsWith('/u'),
 });
 app.use('/api', apiLimiter);
+
+// Route-hit telemetry (before all routers)
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') return next();
+  res.on('finish', () => {
+    if (!req.route) return;
+    const baseUrl = req.baseUrl || '';
+    let routePath = req.route.path || '';
+    if (Array.isArray(routePath)) routePath = routePath[0] || '';
+    if (routePath instanceof RegExp) routePath = routePath.toString();
+    let fullPath = `${baseUrl}${routePath}`;
+    if (!fullPath) fullPath = '/';
+    if (!fullPath.startsWith('/')) fullPath = `/${fullPath}`;
+    fullPath = fullPath.replace(/\/{2,}/g, '/');
+    const method = req.method.toUpperCase();
+    const routeKey = `${method} ${fullPath}`;
+    recordRouteHit({ method, routeKey, requestId: req.requestId }).catch((err) => {
+      console.warn('[route-hits] failed to record', err.message);
+    });
+  });
+  return next();
+});
 
 // Optional whitelist bypass for auth endpoints to skip any upstream guards.
 if (process.env.AUTH_WHITELIST_BYPASS === '1') {
@@ -195,9 +217,7 @@ app.use('/api', skipMpesa(darajaB2CRouter));
 app.use('/api/sacco', livePaymentsRouter);
 app.use('/api/matatu', matatuLivePaymentsRouter);
 app.use('/api/sacco', saccoStaffAssignmentsRouter);
-app.use('/api', debugMatatuAccessRouter);
 app.use('/api', skipMpesa(walletLedgerRouter));
-app.use('/test', require('./routes/wallet'));
 app.use('/', require('./routes/wallet-withdraw'));
 app.use('/api/admin', require('./routes/admin-withdrawals'));
 app.use('/api/admin', require('./routes/admin-matatu-payout'));
@@ -207,6 +227,7 @@ app.use('/api/admin', require('./routes/admin-monitoring'));
 app.use('/api/admin', require('./routes/admin-fraud'));
 app.use('/api/admin', require('./routes/admin-intelligence'));
 app.use('/api/admin', require('./routes/admin-quarantine'));
+app.use('/api/admin', require('./routes/admin-route-audit'));
 app.use('/', require('./routes/sacco'));
 app.use('/api/sacco', require('./routes/sacco-intelligence'));
 

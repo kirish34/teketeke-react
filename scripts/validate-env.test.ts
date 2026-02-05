@@ -6,8 +6,10 @@ describe('getMissingEnv flag-aware validation', () => {
     const missing = getMissingEnv({})
 
     expect(missing).toContain('SUPABASE_URL')
+    expect(missing).toContain('SUPABASE_ANON_KEY')
     expect(missing).toContain('SUPABASE_SERVICE_ROLE_KEY')
-    expect(missing).toContain('MPESA_CONSUMER_KEY')
+    expect(missing).toContain('SUPABASE_DB_URL or DATABASE_URL')
+    expect(missing).toContain('MPESA_CONSUMER_KEY/MPESA_CONSUMER_SECRET or DARAJA_CONSUMER_KEY/DARAJA_CONSUMER_SECRET')
     expect(missing).toContain('DARAJA_SHORTCODE')
     expect(missing).not.toContain('MPESA_B2C_SHORTCODE')
   })
@@ -18,7 +20,9 @@ describe('getMissingEnv flag-aware validation', () => {
       ENABLE_B2C: 'false',
 
       SUPABASE_URL: 'https://example.com',
+      SUPABASE_ANON_KEY: 'anon',
       SUPABASE_SERVICE_ROLE_KEY: 'key',
+      DATABASE_URL: 'postgres://user:pass@localhost:5432/db',
 
       MPESA_CONSUMER_KEY: 'ck',
       MPESA_CONSUMER_SECRET: 'cs',
@@ -37,7 +41,9 @@ describe('getMissingEnv flag-aware validation', () => {
       ENABLE_B2C: 'true',
 
       SUPABASE_URL: 'https://example.com',
+      SUPABASE_ANON_KEY: 'anon',
       SUPABASE_SERVICE_ROLE_KEY: 'key',
+      DATABASE_URL: 'postgres://user:pass@localhost:5432/db',
 
       MPESA_CONSUMER_KEY: 'ck',
       MPESA_CONSUMER_SECRET: 'cs',
@@ -58,7 +64,9 @@ describe('getMissingEnv flag-aware validation', () => {
       ENABLE_B2C: 'false',
       REQUIRE_TELEMETRY: 'true',
       SUPABASE_URL: 'https://example.com',
+      SUPABASE_ANON_KEY: 'anon',
       SUPABASE_SERVICE_ROLE_KEY: 'key',
+      DATABASE_URL: 'postgres://user:pass@localhost:5432/db',
     }
 
     expect(getMissingEnv(envWithoutTelemetry)).toContain('TELEMETRY_TOKEN')

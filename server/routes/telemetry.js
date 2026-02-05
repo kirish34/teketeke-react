@@ -10,7 +10,7 @@ const ROOT = process.cwd();
 const REG_DIR = path.join(ROOT, 'data', 'registry');
 const DEVICES_FILE = path.join(REG_DIR, 'devices.json');
 const TELEMETRY_TOKEN = process.env.TELEMETRY_TOKEN || null;
-const ENABLE_STORAGE = (process.env.TELEMETRY_ENABLE_STORAGE || 'true').toLowerCase() === 'true';
+const ENABLE_STORAGE = (process.env.TELEMETRY_ENABLE_STORAGE || 'false').toLowerCase() === 'true';
 
 function ensureDir(p) {
   if (!ENABLE_STORAGE) return;

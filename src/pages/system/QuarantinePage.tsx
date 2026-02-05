@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { authFetch } from '../../lib/auth'
+import { ApiError, requestJson } from '../../lib/api'
 import { SystemPageHeader } from './SystemPageHeader'
 
 type QuarantineRow = {
@@ -50,12 +50,14 @@ export default function QuarantinePage() {
     setLoading(true)
     setError(null)
     try {
-      const res = await authFetch(`/api/admin/quarantine?${query}`)
-      if (res.status === 403) throw new Error('Not permitted')
-      const json = await res.json()
+      const json = await requestJson<{ items?: QuarantineRow[] }>(`/api/admin/quarantine?${query}`)
       setRows(json.items || [])
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load quarantine list')
+      if (err instanceof ApiError && err.status === 403) {
+        setError('Not permitted')
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to load quarantine list')
+      }
       setRows([])
     } finally {
       setLoading(false)
@@ -76,13 +78,12 @@ export default function QuarantinePage() {
       return
     }
     try {
-      const res = await authFetch(`/api/admin/quarantine/${encodeURIComponent(id)}/${action}`, {
+      const json = await requestJson<{ error?: string }>(`/api/admin/quarantine/${encodeURIComponent(id)}/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note }),
       })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json?.error || 'Action failed')
+      if (json?.error) throw new Error(json?.error || 'Action failed')
       setActionMsg(`${action} ok`)
       await loadRows()
     } catch (err) {

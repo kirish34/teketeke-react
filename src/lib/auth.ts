@@ -5,6 +5,7 @@ type StorageKey = 'auth_token' | 'tt_root_token' | 'tt_admin_token'
 const STORAGE_KEYS: StorageKey[] = ['auth_token', 'tt_root_token', 'tt_admin_token']
 
 let supabase: SupabaseClient | null = null
+let redirectingToLogin = false
 
 const hasWindow = typeof window !== 'undefined'
 
@@ -130,6 +131,11 @@ export async function authFetch(input: RequestInfo | URL, init?: RequestInit) {
   const response = await fetch(target, { ...(init || {}), headers })
   if (response.status === 401) {
     await signOutEverywhere()
+    if (hasWindow && !redirectingToLogin && window.location.pathname !== '/login') {
+      redirectingToLogin = true
+      const next = `${window.location.pathname}${window.location.search}`
+      window.location.assign(`/login?next=${encodeURIComponent(next)}`)
+    }
   }
   return response
 }

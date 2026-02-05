@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import DashboardShell from '../components/DashboardShell'
-import { authFetch } from '../lib/auth'
+import { requestJson } from '../lib/api'
 
 type Overview = {
   counts?: {
@@ -46,15 +46,6 @@ type LoginRow = {
   sacco_id?: string | null
   matatu_id?: string | null
   assigned_at?: string
-}
-
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await authFetch(url, init)
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || res.statusText)
-  }
-  return (await res.json()) as T
 }
 
 const formatNum = (val?: number | null) => new Intl.NumberFormat('en-KE').format(val || 0)
@@ -114,12 +105,12 @@ const OpsDashboard = () => {
     async function loadAll() {
       try {
         const [ov, sacs, mts, avail, alloc, logs] = await Promise.all([
-          fetchJson<Overview>('/api/admin/system-overview'),
-          fetchJson<{ items?: Sacco[] }>('/api/admin/saccos'),
-          fetchJson<{ items?: Matatu[] }>('/api/admin/matatus'),
-          fetchJson<{ items?: UssdAvail[] }>('/api/admin/ussd/pool/available'),
-          fetchJson<{ items?: UssdAlloc[] }>('/api/admin/ussd/pool/allocated'),
-          fetchJson<LoginRow[]>('/api/admin/user-roles/logins'),
+          requestJson<Overview>('/api/admin/system-overview'),
+          requestJson<{ items?: Sacco[] }>('/api/admin/saccos'),
+          requestJson<{ items?: Matatu[] }>('/api/admin/matatus'),
+          requestJson<{ items?: UssdAvail[] }>('/api/admin/ussd/pool/available'),
+          requestJson<{ items?: UssdAlloc[] }>('/api/admin/ussd/pool/allocated'),
+          requestJson<LoginRow[]>('/api/admin/user-roles/logins'),
         ])
         setOverview(ov)
         setSaccos(sacs.items || [])
@@ -137,7 +128,7 @@ const OpsDashboard = () => {
   async function createSacco() {
     setSaccoMsg('Saving...')
     try {
-      await authFetch('/api/admin/register-sacco', {
+      await requestJson('/api/admin/register-sacco', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(saccoForm),
@@ -152,7 +143,7 @@ const OpsDashboard = () => {
         login_email: '',
         login_password: '',
       })
-      const res = await fetchJson<{ items?: Sacco[] }>('/api/admin/saccos')
+      const res = await requestJson<{ items?: Sacco[] }>('/api/admin/saccos')
       setSaccos(res.items || [])
     } catch (err) {
       setSaccoMsg(err instanceof Error ? err.message : 'Create failed')
@@ -162,7 +153,7 @@ const OpsDashboard = () => {
   async function createMatatu() {
     setMatatuMsg('Saving...')
     try {
-      await authFetch('/api/admin/register-matatu', {
+      await requestJson('/api/admin/register-matatu', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(matatuForm),
@@ -177,7 +168,7 @@ const OpsDashboard = () => {
         tlb_number: '',
         till_number: '',
       })
-      const res = await fetchJson<{ items?: Matatu[] }>('/api/admin/matatus')
+      const res = await requestJson<{ items?: Matatu[] }>('/api/admin/matatus')
       setMatatus(res.items || [])
     } catch (err) {
       setMatatuMsg(err instanceof Error ? err.message : 'Create failed')
@@ -187,16 +178,15 @@ const OpsDashboard = () => {
   async function assignUssd() {
     setUssdMsg('Assigning...')
     try {
-      const res = await authFetch('/api/admin/ussd/pool/assign-next', {
+      const data = await requestJson<{ ussd_code?: string }>('/api/admin/ussd/pool/assign-next', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(ussdForm),
       })
-      const data = await res.json().catch(() => ({}))
       setUssdMsg(`Assigned ${data?.ussd_code || 'code'}`)
       const [avail, alloc] = await Promise.all([
-        fetchJson<{ items?: UssdAvail[] }>('/api/admin/ussd/pool/available'),
-        fetchJson<{ items?: UssdAlloc[] }>('/api/admin/ussd/pool/allocated'),
+        requestJson<{ items?: UssdAvail[] }>('/api/admin/ussd/pool/available'),
+        requestJson<{ items?: UssdAlloc[] }>('/api/admin/ussd/pool/allocated'),
       ])
       setUssdAvail(avail.items || [])
       setUssdAlloc(alloc.items || [])

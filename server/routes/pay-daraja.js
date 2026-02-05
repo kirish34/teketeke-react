@@ -13,8 +13,8 @@ const WEBHOOK_SECRET = process.env.DARAJA_WEBHOOK_SECRET || null;
 function base64(str){ return Buffer.from(str).toString('base64'); }
 
 async function getAccessToken(){
-  const key = process.env.DARAJA_CONSUMER_KEY;
-  const secret = process.env.DARAJA_CONSUMER_SECRET;
+  const key = process.env.DARAJA_CONSUMER_KEY || process.env.MPESA_CONSUMER_KEY;
+  const secret = process.env.DARAJA_CONSUMER_SECRET || process.env.MPESA_CONSUMER_SECRET;
   const env = process.env.DARAJA_ENV || 'sandbox';
   const host = env==='production' ? 'https://api.safaricom.co.ke' : 'https://sandbox.safaricom.co.ke';
   const res = await fetch(host + '/oauth/v1/generate?grant_type=client_credentials', {
@@ -28,8 +28,8 @@ async function getAccessToken(){
 // Simple status check for frontend
 router.get('/status', (_req, res) => {
   const env = process.env.DARAJA_ENV || 'sandbox';
-  const hasKey = Boolean(process.env.DARAJA_CONSUMER_KEY);
-  const hasSecret = Boolean(process.env.DARAJA_CONSUMER_SECRET);
+  const hasKey = Boolean(process.env.DARAJA_CONSUMER_KEY || process.env.MPESA_CONSUMER_KEY);
+  const hasSecret = Boolean(process.env.DARAJA_CONSUMER_SECRET || process.env.MPESA_CONSUMER_SECRET);
   const shortcode = process.env.DARAJA_SHORTCODE || '';
   const hasPasskey = Boolean(process.env.DARAJA_PASSKEY);
   const callback = process.env.DARAJA_CALLBACK_URL || 'https://api.teketeke.org/api/pay/stk/callback';
@@ -524,6 +524,8 @@ router.post('/stk/callback', async (req,res)=>{
     }
 
     const client = await pool.connect();
+    let ledgerResult = null;
+    let creditSucceeded = false;
     try {
       await client.query('BEGIN');
       if (paymentRow?.id) {
@@ -543,7 +545,7 @@ router.post('/stk/callback', async (req,res)=>{
         }
       }
       const providerRef = receipt || checkoutRequestId || (paymentRow ? String(paymentRow.id) : null);
-      const ledgerResult = await creditFareWithFeesByWalletId({
+      ledgerResult = await creditFareWithFeesByWalletId({
         walletId,
         amount,
         source: 'MPESA_STK',
@@ -566,6 +568,7 @@ router.post('/stk/callback', async (req,res)=>{
         }
       }
       await client.query('COMMIT');
+      creditSucceeded = true;
     } catch (err) {
       await client.query('ROLLBACK');
       console.error('Error crediting wallet for STK:', err.message);
@@ -583,7 +586,8 @@ router.post('/stk/callback', async (req,res)=>{
       req,
       key: idempotencyKey || sourceRef || checkoutRequestId || null,
       kind: 'STK_CALLBACK',
-      result: ledgerResult?.deduped ? 'accepted_deduped' : 'accepted',
+      result: creditSucceeded ? (ledgerResult?.deduped ? 'accepted_deduped' : 'accepted') : 'rejected',
+      reason: creditSucceeded ? undefined : 'credit_failed',
     });
     return safeAck(res, { ok: true });
   } catch (err) {

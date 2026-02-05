@@ -2,7 +2,7 @@
 import DashboardShell from "../components/DashboardShell"
 import PaybillCodeCard from "../components/PaybillCodeCard"
 import PaybillHeader from "../components/PaybillHeader"
-import { authFetch } from "../lib/auth"
+import { requestJson } from "../lib/api"
 import { mapPaybillCodes, resolveWalletKind, PAYBILL_NUMBER, type PaybillAliasRow } from "../lib/paybill"
 import { useAuth } from "../state/auth"
 import { useEntityWallet } from "../hooks/useEntityWallet"
@@ -50,15 +50,6 @@ type ExpenseRow = {
 
 type Settings = {
   monthly_savings_target_kes?: number
-}
-
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await authFetch(url, init)
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || res.statusText)
-  }
-  return (await res.json()) as T
 }
 
 const formatKes = (val?: number | null) => `KES ${(Number(val || 0)).toLocaleString("en-KE")}`
@@ -158,9 +149,9 @@ const TaxiDashboard = () => {
       setError(null)
       try {
         const [sumRes, weekRes, monthRes] = await Promise.all([
-          fetchJson<Summary>(`/api/taxi/summary?date=${todayISO}`),
-          fetchJson<{ totals?: InsightTotals; trend?: InsightRow[] }>(`/api/taxi/insights?start=${weekStartISO}&end=${todayISO}`),
-          fetchJson<{ totals?: InsightTotals; expenses?: { categories?: Array<{ category?: string; amount?: number }> } }>(
+          requestJson<Summary>(`/api/taxi/summary?date=${todayISO}`),
+          requestJson<{ totals?: InsightTotals; trend?: InsightRow[] }>(`/api/taxi/insights?start=${weekStartISO}&end=${todayISO}`),
+          requestJson<{ totals?: InsightTotals; expenses?: { categories?: Array<{ category?: string; amount?: number }> } }>(
             `/api/taxi/insights?start=${monthStartISO}&end=${todayISO}`,
           ),
         ])
@@ -170,13 +161,13 @@ const TaxiDashboard = () => {
         setMonthTotals(monthRes?.totals || null)
         setExpCats(monthRes?.expenses?.categories || [])
 
-        const cashRes = await fetchJson<{ items?: CashRow[] }>("/api/taxi/cash?limit=20")
+        const cashRes = await requestJson<{ items?: CashRow[] }>("/api/taxi/cash?limit=20")
         setCashRecent(filterToday(cashRes.items || []))
 
-        const expRes = await fetchJson<{ items?: ExpenseRow[] }>("/api/taxi/expenses?limit=20")
+        const expRes = await requestJson<{ items?: ExpenseRow[] }>("/api/taxi/expenses?limit=20")
         setExpRecent(filterToday(expRes.items || []))
 
-        const settingsRes = await fetchJson<Settings>("/api/taxi/settings")
+        const settingsRes = await requestJson<Settings>("/api/taxi/settings")
         const tgt = Number(settingsRes?.monthly_savings_target_kes || 0)
         setTarget(tgt || "")
         updateTargetSummary(tgt, monthRes?.totals?.net)
@@ -196,7 +187,7 @@ const TaxiDashboard = () => {
     }
     async function loadPaybillCodes() {
       try {
-        const res = await fetchJson<{ items?: PaybillAliasRow[] }>(
+        const res = await requestJson<{ items?: PaybillAliasRow[] }>(
           `/u/paybill-codes?entity_type=TAXI&entity_id=${encodeURIComponent(entityId)}`,
         )
         setPaybillAliases(res.items || [])
@@ -257,7 +248,7 @@ const TaxiDashboard = () => {
     }
     setCashMsg("Saving...")
     try {
-      await authFetch("/api/taxi/cash", {
+      await requestJson("/api/taxi/cash", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -269,7 +260,7 @@ const TaxiDashboard = () => {
       })
       setCashMsg("Cash saved")
       setCashForm({ amount: "", name: "", phone: "", notes: "" })
-      const cashRes = await fetchJson<{ items?: CashRow[] }>("/api/taxi/cash?limit=20")
+      const cashRes = await requestJson<{ items?: CashRow[] }>("/api/taxi/cash?limit=20")
       setCashRecent(filterToday(cashRes.items || []))
     } catch (err) {
       setCashMsg(err instanceof Error ? err.message : "Save failed")
@@ -281,7 +272,7 @@ const TaxiDashboard = () => {
     if (cashFrom) params.set("from", cashFrom)
     if (cashTo) params.set("to", cashTo)
     try {
-      const data = await fetchJson<{ items?: CashRow[] }>(`/api/taxi/cash?${params.toString()}`)
+      const data = await requestJson<{ items?: CashRow[] }>(`/api/taxi/cash?${params.toString()}`)
       setCashSearch(data.items || [])
     } catch (err) {
       setCashSearch([])
@@ -296,7 +287,7 @@ const TaxiDashboard = () => {
     }
     setExpMsg("Saving...")
     try {
-      await authFetch("/api/taxi/expenses", {
+      await requestJson("/api/taxi/expenses", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -307,7 +298,7 @@ const TaxiDashboard = () => {
       })
       setExpMsg("Expense saved")
       setExpForm({ category: "Fuel", amount: "", notes: "" })
-      const expRes = await fetchJson<{ items?: ExpenseRow[] }>("/api/taxi/expenses?limit=20")
+      const expRes = await requestJson<{ items?: ExpenseRow[] }>("/api/taxi/expenses?limit=20")
       setExpRecent(filterToday(expRes.items || []))
     } catch (err) {
       setExpMsg(err instanceof Error ? err.message : "Save failed")
@@ -351,7 +342,7 @@ const TaxiDashboard = () => {
     }
     setTargetMsg("Saving target...")
     try {
-      const data = await fetchJson<Settings>("/api/taxi/settings", {
+      const data = await requestJson<Settings>("/api/taxi/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ monthly_savings_target_kes: raw }),
@@ -370,7 +361,7 @@ const TaxiDashboard = () => {
     if (expFrom) params.set("from", expFrom)
     if (expTo) params.set("to", expTo)
     try {
-      const data = await fetchJson<{ items?: ExpenseRow[] }>(`/api/taxi/expenses?${params.toString()}`)
+      const data = await requestJson<{ items?: ExpenseRow[] }>(`/api/taxi/expenses?${params.toString()}`)
       setExpSearch(data.items || [])
     } catch (err) {
       setExpSearch([])
@@ -865,4 +856,3 @@ const TaxiDashboard = () => {
 }
 
 export default TaxiDashboard
-
