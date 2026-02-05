@@ -30,5 +30,8 @@ dist-ssr
 
 .vercel
 
+# Runtime data
+data/
+
 # Route audit artifacts
 docs/route-audit/*.json

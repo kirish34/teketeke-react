@@ -13,8 +13,8 @@ const WEBHOOK_SECRET = process.env.DARAJA_WEBHOOK_SECRET || null;
 function base64(str){ return Buffer.from(str).toString('base64'); }
 
 async function getAccessToken(){
-  const key = process.env.DARAJA_CONSUMER_KEY;
-  const secret = process.env.DARAJA_CONSUMER_SECRET;
+  const key = process.env.DARAJA_CONSUMER_KEY || process.env.MPESA_CONSUMER_KEY;
+  const secret = process.env.DARAJA_CONSUMER_SECRET || process.env.MPESA_CONSUMER_SECRET;
   const env = process.env.DARAJA_ENV || 'sandbox';
   const host = env==='production' ? 'https://api.safaricom.co.ke' : 'https://sandbox.safaricom.co.ke';
   const res = await fetch(host + '/oauth/v1/generate?grant_type=client_credentials', {
@@ -28,8 +28,8 @@ async function getAccessToken(){
 // Simple status check for frontend
 router.get('/status', (_req, res) => {
   const env = process.env.DARAJA_ENV || 'sandbox';
-  const hasKey = Boolean(process.env.DARAJA_CONSUMER_KEY);
-  const hasSecret = Boolean(process.env.DARAJA_CONSUMER_SECRET);
+  const hasKey = Boolean(process.env.DARAJA_CONSUMER_KEY || process.env.MPESA_CONSUMER_KEY);
+  const hasSecret = Boolean(process.env.DARAJA_CONSUMER_SECRET || process.env.MPESA_CONSUMER_SECRET);
   const shortcode = process.env.DARAJA_SHORTCODE || '';
   const hasPasskey = Boolean(process.env.DARAJA_PASSKEY);
   const callback = process.env.DARAJA_CALLBACK_URL || 'https://api.teketeke.org/api/pay/stk/callback';

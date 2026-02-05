@@ -5,7 +5,7 @@ React (Vite + TS) dashboards and Express API for payments, wallets, and sacco/ma
 ## Prerequisites
 - Node 18+ (Node 20 recommended)
 - Supabase project with service-role key
-- PostgreSQL reachable via `SUPABASE_DB_URL` (from Supabase)
+- PostgreSQL reachable via `SUPABASE_DB_URL` or `DATABASE_URL` (from Supabase)
 - Daraja/M-PESA B2C credentials (for withdrawals)
 
 ## Environment
@@ -13,14 +13,20 @@ Copy `.env.example` to `.env` and fill:
 ```
 SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
-SUPABASE_DB_URL=
+SUPABASE_DB_URL=          # or DATABASE_URL
+DATABASE_URL=
 SUPABASE_ANON_KEY=
 
+# Use either MPESA_* or DARAJA_* consumer keys (both supported)
+MPESA_CONSUMER_KEY=
+MPESA_CONSUMER_SECRET=
 DARAJA_CONSUMER_KEY=
 DARAJA_CONSUMER_SECRET=
 DARAJA_CALLBACK_URL=https://your-domain.example/api/pay/stk/callback   # avoid "mpesa" in path; Safaricom blocks it
+DARAJA_WEBHOOK_SECRET=     # required when MPESA_C2B_REQUIRE_SECRET=1
 MPESA_B2C_SECURITY_CREDENTIAL=
 MPESA_B2C_SHORTCODE=   # or DARAJA_SHORTCODE
+MPESA_C2B_REQUIRE_SECRET=1 # enforce webhook secret for C2B callbacks
 
 TELEMETRY_TOKEN=       # shared key for device telemetry
 TELEMETRY_ENABLE_STORAGE=true   # set false to disable JSONL writes
@@ -81,6 +87,7 @@ npm run seed:roles
   - `QUEUE_PREFIX=teketeke` (optional)
   - `WORKER_CONCURRENCY=5` (optional)
 - Apply the idempotency table once in prod: `ops/sql/mpesa_callback_events.sql`
+- If you need auto-init for local/dev only, set `ALLOW_CALLBACK_TABLE_INIT=1`
 - Run API: `npm run server`
 - Run worker (separate process): `node server/worker.js`
 - Job status (admin-only):

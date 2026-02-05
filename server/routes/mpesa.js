@@ -319,9 +319,11 @@ async function handleC2BCallback(req, res) {
 
   log('info', 'Received M-Pesa callback');
 
-  const webhookSecret = process.env.DARAJA_WEBHOOK_SECRET || null;
-  const got = req.headers['x-webhook-secret'] || '';
-  const requireSecret = process.env.MPESA_C2B_REQUIRE_SECRET === '1';
+  const webhookSecret = (process.env.DARAJA_WEBHOOK_SECRET || '').trim() || null;
+  const got = (req.headers['x-webhook-secret'] || '').toString().trim();
+  const requireSecret = webhookSecret
+    ? String(process.env.MPESA_C2B_REQUIRE_SECRET || '1').trim() !== '0'
+    : false;
   const secretProvided = Boolean(got);
   const secretMismatch = webhookSecret
     ? (requireSecret ? got !== webhookSecret : secretProvided && got !== webhookSecret)
